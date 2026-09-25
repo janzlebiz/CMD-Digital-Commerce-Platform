@@ -1,11 +1,11 @@
 # Initial System Architecture & Technical Specification
 
-**Document ID:** ARCH-SPEC-001  
+**Document ID:** ARCH-SPEC-001 (Remediated)  
 **Project:** HCI CMD Digital Commerce Platform  
 **Target Territory:** Camarines Norte, Philippines  
-**Audit Phase:** Phase 0 — Baseline Architectural Blueprint  
+**Audit Phase:** Phase 0 Remediation — Baseline Architectural Blueprint  
 **Status:** Certified Architecture Baseline  
-**Date:** 2026-09-25  
+**Date of Audit:** 2026-09-25  
 
 ---
 
@@ -36,25 +36,25 @@ To balance rapid development velocity, operational simplicity, transactional con
 ├──────────────┬──────────────┬──────────────┬──────────────┬────────────┤
 │   Commerce   │   Branches   │  Inventory   │ Consultation │   Events   │
 │  - Catalog   │  - Directory │  - Ledger    │  - Booking   │  - Agendas │
-│  - Checkout  │  - Pickups   │  - Lots/EXP  │  - Intake    │  - Tickets │
+│  - Checkout  │  - Pickups   │  - Lots/FEFO │  - Intake    │  - Tickets │
 │  - Payments  │  - Routing   │  - Resrvtn   │  - Encrypted │  - QR Scan │
 │  - Invoices  │  - Staff     │  - Transfers │    Notes     │  - Waitlist│
 ├──────────────┼──────────────┼──────────────┼──────────────┼────────────┤
 │     CRM      │   Content    │Notification  │  Security &  │ Analytics  │
 │  - Profiles  │  - Articles  │  - SMS Gate  │    Audit     │  - Branch  │
 │  - Consent   │  - Claims    │  - Email Gate│  - Auth Log  │    Sales   │
-│  - Support   │    Check     │  - Push Gate │  - SPI Audit │  - Reports │
+│  - Support   │    Filter    │  - Push Gate │  - SPI Audit │  - Reports │
 └──────────────┴──────────────┴──────────────┴──────────────┴────────────┘
                                     │
            ┌────────────────────────┴────────────────────────┐
            ▼                                                 ▼
 ┌───────────────────────────────────────┐ ┌──────────────────────────────┐
 │        PERSISTENCE LAYER              │ │       OBJECT STORAGE         │
-│  - PostgreSQL Relational Database     │ │  - S3-Compatible / MinIO     │
+│  - PostgreSQL Relational Database     │ │  - S3-Compatible Storage     │
 │  - Typed ORM (Drizzle / Prisma)       │ │  - Product Images            │
-│  - Row-Level Locking for Inventory    │ │  - Batch Certifications (CPR)│
+│  - Row-Level Locking for Inventory    │ │  - Batch CPR Scans           │
 │  - Column Encryption for Health Data  │ │  - Invoice PDF Archives      │
-│  - Immutable Audit Log Tables         │ │  - Privacy-Signed Uploads    │
+│  - Immutable Audit Log Tables         │ │  - Signed URL File Access    │
 └───────────────────────────────────────┘ └──────────────────────────────┘
 ```
 
@@ -67,9 +67,9 @@ To balance rapid development velocity, operational simplicity, transactional con
 | **Framework / Runtime** | **Next.js (App Router) + TypeScript** | Remix, Express + React SPA, Nuxt | Unified full-stack TypeScript environment, server components for SEO-rich public catalog, lightweight mobile payloads. |
 | **Persistence Engine** | **PostgreSQL (v15+)** | MySQL, MongoDB, DynamoDB | Strict ACID transaction guarantees essential for multi-branch stock reservations and financial invoice ledgers. Robust JSONB support. |
 | **Data Access / ORM** | **Typed ORM (Drizzle / Prisma)** | Raw SQL, TypeORM | Compile-time type safety, automated schema migrations, zero SQL injection vulnerabilities. |
-| **Authentication & RBAC** | **Secure Session Auth (HTTP-Only Secure Cookies)** | Firebase Auth, Supabase Auth, Clerk | Provider independence, strict local session control, zero vendor lock-in, effortless custom RBAC. |
+| **Authentication & RBAC** | **Secure Session Auth (HTTP-Only Secure Cookies)** | Firebase Auth, Supabase Auth, Clerk | Provider independence, strict local session control, zero vendor lock-in, customizable RBAC. |
 | **Object Storage** | **S3-Compatible Cloud Storage (Cloudflare R2 / AWS S3)** | Local Disk, Google Cloud Storage | Globally distributed, zero egress fees (Cloudflare R2), signed URL uploads for secure health document attachments. |
-| **SMS Gateway** | **Semaphore / Local Philippine Telco Gateway** | Twilio exclusively | Direct Philippine telco interconnection (Smart, Globe, Dito) ensures >98% instantaneous SMS delivery for OTPs and pickup codes. |
+| **SMS Gateway** | **Semaphore / Philippine Direct Telco Gateway** | Twilio exclusively | Direct Philippine telco interconnection (Smart, Globe, Dito) ensures >98% instantaneous SMS delivery for OTPs and pickup codes. |
 
 ---
 
@@ -88,19 +88,19 @@ To balance rapid development velocity, operational simplicity, transactional con
 | **System Admin** | NO | NO | NO | **FORBIDDEN** | System Config | Full Audit |
 
 ### 3.2 Health Data Isolation
-- Health narrative columns (`consultation_intakes.clinical_assessment` and `consultation_notes.notes_narrative`) are encrypted at the application layer using `AES-256-GCM` before reaching the database persistence layer.
+- Health narrative columns (`consultation_intakes.clinical_assessment` and `consultation_notes.notes_narrative`) are encrypted at the application layer using `AES-256-GCM` before reaching the database persistence layer (*Recommended Technical Security Control*).
 - Health records are placed in a logically segregated module and schema with dedicated access controllers.
 
 ### 3.3 Defensive Security Controls
 1. **Input Validation:** Enforced through Zod schemas at every API route boundary. Rejects unvalidated payload fields.
-2. **Rate Limiting:** IP and user-based token bucket rate limiting on authentication routes (5 attempts per 15 minutes) and checkout endpoints (10 requests per minute) to thwart brute-force and credential stuffing.
+2. **Rate Limiting:** IP and user-based token bucket rate limiting on authentication routes (5 attempts per 15 minutes) and checkout endpoints (10 requests per minute) to thwart brute-force attacks.
 3. **Session Hardening:** Session tokens stored strictly in `HTTP-Only`, `Secure`, `SameSite=Lax` cookies.
 4. **Secret Management:** All credentials (database connection strings, encryption keys, SMS API tokens) managed via environment variables. Zero credentials in repository source code.
 5. **CSRF & Security Headers:** Enforce Content Security Policy (CSP), X-Content-Type-Options: nosniff, X-Frame-Options: DENY, and Strict-Transport-Security (HSTS).
 
 ---
 
-## 4. Concurrency & Inventory Consistency
+## 4. Concurrency & Multi-Branch Inventory Consistency
 
 To prevent overselling across the six branch locations:
 - Checkout stock deductions employ **pessimistic row-level locking**:

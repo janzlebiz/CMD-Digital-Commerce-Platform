@@ -1,21 +1,21 @@
 # Events & Symposium Management Requirements
 
-**Document ID:** REQ-EVT-006  
+**Document ID:** REQ-EVT-006 (Remediated)  
 **Project:** HCI CMD Digital Commerce Platform  
 **Target Territory:** Camarines Norte, Philippines  
-**Audit Phase:** Phase 0 — Baseline Requirements  
-**Status:** Certified Audit Baseline  
-**Date:** 2026-09-25  
+**Audit Phase:** Phase 0 Remediation — Event Operations Baseline  
+**Status:** Certified Audit Baseline (Qualified with Business Open Questions)  
+**Date of Audit:** 2026-09-25  
 
 ---
 
 ## 1. Events Philosophy & Scope
 
-Community wellness symposiums and educational seminars are a primary growth and health-education engine for the HCI CMD distribution network in Camarines Norte.
+Community wellness symposiums and educational seminars are a primary growth and health-education engine for the HCI CMD distribution network in Camarines Norte (*Business-Provided Mandate*).
 
 Events occur at:
 1. **Branch-Hosted Workshops:** Small-group seminars (15–30 attendees) held at Daet, Labo, Paracale, Panganiban, Capalonga, or Sta. Elena branches.
-2. **Major Provincial Symposiums:** Large health conferences (100–500 attendees) held at convention centers, hotel ballrooms, or civic centers in Daet.
+2. **Provincial Symposiums:** Large health conferences (100–500 attendees) held at rented convention halls or civic centers in Daet.
 
 ---
 
@@ -34,7 +34,7 @@ Events occur at:
 - Date, Start Time, End Time.
 - Venue: Branch selection or external venue address with embedded map coordinates.
 - Keynote Speakers & Practitioner Bios.
-- Maximum Seat Capacity & Ticket Price (Free or Nominal Seat Reservation Fee in PHP).
+- Maximum Seat Capacity & Ticket Price (Free or Seat Reservation Deposit in PHP).
 - Registration Deadline.
 
 ---
@@ -59,7 +59,7 @@ Events occur at:
 ```
 
 ### 3.1 QR Code Specification
-- Each ticket generates a cryptographically signed HMAC-SHA256 payload: `e.g., EVT-{eventId}-{ticketId}-{signature}`.
+- Each ticket generates a cryptographically signed HMAC-SHA256 payload: `e.g. EVT-{eventId}-{ticketId}-{signature}` (*Recommended Technical Control*).
 - Prevents screenshot duplication or forged passes.
 - Works offline in staff mobile PWA app: Cached attendee list allows offline QR scanning at rural venues where mobile signal may be weak (e.g., rural Capalonga or Paracale).
 
@@ -68,4 +68,4 @@ Events occur at:
 ## 4. Capacity & Waitlist Engine
 
 - **Real-Time Seat Reservation:** Ticking down available seats on checkout.
-- **Waitlist Mode:** Once capacity reaches 100%, customers can join a waitlist. If a cancellation occurs, the system automatically sends an SMS notification to the next waitlisted user with a 2-hour priority reservation window.
+- **Waitlist Mode:** Once capacity reaches 100%, customers can join a waitlist. If a cancellation occurs, the system automatically sends an SMS notification to the next waitlisted user with a 2-hour priority reservation window (*Recommended Policy*).

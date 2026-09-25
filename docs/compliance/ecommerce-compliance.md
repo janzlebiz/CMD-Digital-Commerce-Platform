@@ -1,10 +1,11 @@
 # Philippine E-Commerce & Consumer Regulatory Compliance Dossier
 
-**Document ID:** COMP-ECOM-003  
+**Document ID:** COMP-ECOM-003 (Remediated)  
 **Project:** HCI CMD Digital Commerce Platform  
 **Target Territory:** Camarines Norte, Philippines  
-**Audit Phase:** Phase 0 — Baseline Legal & Technical Compliance  
+**Audit Phase:** Phase 0 Remediation — Statutory Mapping & Tax Integration  
 **Date of Audit:** 2026-09-25  
+**Primary Authorities:** RA 11967, RA 7394, RA 8792, RA 11976 (EOPT), BIR RR 16-2023, RR 15-2024  
 
 ---
 
@@ -16,17 +17,20 @@ The HCI CMD Digital Commerce Platform must comply with the codified legal requir
 ┌────────────────────────────────────────────────────────────────────────┐
 │                      Philippine Statutory Framework                    │
 ├────────────────────────────────┬───────────────────────────────────────┤
-│ RA 11967 (Internet             │ Comprehensive e-commerce governance,  │
-│ Transactions Act of 2023)      │ digital merchant registry & redress   │
+│ RA 11967 (Internet             │ E-retailer & merchant obligations     │
+│ Transactions Act of 2023)      │ (Sec 23); Internal redress (Sec 24)   │
 ├────────────────────────────────┼───────────────────────────────────────┤
-│ RA 7394 (Consumer Act          │ Price transparency, deceptive sales   │
-│ of the Philippines)            │ prohibitions, product warranties      │
+│ RA 7394 (Consumer Act          │ Price transparency (Art 81), deceptive│
+│ of the Philippines)            │ sales prohibitions, product warranties│
 ├────────────────────────────────┼───────────────────────────────────────┤
 │ RA 8792 (Electronic Commerce   │ Legal recognition of electronic data, │
 │ Act of 2000)                   │ signatures, and contracts             │
 ├────────────────────────────────┼───────────────────────────────────────┤
+│ RA 11976 (Ease of Paying Taxes │ "Invoice" as primary substantiation   │
+│ Act of 2024 - EOPT)            │ across goods and services             │
+├────────────────────────────────┼───────────────────────────────────────┤
 │ BIR RR 16-2023 & RR 15-2024    │ Online merchant tax registration,     │
-│ (National Internal Revenue)    │ electronic invoicing, withholding tax │
+│ (National Internal Revenue)    │ DFSP withholding tax, BIR 2303 display│
 ├────────────────────────────────┼───────────────────────────────────────┤
 │ RA 10173 (Data Privacy         │ Lawful personal & sensitive data      │
 │ Act of 2012)                   │ processing, consent, and security     │
@@ -39,84 +43,77 @@ The HCI CMD Digital Commerce Platform must comply with the codified legal requir
 
 Signed into law on December 5, 2023, and fully enforced as of June 20, 2025, RA 11967 governs all B2C digital transactions in the Philippines. As an independent e-retailer and merchant platform, the platform must satisfy the following statutory obligations:
 
-### 2.1 Mandatory Merchant Identification & Transparency
-Under Section 18 of RA 11967, the platform homepage and checkout surfaces must clearly publish:
-1. **Registered Business Name:** Exact registered business name (e.g., Sole Proprietorship registered with DTI or Partnership/Corporation with SEC).
-2. **Trade Name:** Doing Business As (DBA) name (e.g., "HCI CMD Camarines Norte Distribution").
-3. **Physical / Geographic Address:** The physical address of the principal office/hub (Daet Branch) and addresses for all operating branch locations (Labo, Paracale, Panganiban, Capalonga, Sta. Elena).
-4. **Active Contact Channels:** A valid landline or mobile telephone number, plus a monitored email address for customer service and legal correspondence.
-5. **Tax Identification & Business Registration:** Display of BIR Certificate of Registration (BIR Form 2303) details and DTI/SEC registration number.
+### 2.1 E-Retailer & Merchant Obligations (Section 23, RA 11967)
+Under Section 23 of RA 11967, the platform and its operators must comply with the following explicit duties:
+1. **Price Transparency (Section 23(a)):** Indicate prices consistent with Article 81 of the Consumer Act of the Philippines (RA 7394). Prices must be stated in Philippine Peso (PHP / ₱) with total costs, discounts, and delivery charges displayed before order confirmation.
+2. **Product Conformity (Section 23(b)):** Deliver goods in the condition, type, quantity, and quality described on the storefront. Ensure physical tamper seals, lot tracking, and expiry dates match descriptions.
+3. **Mandatory Redress Mechanism (Section 23(d)):** Maintain an accessible and efficient internal redress mechanism to address consumer inquiries, damaged goods, or delivery failures.
+4. **Data Privacy Safeguards (Section 23(e)):** Protect consumer privacy pursuant to RA 10173 and comply with minimum information security standards.
+5. **Right to Request Identification (Section 23(f)):** The merchant is authorized to require consumers to provide a valid mobile number and email address before completing orders to facilitate logistics and combat fraud.
+6. **Mandatory Invoicing (Section 23(g)):** Issue paper or electronic invoices or receipts for all sales.
+7. **Merchant Identification (Section 23 & IRR):** Conspicuously display registered business name, trade name, physical address of Daet hub, and contact channels (mobile/landline/email) on homepage and checkout footers.
 
-### 2.2 Price Tag & Disclosure Compliance (RA 7394 Art. 81 & RA 11967)
-- **Philippine Peso (PHP / ₱):** All prices must be quoted exclusively in Philippine Peso.
-- **Total Price Breakdown:** Prices must clearly state whether Value-Added Tax (VAT) or percentage tax is included.
-- **Hidden Fees Prohibited:** Delivery charges, branch pickup handling fees, or payment processing surcharges must be explicitly calculated and displayed *before* the consumer confirms the order. "PM for price" (Private Message for price) practices are strictly illegal.
+### 2.2 Internal Redress Mechanism & Statutory Exhaustion (Section 24, RA 11967)
+Under Section 24 of RA 11967:
+- Consumers with grievances must first utilize the platform's internal redress mechanism before filing formal complaints with the DTI, regular courts, or alternative dispute resolution bodies.
+- **Statutory Exhaustion Window:** The internal redress mechanism is deemed exhausted if the complaint remains unresolved after **seven (7) calendar days** from filing.
+- **CRITICAL LEGAL DISTINCTION:** The 7-calendar-day provision is a **procedural exhaustion threshold for administrative escalation**, NOT an unconditional 7-day right of return or refund for opened dietary supplements.
 
-### 2.3 Product Quality, Conformity & Standards
-- Products delivered must strictly conform to descriptions, specifications, expiry dates, and lot numbers presented on the digital catalog.
-- If a batch has distinct expiry horizons, the minimum guaranteed shelf-life upon dispatch must be made transparent to the consumer.
-
-### 2.4 Consumer Redress & Complaint Mechanism
-- The platform must provide an accessible, tracked redress mechanism (Customer Support Ticketing / Dispute Resolution Portal) enabling consumers to:
-  - Report non-delivery, damaged goods, or incorrect item variants.
-  - Request order status tracking with timestamps.
-  - Escalate unresolved disputes within a guaranteed response SLA (e.g., within 48 to 72 business hours).
-- Records of consumer complaints must be preserved in compliance with DTI administrative oversight.
+### 2.3 Recommended Internal Support SLAs vs. Statutory Law
+- While Section 24 establishes a 7-day exhaustion window, the platform adopts an internal operational target:
+  - First acknowledgment within 24 hours.
+  - Initial investigation and response within 48–72 hours.
+- *Audit Note:* These operational SLAs are **recommended platform policies**, not statutory deadlines.
 
 ---
 
-## 3. Electronic Commerce Act of 2000 (Republic Act No. 8792)
+## 3. Taxation, Invoicing & BIR Regulatory Compliance
 
-1. **Legal Validity of Electronic Orders:**
-   - Digital orders placed through the platform constitute valid, legally binding commercial contracts upon checkout confirmation and payment receipt.
-   - An electronic receipt/confirmation message generated by the server constitutes an electronic document admissible under the Rules on Electronic Evidence.
-2. **Order Integrity & Tamper-Evident Records:**
-   - System audit trails must log exact timestamps, IP addresses (hashed/minimized), customer identifiers, line items, and totals at the time of purchase.
+### 3.1 Ease of Paying Taxes (EOPT) Act (RA 11976) & Invoicing
+Under the EOPT Act (effective January 22, 2024, implemented via RR 3-2024 and RR 7-2024):
+- The **"Invoice"** is established as the sole primary document substantiating sales of both goods and services for VAT purposes.
+- The platform's automated invoicing engine must generate serialized **Sales Invoices** (not Official Receipts) for all product purchases and consultation services.
+- Mandatory invoice details include: Serialized Invoice No., Date, Merchant Legal Name, Address, TIN, Buyer Details (where applicable), line-item breakdown, and explicit VAT/Non-VAT notations.
 
----
+### 3.2 Mandatory BIR Registration (RR No. 15-2024)
+- Under RR 15-2024, online merchants must be officially registered with the BIR and prominently display their Certificate of Registration (BIR Form 2303) details on the online storefront.
+- **Status:** **BUSINESS CONFIRMATION REQUIRED** (Business owner must provide BIR Form 2303).
 
-## 4. Taxation, Invoicing & BIR Regulatory Compliance
+### 3.3 Withholding Tax on Online Transactions (RR No. 16-2023 & RMC No. 8-2024)
+- **Applicability Analysis:**
+  - RR 16-2023 imposes a 1% withholding tax on 50% of gross remittances (0.5% effective) made by **e-marketplace operators** and **Digital Financial Services Providers (DFSPs)** to online merchants.
+  - **Single-Merchant Status:** Because this platform operates as an independent, single-merchant storefront selling its own inventory across six branches, the platform itself is **NOT an e-marketplace operator** and does not withhold tax from third parties.
+  - **Inbound Payouts from DFSPs:** When settling funds to the business, DFSPs (such as GCash or Maya) are legally required to withhold 0.5% if the merchant's gross remittances exceed **₱500,000** annually. If annual gross remittances are below ₱500,000, the merchant can receive gross remittances without withholding by submitting a sworn declaration and BIR Form 2303 to the DFSP.
+- **Status:** **VERIFIED REGULATORY FACT / OPERATIONAL CONFIRMATION REQUIRED**.
 
-### 4.1 Mandatory BIR Registration & Form 2303 Display
-Under BIR Revenue Regulations (RR No. 15-2024 and RR No. 16-2023), any enterprise engaged in online commerce or electronic retailing must:
-- Possess a valid Certificate of Registration (BIR Form 2303) explicitly listing e-commerce / retail activities.
-- Register all physical branch branches with their corresponding BIR Branch Codes.
-
-### 4.2 Electronic Invoicing & Sales Receipts
-- For every finalized transaction (whether paid online or upon cash pickup), the platform must generate an electronic Sales Invoice or Official Receipt (OR) detailing:
-  - Merchant Name, Address, and TIN (Taxpayer Identification Number).
-  - Customer Name and Address (or designated guest billing identifier).
-  - Date and time of transaction.
-  - Itemized quantity, unit price, discounts, VAT breakdown (or Non-VAT declaration if eligible), and final gross amount.
-  - Serialized electronic invoice reference number.
-
-### 4.3 Withholding Tax Awareness (RR No. 16-2023 / RMC No. 8-2024)
-- Where payment gateways (e.g., Maya, PayMongo, GCash) or Digital Financial Service Providers (DFSPs) remit funds to the merchant, DFSPs are legally mandated to withhold 1% on 50% of gross remittances (effective 0.5%) if annual gross sales exceed ₱500,000.
-- Financial reporting schemas in the system must account for payment gateway fee deductions and gross-to-net reconciliation.
+### 3.4 VAT vs. Non-VAT Tax Status
+- The platform does not assume whether the business is VAT-registered or Non-VAT.
+- If annual gross sales exceed ₱3,000,000, the business must register for 12% VAT. If below ₱3,000,000, the business may be registered as Non-VAT subject to percentage tax under Section 116 of the NIRC.
+- **Status:** **BUSINESS CONFIRMATION REQUIRED**.
 
 ---
 
-## 5. Cancellation, Refund & Return Framework
+## 4. Cancellation, Refund & Return Framework
 
-In accordance with DTI Department Administrative Orders and RA 7394:
+In accordance with DTI Department Administrative Orders and RA 7394 (Consumer Act):
 
-### 5.1 Permissible Customer Cancellations
-- **Before Dispatch / Order Preparation:** Customers may cancel orders without penalty before branch fulfillment staff mark the order as "Dispatched" or "Packed for Delivery".
+### 4.1 Permissible Customer Cancellations
+- **Before Order Packing:** Customers may cancel orders without penalty before branch fulfillment staff mark the order as `PACKED_AND_READY`.
 - **Out-of-Stock Condition:** If an ordered item is unavailable at the selected branch, the platform must notify the customer immediately and process a full refund or offer branch transfer options.
 
-### 5.2 Returns & Replacements Policy (Perishable / Dietary Supplements)
-- **Defective / Damaged Upon Receipt:** Because HCI CMD is a sealed liquid food supplement, returns for opened bottles are restricted for health and hygiene reasons unless:
+### 4.2 Returns & Replacements Policy (Sealed Dietary Supplements)
+- **Defective / Damaged Upon Receipt:** Because HCI CMD is a sealed liquid food supplement, returns for unsealed/opened bottles are restricted for health and hygiene reasons unless:
   - The security seal was broken upon receipt.
   - The bottle leaked during transit.
-  - The delivered product was expired or mismatched.
-- **Reporting Window:** Customers must report damage or defects within seven (7) calendar days of delivery, supported by photographic evidence submitted via the support portal.
+  - The delivered product was expired or mismatched with the order.
+- **Reporting Window:** Customers must report damage or defects within seven (7) calendar days of delivery, supported by photographic evidence submitted via the internal redress ticketing portal.
 - **Refund Methods:** Refunds must be returned via the original payment channel (or digital store credit if explicitly selected by the consumer).
 
 ---
 
-## 6. Delivery & Branch Pickup Rules
+## 5. Delivery & Branch Pickup Rules
 
-### 6.1 Camarines Norte Geographic Coverage
+### 5.1 Camarines Norte Geographic Coverage
 The platform serves six designated branch hubs:
 1. **Daet (Central Hub):** Provincial capital, high delivery density, central replenishment depot.
 2. **Labo:** Inland municipality, commercial corridor.
@@ -125,10 +122,10 @@ The platform serves six designated branch hubs:
 5. **Capalonga:** Northwestern pilgrimage / coastal municipality.
 6. **Sta. Elena:** Western boundary municipality (gateway to Quezon province).
 
-### 6.2 Delivery Terms & Disclosures
-- **Estimated Delivery Windows:** Clear estimates must be shown based on municipal transit times (e.g., Same-day or Next-day in Daet/Labo; 1–3 business days for distant branches like Capalonga or Sta. Elena).
+### 5.2 Delivery Terms & Disclosures
+- **Estimated Delivery Windows:** Clear estimates must be shown based on municipal transit times (e.g. Same-day in Daet; 1–3 business days for distant branches like Capalonga or Sta. Elena).
 - **Branch Pickup Rules:**
   - Customers selecting "Branch Pickup" must select their preferred pickup branch.
   - The platform must verify stock availability at that specific branch before order confirmation.
-  - Orders ready for pickup must generate a secure Pickup Authorization Code (or QR code).
-  - Branch holding period: 5 business days before stock reservation expires.
+  - Orders ready for pickup must generate a secure Pickup Authorization Code and dynamic QR code.
+  - Branch holding period: 5 business days before stock reservation expires (recommended platform policy).

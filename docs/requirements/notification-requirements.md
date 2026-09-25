@@ -1,11 +1,11 @@
 # Multi-Channel Notification Engine Requirements
 
-**Document ID:** REQ-NOTIF-009  
+**Document ID:** REQ-NOTIF-009 (Remediated)  
 **Project:** HCI CMD Digital Commerce Platform  
 **Target Territory:** Camarines Norte, Philippines  
-**Audit Phase:** Phase 0 — Baseline Requirements  
-**Status:** Certified Audit Baseline  
-**Date:** 2026-09-25  
+**Audit Phase:** Phase 0 Remediation — Notification Architecture Baseline  
+**Status:** Certified Audit Baseline (Qualified with Business Open Questions)  
+**Date of Audit:** 2026-09-25  
 
 ---
 
@@ -25,7 +25,7 @@ The platform employs a tiered notification matrix:
 | Trigger Event | Channel | Priority | Template Content Summary |
 | :--- | :--- | :--- | :--- |
 | **Order Placed (Online Payment)** | SMS + Email | High | *"Salamat! Order #{orderId} received. Please complete payment via {paymentLink} within 1 hour."* |
-| **Payment Confirmed** | SMS + Email | High | *"Payment received for Order #{orderId}! Your order is being packed at {branchName}. Invoice #{invoiceNo}."* |
+| **Payment Confirmed** | SMS + Email | High | *"Payment received for Order #{orderId}! Your order is being packed at {branchName}. Sales Invoice #{invoiceNo}."* |
 | **Ready for Branch Pickup** | SMS | **CRITICAL** | *"Your HCI CMD order is READY FOR PICKUP at {branchName} ({branchAddress})! Pickup Code: {pickupCode}. Bring valid ID."* |
 | **Out for Delivery** | SMS | High | *"Your order #{orderId} is out for delivery with our rider ({riderName} - {riderPhone}). Please prepare exact payment ₱{total} if COD."* |
 | **Consultation Booked** | SMS + Email | High | *"Wellness consultation confirmed with {practitionerName} on {date} at {time} ({branchName}/Online). Please complete intake form: {intakeLink}."* |
@@ -47,7 +47,7 @@ interface NotificationProvider {
 
 ### Recommended Provider Candidates for Philippine Deployment:
 - **Philippine SMS Gateways:**
-  - *Semaphore (Philippine Telco Direct Route):* Highly reliable for Smart, Globe, Dito networks, supports custom Sender ID (e.g., `HCICMD`).
+  - *Semaphore (Philippine Telco Direct Route):* Highly reliable for Smart, Globe, Dito networks, supports custom Sender ID (e.g. `CMDCOMMERCE`).
   - *PhilSMS / M360:* Local B2B bulk aggregators.
   - *Twilio:* Fallback global route.
 - **Transactional Email Gateways:**
@@ -58,5 +58,5 @@ interface NotificationProvider {
 ## 4. Compliance & Consent Governance
 
 - **Sender ID Transparency:** SMS messages must clearly identify the business name.
-- **Strict Separation of Channels:** Promotional blasts (new product arrivals, discounts) must **never** be sent to numbers that have only consented to transactional order receipts.
+- **Strict Separation of Channels:** Promotional blasts (new product arrivals, discounts) must **never** be sent to numbers that have only consented to transactional order receipts (RA 10173).
 - **Opt-Out Mechanism:** Promotional SMS messages must include: *"Text STOP to unsubscribe."*

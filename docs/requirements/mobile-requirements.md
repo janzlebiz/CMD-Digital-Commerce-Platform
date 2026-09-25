@@ -1,19 +1,19 @@
 # Mobile & Progressive Web Application (PWA) Requirements
 
-**Document ID:** REQ-MOB-008  
+**Document ID:** REQ-MOB-008 (Remediated)  
 **Project:** HCI CMD Digital Commerce Platform  
 **Target Territory:** Camarines Norte, Philippines  
-**Audit Phase:** Phase 0 — Baseline Architecture  
-**Status:** Certified Audit Baseline  
-**Date:** 2026-09-25  
+**Audit Phase:** Phase 0 Remediation — Mobile & PWA Specifications Baseline  
+**Status:** Certified Audit Baseline (Qualified with Business Open Questions)  
+**Date of Audit:** 2026-09-25  
 
 ---
 
 ## 1. Mobile-First Context & Strategic Rationale
 
-Over 85% of e-commerce interactions, customer service inquiries, and staff operations in Camarines Norte occur on mobile Android and iOS smartphones over cellular networks (Smart/TNT and Globe/TM).
+Over 85% of e-commerce interactions, customer service inquiries, and staff operations in Camarines Norte occur on mobile Android and iOS smartphones over cellular networks (Smart/TNT and Globe/TM) (*Operational Market Reality*).
 
-Mobile experience is not an afterthought; it is the **primary execution surface** of the platform.
+Mobile experience is the **primary execution surface** of the platform.
 
 ---
 
@@ -21,8 +21,8 @@ Mobile experience is not an afterthought; it is the **primary execution surface*
 
 ### 2.1 PWA Manifest & App Shell
 - **Installability:** Meets full W3C Web App Manifest standards:
-  - `name`: "HCI CMD Camarines Norte"
-  - `short_name`: "HCI CMD"
+  - `name`: "CMD Digital Commerce Platform"
+  - `short_name`: "CMD Commerce"
   - `display`: `standalone` (removes browser URL bar when installed)
   - `theme_color`: Professional wellness palette (emerald green / deep slate)
   - `icons`: Maskable and standard PNG icons (192x192, 512x512).
@@ -46,7 +46,7 @@ Mobile experience is not an afterthought; it is the **primary execution surface*
 
 ## 3. Cellular Network Optimization (3G / 4G Bicol Infrastructure)
 
-Given sporadic cellular connectivity in rural barangays (e.g., coastal Capalonga or mountain corridors of Labo):
+Given sporadic cellular connectivity in rural barangays (e.g. coastal Capalonga or mountain corridors of Labo):
 1. **Lightweight Bundle:** Target initial JavaScript payload < 150 KB compressed.
 2. **Next-Gen Media Formats:** WebP/AVIF image delivery with responsive `srcset` tailored to device resolution.
 3. **Resilient Network Requests:** Exponential backoff retry logic for critical network queries.
@@ -58,4 +58,4 @@ Given sporadic cellular connectivity in rural barangays (e.g., coastal Capalonga
 
 1. **Touch Ergonomics:** Minimum 48x48 dp touch target size for buttons, dropdowns, and navigation elements. Single-thumb reachability for cart and checkout action triggers.
 2. **E-Wallet Deep Linking:** Seamless app-switch flow to GCash and Maya mobile apps, returning automatically to order confirmation upon payment completion.
-3. **Staff Mobile Scanner:** Camera-based barcode and QR code scanner integrated directly into web browser via HTML5 Camera API (`getUserMedia`) for instant ticket check-in and pickup code validation without requiring separate hardware.
+3. **Staff Mobile Scanner:** Camera-based barcode and QR code scanner integrated directly into web browser via HTML5 Camera API (`getUserMedia`) for instant ticket check-in and pickup code validation without requiring separate hardware (*Staff smartphone availability required*).

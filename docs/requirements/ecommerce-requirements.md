@@ -1,23 +1,23 @@
 # E-Commerce & Transaction Engine Functional Requirements
 
-**Document ID:** REQ-ECOM-002  
+**Document ID:** REQ-ECOM-002 (Remediated)  
 **Project:** HCI CMD Digital Commerce Platform  
 **Target Region:** Camarines Norte, Philippines  
-**Audit Phase:** Phase 0 — Baseline Requirements  
-**Status:** Certified Audit Baseline  
-**Date:** 2026-09-25  
+**Audit Phase:** Phase 0 Remediation — Commercial Specifications Baseline  
+**Status:** Certified Audit Baseline (Qualified with Business Open Questions)  
+**Date of Audit:** 2026-09-25  
 
 ---
 
-## 1. Product Catalog & Storefront
+## 1. Product Catalog & Storefront Specifications
 
 ### 1.1 Product Representation
-- **SKU Management:** Support individual items (e.g., `CMD-65ML`, `CMD-30ML`), multi-packs (e.g., `CMD-TRIO-65ML`), and complementary wellness items.
-- **Pricing:** Listed exclusively in Philippine Peso (PHP / ₱) with explicit VAT notation.
+- **SKU Management:** Support individual items (e.g., `CMD-65ML`, `CMD-30ML`), multi-packs, and companion wellness items (*Subject to FDA CPR packaging annex confirmation*).
+- **Pricing:** Listed exclusively in Philippine Peso (PHP / ₱) with explicit VAT notation (or Non-VAT notation pursuant to confirmed tax status).
 - **Mandatory Regulatory Banner:** Every product page must dynamically display:
   - English: `"NO APPROVED THERAPEUTIC CLAIMS"`
   - Filipino: `"MAHALAGANG PAALALA: ANG HCI CELL MINERAL DROPS AY HINDI GAMOT AT HINDI DAPAT GAMITING PANGGAMOT SA ANUMANG URI NG SAKIT."`
-- **Nutritional / Technical Panel:** Serving size, mineral breakdown ($Mg$, $Cl$, $K$, $SO_4$, low sodium), directions for dilution, and expiry/batch advisory.
+- **Nutritional / Technical Panel:** Serving size, mineral composition ($Mg$, $Cl$, $K$, $SO_4$, low sodium), directions for dilution, and expiry/batch advisory.
 - **Media Gallery:** Multi-image gallery with pinch-to-zoom on mobile, displaying tamper seals and packaging barcodes.
 
 ### 1.2 Branch-Aware Stock Visibility
@@ -48,19 +48,19 @@
                                                            ▼
                                                  [Order Confirmation]
                                       - Unique serialized Order Reference ID
-                                      - Electronic invoice breakdown & SMS/Email receipt
+                                      - Electronic Sales Invoice breakdown & SMS receipt
                                       - Branch fulfillment dispatch alert
 ```
 
 ### 2.1 Customer Identity at Checkout
-- **Guest Checkout:** Permitted to minimize friction; requires recipient name, mobile number, email, and destination address.
+- **Guest Checkout:** Permitted to minimize data retention; requires recipient name, mobile number, email, and destination address.
 - **Registered Account:** Automatically stores address book (Barangay, Municipality, landmarks), order history, and re-order shortcuts.
 
 ### 2.2 Fulfillment Modes
 1. **Branch Pickup (Free):**
    - Customer chooses from the 6 branches (Daet, Labo, Paracale, Panganiban, Capalonga, Sta. Elena).
    - Generates an alphanumeric Pickup Code and dynamic QR Code for contactless verification by branch staff.
-   - 5-business-day hold period.
+   - Recommended 5-business-day hold period.
 2. **Local Delivery (Camarines Norte):**
    - Municipal boundary selector: Daet, Labo, Paracale, Panganiban, Capalonga, Sta. Elena, San Vicente, San Lorenzo Ruiz, Basud, Mercedes, Vinzons, Talisay.
    - Distance/zone-based flat fee calculation.
@@ -73,62 +73,24 @@
 ### 3.1 Supported Payment Methods
 | Method Code | Channel | Processing Type | Settlement Flow |
 | :--- | :--- | :--- | :--- |
-| `gcash_ewallet` | GCash | Payment Gateway Redirect / In-App Webhook | Instant digital confirmation. |
-| `maya_ewallet` | Maya | Payment Gateway QR / Direct App Redirect | Instant digital confirmation. |
-| `qrph_standard` | QR Ph National Standard | Static/Dynamic interoperable QR code | Webhook notification upon settlement. |
-| `credit_card` | Visa / Mastercard | Gateway Tokenization (PCI-DSS Level 1) | Instant capture via 3D Secure. |
-| `cash_on_pickup`| Branch Register | In-person cash / point-of-sale at branch counter | Marked "Paid" by branch cashier. |
-| `cash_on_delivery` | Local Dispatch Rider | Cash collection at customer doorstep | Marked "Paid" by courier upon delivery. |
-
-### 3.2 Idempotency & Webhook Integrity
-- All payment gateway webhooks must use cryptographic signature validation (HMAC SHA-256) to prevent replay attacks or fraudulent payment falsification.
-- Transactions must enforce idempotency keys to eliminate duplicate billing during mobile network dropouts.
+| `gcash_ewallet` | GCash | DFSP Redirect / In-App Webhook | Instant digital confirmation; subject to RR 16-2023 withholding if merchant annual threshold > ₱500k. |
+| `maya_ewallet` | Maya | DFSP QR / Direct App Redirect | Instant digital confirmation; subject to RR 16-2023 withholding if merchant annual threshold > ₱500k. |
+| `qrph_standard` | QR Ph National Standard | Interoperable QR code | Webhook notification upon settlement. |
+| `credit_card` | Visa / Mastercard | Gateway Tokenization (PCI-DSS) | Instant capture via 3D Secure. |
+| `cash_on_pickup`| Branch Register | Counter cash at branch | Marked "Paid" by branch cashier upon customer handover. |
+| `cash_on_delivery` | Dispatch Rider | Doorstep cash collection | Marked "Paid" by rider upon delivery handover. |
 
 ---
 
-## 4. Order Lifecycle & State Machine
+## 4. Electronic Sales Invoicing (EOPT Act RA 11976 & RA 11967)
 
-```
-      [PENDING_PAYMENT]
-             │
-             ├────────────► [EXPIRED / CANCELLED] (Payment timeout after 1 hour)
-             ▼
-        [PAYMENT_CONFIRMED]
-             │
-             ▼
-        [ALLOCATED_TO_BRANCH] (Assigned to Daet, Labo, etc.)
-             │
-             ▼
-        [PACKED_AND_READY]
-             │
-      ┌──────┴─────────────────────────────────┐
-      ▼ (If Delivery)                          ▼ (If Branch Pickup)
-[OUT_FOR_DELIVERY]                       [READY_FOR_CUSTOMER_PICKUP]
-      │                                        │
-      ▼                                        ▼
-[DELIVERED]                              [PICKED_UP_AND_VERIFIED]
-      │                                        │
-      └───────────────────┬────────────────────┘
-                          ▼
-                     [COMPLETED]
-                          │
-                          ├────────► [RETURN_REQUESTED]
-                          │                 │
-                          │                 ▼
-                          │          [REFUNDED / REPLACED]
-```
-
----
-
-## 5. Electronic Invoicing & Receipts
-
-- **Compliance Reference:** BIR Revenue Regulations (RR 16-2023, RR 15-2024) and RA 11967.
-- Every completed order automatically compiles an immutable digital sales invoice containing:
-  - Sequential Sales Invoice Number (e.g., `INV-2026-00001234`).
+Pursuant to RA 11967 Section 23(g) and the Ease of Paying Taxes (EOPT) Act (RA 11976):
+- Every completed transaction automatically generates a serialized digital **Sales Invoice** (which legally replaces the historical official receipt across goods and services).
+- Mandatory Invoice Fields:
+  - Sequential Sales Invoice Number (e.g. `INV-2026-00001234`).
   - Business Legal Name, Registered Address, TIN, and BIR Branch Code.
-  - Date & Timestamp of Purchase.
+  - Date & Timestamp of Transaction.
   - Customer Name, Delivery/Pickup Address, Contact Mobile.
-  - Detailed Line Items: SKU, Description, Unit Price (PHP), Quantity, Total.
-  - VATable Sales, VAT Amount (12%), VAT-Exempt Sales, Net Amount.
-  - Payment Reference ID and Payment Gateway Transaction Hash.
-  - Mandatory disclaimer: *"This document serves as an electronic sales confirmation in compliance with the Electronic Commerce Act (RA 8792)."*
+  - Itemized Line Items: SKU, Description, Unit Price (PHP), Quantity, Total.
+  - VATable Sales, VAT Amount (12%), VAT-Exempt Sales, Net Amount (or statutory Non-VAT disclosure).
+  - Statutory statement: *"This document serves as an electronic sales invoice issued pursuant to the Ease of Paying Taxes Act (RA 11976) and Electronic Commerce Act (RA 8792)."*
