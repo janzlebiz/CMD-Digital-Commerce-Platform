@@ -29,7 +29,7 @@ Processing of Sensitive Personal Information (SPI)—which includes health, biom
 - **Sec 13(c): Vital Interests:** Necessary to protect vital interests where the data subject is physically or legally unable to consent.
 - **Sec 13(d): Non-Profit Organizations:** Limited to recognized religious, philosophical, or charitable entities for their members.
 - **Sec 13(e): Medical Treatment:** Necessary for medical treatment, carried out by a **licensed medical practitioner or medical institution**, and an adequate level of data protection is ensured.
-  - *Critical Legal Clarification:* Because naturopathic, wellness, and lifestyle consultations on this platform are conducted by wellness consultants rather than licensed medical doctors operating in a medical clinic, **Section 13(e) DOES NOT APPLY**. Therefore, processing client health intake questionnaires and wellness notes **MUST RELY EXCLUSIVELY ON SECTION 13(a) EXPLICIT INFORMED CONSENT**.
+  - *Proposed Compliance Baseline:* Based on the currently documented proposed wellness-consultation model, processing is designed to rely on Section 13(a) explicit consent. Reassess Section 13(e) if the service later involves medical treatment, a medical practitioner, or a medical treatment institution.
 - **Sec 13(f): Legal Claims / Defense:** Lawful defense of legal rights in court proceedings.
 
 ---
@@ -55,10 +55,10 @@ To maintain technical accuracy, the documentation explicitly delineates direct s
 
 | Security Measure / Control | Designation | Governing Authority / Rationale | Regulatory Reality |
 | :--- | :--- | :--- | :--- |
-| **AES-256 / AES-256-GCM Encryption** | **RECOMMENDED TECHNICAL SECURITY CONTROL** | Proportional security measure under Section 20, RA 10173 & NPC Circular 16-04. | RA 10173 mandates "reasonable and appropriate organizational, physical, and technical measures" to protect personal data; it does **not** specify AES-256 or any specific cryptographic cipher in statutory text. |
+| **AES-256 / AES-256-GCM Encryption** | **RECOMMENDED TECHNICAL SECURITY CONTROL** | Proportional security measure under Section 20, RA 10173 & IRR of RA 10173 (Rule VI). | RA 10173 mandates "reasonable and appropriate organizational, physical, and technical measures" to protect personal data; it does **not** specify AES-256 or any specific cryptographic cipher in statutory text. |
 | **TLS 1.3 & HTTPS Everywhere** | **RECOMMENDED TECHNICAL SECURITY CONTROL** | Standard web engineering best practice; fulfills NPC security guidelines. | Not named in statute; fulfills statutory duty of protecting data in transit. |
 | **Column-Level Database Encryption** | **RECOMMENDED TECHNICAL SECURITY CONTROL** | Defense-in-depth architecture to enforce the Health Data Boundary. | Architectural choice to safeguard Sensitive Personal Information. |
-| **Immutable Audit Logging** | **RECOMMENDED TECHNICAL SECURITY CONTROL** | Auditability guideline under NPC Circular 16-04. | Fulfills principle of accountability. |
+| **Immutable Audit Logging** | **RECOMMENDED TECHNICAL SECURITY CONTROL** | Auditability guideline under IRR of RA 10173 (Rule VI). | Fulfills principle of accountability. |
 | **30-Day Erasure Response SLA** | **RECOMMENDED PLATFORM POLICY** | Operational implementation of Section 16(e) Right to Erasure. | The statute grants the right to block or remove data upon justified grounds, but does not specify a 30-day statutory countdown. |
 | **48-Hour Data Portability SLA** | **RECOMMENDED PLATFORM POLICY** | Operational implementation of Section 18 Right to Data Portability. | The statute grants the right to obtain data in an interoperable format; the 48-hour deadline is an internal operational target. |
 | **72-Hour Data Breach Notification** | **STATUTORY / REGULATORY REQUIREMENT** | **Section 20(f), RA 10173 & NPC Circular 16-03** | **Statutory Mandate:** Personal Information Controllers must notify the NPC and affected data subjects within seventy-two (72) hours of knowledge of a reportable data breach involving SPI or posing real risk of serious harm. |

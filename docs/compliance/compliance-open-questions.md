@@ -35,6 +35,6 @@
 | Question ID | Scope | Regulatory Reference | Open Question & Evidence Required | Risk Level |
 | :--- | :--- | :--- | :--- | :--- |
 | **COMP-Q09** | Naturopathic Practitioner Licensing | PITAHC Act (RA 8423) / DOH | What specific accreditations, certifications, or licenses do the consultation practitioners hold (e.g. Traditional and Alternative Health Care / PITAHC certification, licensed nutritionist-dietitian, or certified lifestyle coach)? | **CRITICAL** |
-| **COMP-Q10** | DPO Appointment & NPC Registration | RA 10173 / NPC Circular 16-01 | Has the business formally appointed a Data Protection Officer (DPO) and registered with the National Privacy Commission (NPC)? | **HIGH** |
+| **COMP-Q10** | DPO Appointment & NPC Registration | RA 10173 / NPC Advisory 2017-01 & Circular 2022-04 | Has the business formally appointed a Data Protection Officer (DPO) and registered with the National Privacy Commission (NPC)? | **HIGH** |
 | **COMP-Q11** | Health Intake Consent Scope | RA 10173 Section 13(a) | Does the business owner approve the proposed digital consent waiver explicitly establishing that consultations are non-medical wellness advice rather than clinical diagnoses? | **HIGH** |
 | **COMP-Q12** | Consultation Room Physical Privacy | RA 10173 Physical Security | Are physical consultations at the six branches conducted in closed, confidential rooms to ensure client oral discussions cannot be overheard by retail customers? | **MEDIUM** |

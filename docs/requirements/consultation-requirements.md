@@ -16,7 +16,7 @@ The platform supports holistic naturopathic and wellness consultations designed 
 ### 1.1 Non-Medical Boundary & Statutory Consent
 - Consultations **do not** constitute the practice of medicine or pharmaceutical prescribing under Republic Act No. 2382 (Medical Act of 1959).
 - Consultations are classified as **Lifestyle and Wellness Education**.
-- **Privacy Legal Basis:** Under Section 13(a) of RA 10173 (Data Privacy Act of 2012), capturing client health intake and wellness goals requires **Explicit Informed Consent**. Section 13(e) (medical treatment by licensed medical doctor) does not apply.
+- **Privacy Legal Basis (Proposed Compliance Baseline):** Under Section 13(a) of RA 10173 (Data Privacy Act of 2012), capturing client health intake and wellness goals is designed to require **Explicit Informed Consent**. Based on the currently documented proposed wellness-consultation model, processing is designed to rely on Section 13(a) explicit consent. Reassess Section 13(e) if the service later involves medical treatment, a medical practitioner, or a medical treatment institution. Standalone, granular informed consent is secured prior to capturing health intake questionnaires.
 - Prior to confirming an appointment, the customer must acknowledge an explicit standalone digital informed consent:
   > *"I understand that this consultation is a holistic wellness and nutritional education session provided by a certified wellness practitioner. It does not replace medical consultation, diagnosis, or treatment with a licensed physician. I will not discontinue any prescribed medical treatment without consulting my doctor."*
 

@@ -15,8 +15,8 @@ Under Section 13 of the Philippine Data Privacy Act of 2012 (RA 10173), health i
 **The Golden Architectural Rule:**  
 Health, naturopathic, and consultation data **MUST NEVER** be stored in the same tables, exposed through the same API endpoints, or viewable by the same user roles as retail e-commerce transactions.
 
-**Lawful Ground for Health Processing:**  
-Because wellness consultations provide holistic lifestyle, hydration, and nutritional coaching rather than clinical medical treatment by a registered medical physician in a hospital or clinic (which would fall under Section 13(e)), the platform **strictly relies on Section 13(a): Explicit Informed Consent**. Standalone, granular consent must be secured before any health intake questionnaire is captured.
+**Lawful Ground for Health Processing (Proposed Compliance Baseline):**  
+Based on the currently documented proposed wellness-consultation model, processing is designed to rely on Section 13(a) explicit consent. Reassess Section 13(e) if the service later involves medical treatment, a medical practitioner, or a medical treatment institution. Standalone, granular informed consent is secured prior to capturing health intake questionnaires.
 
 ---
 

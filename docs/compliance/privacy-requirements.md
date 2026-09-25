@@ -40,8 +40,8 @@ Data processed by the platform is divided into two distinct legal tiers under RA
 ├───────────────────────────────────┼────────────────────────────────────┤
 │ Primary Lawful Bases:             │ Primary Lawful Basis:              │
 │ • Contractual Necessity (12(b))   │ • Explicit Informed Consent (13(a))│
-│ • Legal Obligation (12(c))        │   (Section 13(e) medical exemption │
-│ • Consent for Marketing (12(a))   │   does not apply to wellness coaching)│
+│ • Legal Obligation (12(c))        │   (Proposed compliance baseline;   │
+│ • Consent for Marketing (12(a))   │   reassess Sec 13(e) if medical)   │
 └───────────────────────────────────┴────────────────────────────────────┘
 ```
 
@@ -69,7 +69,7 @@ Data processed by the platform is divided into two distinct legal tiers under RA
 ### 3.5 Naturopathic Consultation & Health Data (CRITICAL)
 - **Classification:** **Sensitive Personal Information (SPI)** under Section 3(l) of RA 10173.
 - **Lawful Processing Ground:** **Section 13(a): Explicit Informed Consent**.
-  - *Statutory Note:* Under Section 13(e), SPI may be processed without consent for medical treatment *only* when carried out by a licensed medical physician or medical institution. Because consultations on this platform provide non-medical wellness/naturopathic education, Section 13(e) cannot be used. **Explicit, standalone consent is mandatory.**
+  - *Proposed Compliance Baseline:* Under Section 13(e), SPI may be processed without consent for medical treatment when carried out by a licensed medical practitioner or medical institution. Based on the currently documented proposed wellness-consultation model, processing is designed to rely on Section 13(a) explicit consent. Reassess Section 13(e) if the service later involves medical treatment, a medical practitioner, or a medical treatment institution. Standalone, granular informed consent is secured prior to capturing health intake questionnaires.
 - **Isolation Rule:** Health intake responses and clinical notes must reside in an isolated schema protected by column-level encryption. Strictly accessible only by the assigned practitioner and the patient.
 
 ### 3.6 Event Registrations
@@ -118,6 +118,6 @@ To maintain technical accuracy, the documentation clearly distinguishes statutor
 | **Sales Invoices & Tax Data** | NIRC Sec 235, as amended by RA 11976 | **5 Years**, reckoned per Sec 235 | Statutory tax record preservation mandate. |
 | **Order Telemetry & Packing Slips** | Commercial Best Practice | **3 Years** | Recommended policy for dispute resolution. |
 | **Health Consultation Notes** | Clinical & Privacy Best Practice | **5 Years** | Recommended policy; balances continuity of wellness care against data minimization. |
-| **Security & Auth Audit Logs** | NPC Circular 16-04 | **12 Months** | Recommended security monitoring baseline. |
+| **Security & Auth Audit Logs** | IRR of RA 10173 (Rule VI) & Security Best Practice | **12 Months** | Recommended security monitoring baseline. |
 | **Marketing Consent Records** | RA 10173 Principle of Transparency | **Duration of Active Consent** | Purged upon opt-out / unsubscribe. |
 | **Abandoned Shopping Carts** | Data Minimization Principle | **30 Calendar Days** | Purged automatically. |

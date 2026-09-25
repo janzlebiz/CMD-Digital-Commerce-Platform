@@ -31,10 +31,10 @@
 - **Decision:** Build as a Modular Monolith in TypeScript with strictly decoupled domain boundaries rather than distributed microservices.
 - **Consequences:** Fast single-codebase development, zero distributed network latency, straightforward local transactions for branch inventory transfer, single deployment target.
 
-### ADR-002: Strict Health Data Isolation & Explicit Consent Model
-- **Context:** Naturopathic consultations capture sensitive client lifestyle and dietary habits. Under Philippine RA 10173, wellness coaching cannot rely on Section 13(e) (medical treatment by licensed physician).
-- **Decision:** Health intake records and clinical notes must reside in an isolated persistence schema, protected by application-level AES-256-GCM encryption and anchored strictly to Section 13(a) Explicit Informed Consent.
-- **Consequences:** Protects client confidentiality and ensures lawful processing of Sensitive Personal Information under NPC regulations.
+### ADR-002: Strict Health Data Isolation & Explicit Consent Model (Proposed Compliance Baseline)
+- **Context:** Naturopathic consultations capture sensitive client lifestyle and dietary habits (Sensitive Personal Information under RA 10173). Based on the currently documented proposed wellness-consultation model, processing is designed to rely on Section 13(a) explicit consent. Reassess Section 13(e) if the service later involves medical treatment, a medical practitioner, or a medical treatment institution.
+- **Decision (Proposed Compliance Baseline):** Health intake records and clinical notes must reside in an isolated persistence schema, protected by application-level AES-256-GCM encryption and anchored to Section 13(a) Explicit Informed Consent.
+- **Consequences:** Protects client confidentiality and establishes a compliant proposed baseline for processing Sensitive Personal Information under NPC regulations pending business confirmation of consultation clinical staffing.
 
 ### ADR-003: Mandatory Statutory Product Disclaimers
 - **Context:** HCI CMD is registered under FR-4000008713595 as a food supplement, not a pharmaceutical drug.

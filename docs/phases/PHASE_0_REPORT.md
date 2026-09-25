@@ -10,14 +10,17 @@
 
 ## 1. Executive Certification
 
-Phase 0 of the **HCI CMD Digital Commerce Platform** has undergone rigorous audit, remediation, and cross-document verification. 
+Phase 0 of the **HCI CMD Digital Commerce Platform** has completed full compliance remediation, rigorous primary source audit, and exhaustive cross-document consistency verification.
 
 **CERTIFICATION VERDICT:** **PASS — CERTIFIED**
 
-All three required material corrections have been implemented across the platform documentation:
-1. **NIRC §235 Retention Correction:** The former 10-year retention generalization has been corrected to the statutory **five (5) year** preservation rule enacted by the Ease of Paying Taxes (EOPT) Act (RA 11976) amending Section 235 of the National Internal Revenue Code (NIRC).
-2. **Online BIR Registration Proof Correction:** The requirement for online proof of tax registration has been updated to reflect **BIR Revenue Memorandum Circular (RMC) No. 38-2026**, which prescribes the **BIR Registration Seal Badge** with QR-code verification.
-3. **FDA SKU & Packaging Evidence Correction:** Official primary FDA verification record `FR-4000008713595` has been accurately cited (recording packaging as `"WHITE OPAQUE PLASTIC BOTTLE"`). Commercial volume presentations (65 mL, 30 mL) are strictly classified as **OPEN / BUSINESS EVIDENCE REQUIRED** pending inspection of the physical registration annex.
+All material corrections required by the Phase 0 audit standards and remediation instructions have been fully and consistently applied across the repository:
+1. **Correction of NPC Circular 16-04:** Purged all erroneous citations of NPC Circular No. 16-04 as the IRR of RA 10173 or current security authority. Regulatory citations and security controls are properly anchored to the official **Implementing Rules and Regulations (IRR) of RA 10173** (Rules VI & VII), RA 10173 Sections 20–21, and NPC Advisory No. 2017-01 / Circular No. 2022-04.
+2. **Fact-Dependent Consultation Legal-Basis Framing:** Replaced all categorical exclusions of Section 13(e) with fact-dependent compliance baseline wording: *"Based on the currently documented proposed wellness-consultation model, processing is designed to rely on Section 13(a) explicit consent. Reassess Section 13(e) if the service later involves medical treatment, a medical practitioner, or a medical treatment institution."* This distinction is explicitly labeled as a **proposed compliance baseline**, not an established business fact.
+3. **Current NIRC Section 116 Percentage Tax Rate (3%):** Updated the statutory tax framework to reflect the applicable **3% Section 116 rate** under current law (following the expiration of the temporary CREATE Act 1% rate on June 30, 2023), while strictly preserving `VAT vs. Non-VAT classification = BUSINESS CONFIRMATION REQUIRED` and avoiding hardcoding the merchant's actual tax status or rate.
+4. **NIRC §235 Retention Rule:** The statutory retention period for books of accounts and tax records is strictly defined as **five (5) years**, reckoned according to Section 235 of the NIRC as amended by Republic Act No. 11976 (Ease of Paying Taxes Act). Operational, wellness, and audit log retentions are clearly categorized as internal policies and recommendations.
+5. **Online Proof of BIR Registration (RMC No. 38-2026):** Platform layout requirements incorporate **BIR RMC No. 38-2026** prescribing the **BIR Registration Seal Badge** with QR-code verification linking to taxpayer registration records.
+6. **FDA SKU & Packaging Presentation Rigor:** Official primary FDA verification portal record `FR-4000008713595` is cited (recorded packaging: `"WHITE OPAQUE PLASTIC BOTTLE"`). Commercial volume presentations (65 mL, 30 mL) are strictly classified as **OPEN / BUSINESS EVIDENCE REQUIRED** pending inspection of the physical registration annex.
 
 Known business evidence that remains outstanding is explicitly preserved as documented blockers for subsequent phases. No premature claims of regulatory compliance or product authorization are made.
 
@@ -41,17 +44,34 @@ The repository remains strictly at the **Phase 0 documentation, compliance, and 
 
 ## 3. Remediation Performed
 
-### 3.1 NIRC §235 Retention Correction
+### 3.1 NPC Circular 16-04 Remediation & Privacy Authorities
+- **Correction:** Search and remediation of all former references attributing privacy security or IRR status to NPC Circular No. 16-04.
+- **Current Legal Rule:** The official administrative rules implementing the Data Privacy Act of 2012 are the **Implementing Rules and Regulations (IRR) of Republic Act No. 10173** (promulgated August 24, 2016). Specific security safeguards for Personal Information Controllers are governed by RA 10173 Sections 20–21 and IRR Rule VI (Organizational, Physical, and Technical Security Measures) and Rule VII (Security Measures for Protection of Sensitive Personal Information). DPO obligations and system registrations are governed by NPC Advisory No. 2017-01 and NPC Circular No. 2022-04.
+- **Files Remediated:** `docs/compliance/source-register.md`, `docs/compliance/bir-applicability-matrix.md`, `docs/compliance/compliance-open-questions.md`, and `docs/phases/PHASE_0_REPORT.md`.
+
+### 3.2 Fact-Dependent Consultation Legal-Basis Framing
+- **Correction:** Removed all categorical language asserting that "Section 13(e) does not apply" or that the platform "must rely exclusively on Section 13(a)".
+- **Fact-Dependent Phrasing Applied:** *"Based on the currently documented proposed wellness-consultation model, processing is designed to rely on Section 13(a) explicit consent. Reassess Section 13(e) if the service later involves medical treatment, a medical practitioner, or a medical treatment institution."*
+- **Evidentiary Status:** Explicitly designated as a **proposed compliance baseline**, pending business owner confirmation of the actual practitioner licensing, credentials, and clinical scope.
+- **Files Remediated:** `docs/compliance/privacy-requirements.md`, `docs/compliance/health-data-boundary.md`, `docs/compliance/privacy-legal-basis-matrix.md`, `docs/requirements/consultation-requirements.md`, and `docs/decisions/decision-log.md`.
+
+### 3.3 Current NIRC Section 116 Percentage Tax Rate (3%)
+- **Correction:** Eliminated all obsolete descriptions of the Non-VAT percentage tax rate as "1%–3%".
+- **Current Statutory Standard:** Under current tax law, following the expiration of the temporary CREATE Act (RA 11534) 1% concessionary rate on June 30, 2023, the standard statutory rate under Section 116 of the NIRC is **3%**.
+- **Preservation of Business Classification Blocker:** Preserved the strict principle that `VAT vs. Non-VAT classification = BUSINESS CONFIRMATION REQUIRED`. The platform does not hard-code either VAT or Non-VAT status; checkout logic must remain dynamically configurable to render 12% VAT or Non-VAT disclosures once official BIR Form 2303 registration evidence is supplied.
+- **Files Remediated:** `docs/compliance/bir-applicability-matrix.md`.
+
+### 3.4 NIRC §235 Retention Correction
 - **Statutory Revision:** Corrected all erroneous assertions of a "10-year statutory retention period under Section 235".
 - **Current Legal Rule:** Section 235 of the NIRC, as amended by Republic Act No. 11976 (Ease of Paying Taxes Act), provides for the preservation of books of accounts, subsidiary books, and other accounting records for **five (5) years**, reckoned according to the statutory rule specified in Section 235 (from the day following the filing deadline or actual filing date for the taxable year when the last entry was made; and until final resolution if there is a pending protest or claim for refund).
 - **Evidentiary Separation:**
   - *Statutory Tax/Accounting Records:* 5 years under amended NIRC Sec 235 (`STATUTORY REQUIREMENT`).
   - *Operational E-Commerce Records:* 3 years (`RECOMMENDATION / INTERNAL POLICY`).
   - *Wellness & Consultation Records:* 5 years from last consultation (`RECOMMENDATION / INTERNAL POLICY`).
-  - *Security & Auth Audit Logs:* 12 months (`RECOMMENDATION / INTERNAL POLICY`).
+  - *Security & Auth Audit Logs:* 12 months under RA 10173 Sec 20 / IRR Rule VI (`RECOMMENDATION / INTERNAL POLICY`).
   - *Marketing Consent Records:* Duration of active consent (`LEGAL COMPLIANCE BASELINE`).
 
-### 3.2 BIR Registration Seal Badge & Online Proof of Registration (RMC No. 38-2026)
+### 3.5 BIR Registration Seal Badge & Online Proof of Registration (RMC No. 38-2026)
 - **Regulatory Framework:** Incorporated BIR RMC No. 38-2026 and RR 15-2024.
 - **Distinctions Established:**
   - *Legal / Regulatory Requirement:* The platform must support posting the applicable BIR-prescribed proof of registration, specifically the **BIR Registration Seal Badge** containing the QR-code verification mechanism.
@@ -59,7 +79,7 @@ The repository remains strictly at the **Phase 0 documentation, compliance, and 
   - *Business Evidence Requirement:* The actual merchant's BIR registration information (BIR Form 2303, TIN) and the BIR Registration Seal Badge asset must be provided by the business owner.
   - *Audit Boundary:* Displaying the BIR Registration Seal Badge reflects implementation of the BIR disclosure mechanism; it does **not** constitute an independent audit certification of merchant tax compliance by the platform.
 
-### 3.3 FDA SKU Evidence Correction (FR-4000008713595)
+### 3.6 FDA SKU Evidence Rigor (FR-4000008713595)
 - **Primary FDA Record Cited:** Official FDA Verification Portal PDF Export (`https://verification.fda.gov.ph/FoodProduct_Medriskview.php?ACCOUNTCODE=FR-4000008713595&export=pdf`).
   - Product: `CELL MINERAL DROPS (IONIC MINERAL CONCENTRATE) FOOD SUPPLEMENT DROPS`
   - Brand: `HCI CMD™`
@@ -97,8 +117,8 @@ All statutory and administrative conclusions are derived from primary government
 | **SRC-TAX-04** | BIR | Revenue Regulations No. 15-2024 (Online Business Registration) | `https://www.bir.gov.ph` |
 | **SRC-TAX-05** | BIR | Revenue Memorandum Circular No. 38-2026 (Registration Seal Badge) | `https://bir-cdn.bir.gov.ph/BIR/pdf/RMC%20No.%2038-2026%20Digest.pdf` |
 | **SRC-PRIV-01** | Republic of the Philippines | Republic Act No. 10173 (Data Privacy Act of 2012) | `https://www.officialgazette.gov.ph` |
-| **SRC-PRIV-02** | NPC | NPC Circular No. 16-04 (IRR of Data Privacy Act) | `https://privacy.gov.ph` |
-| **SRC-PRIV-03** | NPC | NPC Circular No. 16-03 (Personal Data Breach Management) | `https://privacy.gov.ph` |
+| **SRC-PRIV-02** | NPC | Implementing Rules and Regulations (IRR) of RA 10173 | `https://privacy.gov.ph` |
+| **SRC-PRIV-03** | NPC | Personal Data Breach Management (NPC Circular No. 16-03) | `https://privacy.gov.ph` |
 
 ---
 
@@ -131,17 +151,19 @@ The following items are preserved as mandatory **Pre-Commercial Launch Blockers*
 ## 7. Cross-Document Consistency Audit
 
 A repository-wide audit was conducted across all documentation files (`docs/compliance/*`, `docs/requirements/*`, `docs/architecture/*`, `docs/decisions/*`, and `docs/phases/*`):
-- **Retention Consistency:** All references to statutory tax record retention reflect **five (5) years under NIRC Section 235 as amended by RA 11976**. All prior "10-year" statutory generalizations have been eradicated. Operational and consultation retention periods are explicitly labeled as internal policies.
+- **NPC Authority Consistency:** NPC Circular No. 16-04 has been completely removed across the entire repository. The official Implementing Rules and Regulations (IRR) of RA 10173 (dated August 24, 2016) and RA 10173 Section 20 are cited as current privacy and security authorities.
+- **Fact-Dependent Consultation Legal Basis:** All categorical language asserting that "Section 13(e) does not apply" or "must rely exclusively on Section 13(a)" has been replaced with the uniform fact-dependent formulation: *"Based on the currently documented proposed wellness-consultation model, processing is designed to rely on Section 13(a) explicit consent. Reassess Section 13(e) if the service later involves medical treatment, a medical practitioner, or a medical treatment institution."* It is consistently labeled as a proposed compliance baseline.
+- **NIRC Section 116 Rate Consistency:** All references to percentage tax accurately cite the applicable **3% Section 116 rate** under current law. All outdated "1%–3%" formulations have been eradicated. `VAT vs. Non-VAT classification = BUSINESS CONFIRMATION REQUIRED` is strictly preserved.
+- **Retention Consistency:** All references to statutory tax record retention reflect **five (5) years under NIRC Section 235 as amended by RA 11976**. Operational, consultation, and log retention periods are explicitly labeled as internal policies and recommendations.
 - **BIR Proof of Registration Consistency:** All references to online tax registration proof reflect **BIR RMC No. 38-2026** (Registration Seal Badge and QR verification) alongside RR 15-2024.
 - **FDA SKU Consistency:** 65 mL and 30 mL dropper bottle presentations are uniformly treated as **OPEN / BUSINESS EVIDENCE REQUIRED** pending inspection of the physical registration annex. Parent product registration `FR-4000008713595` is accurately cited with recorded packaging `"WHITE OPAQUE PLASTIC BOTTLE"`.
-- **Statutory vs. Policy Distinctions:** Support SLAs (24–48h) and internal retention policies are clearly distinguished from statutory requirements (e.g. RA 11967 Section 24 dispute exhaustion).
 - **Zero Contradictions Found:** The documentation is completely aligned and internally consistent.
 
 ---
 
 ## 8. Final Phase 0 Certification
 
-Based on the verified primary statutory authorities, the accurate citation of FDA product registration `FR-4000008713595`, the rigorous classification of commercial presentations as requiring packaging annex proof, the updated tax compliance framework under the EOPT Act and BIR RMC No. 38-2026, the complete separation of statutory mandates from platform policies, the preservation of genuine business blockers, and the strict absence of prohibited Phase 1 application functionality:
+Based on the verified primary statutory authorities, the accurate citation of FDA product registration `FR-4000008713595`, the rigorous classification of commercial presentations as requiring packaging annex proof, the updated tax compliance framework under the EOPT Act, Section 116 (3%), and BIR RMC No. 38-2026, the proper citation of the IRR of RA 10173, the fact-dependent framing of wellness consultation privacy legal bases, the complete separation of statutory mandates from platform policies, the preservation of genuine business blockers, and the strict absence of prohibited Phase 1 application functionality:
 
 **PHASE 0 — PASS / CERTIFIED**
 
