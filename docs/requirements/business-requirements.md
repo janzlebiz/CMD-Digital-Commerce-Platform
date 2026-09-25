@@ -43,13 +43,13 @@ Prior to entering Phase 1 implementation, the business owner must provide the fo
 
 ### 3.1 Legal & Commercial Identity
 - [ ] Registered business entity name (DTI or SEC registration).
-- [ ] Certificate of Registration (BIR Form 2303) and official TIN.
+- [ ] Certificate of Registration (BIR Form 2303), official TIN, and BIR Registration Seal Badge asset with QR verification code (BIR RMC No. 38-2026).
 - [ ] Tax classification: Confirmation of VAT (12%) vs. Non-VAT (Percentage Tax) status.
 - [ ] Formal distributor agreement with Health Code International (HCI).
-- [ ] Physical copy of FDA Certificate of Product Registration for FR-4000008713595 including packaging annex.
+- [ ] Physical copy of official FDA product registration documentation for FR-4000008713595 including approved packaging specification annex establishing commercial volumes (e.g. 65 mL, 30 mL).
 
 ### 3.2 Product Catalog & Commercial Pricing
-- [ ] Final SKU list (confirming whether 65 mL, 30 mL, or other sizes are authorized).
+- [ ] Final SKU list with corresponding FDA packaging authorization evidence (confirming whether 65 mL, 30 mL, or other presentations are covered).
 - [ ] Retail Selling Price (SRP) per SKU in Philippine Peso (PHP).
 - [ ] Wholesale / Member pricing tiers (if multi-level distributor discounts apply).
 - [ ] High-resolution product packaging photography (front, nutrition panel, tamper seal).

@@ -60,7 +60,7 @@ Data processed by the platform is divided into two distinct legal tiers under RA
 
 ### 3.3 Sales Invoicing & Tax Compliance
 - **Lawful Basis:** **Section 12(c): Legal Obligation** (Mandated under NIRC Section 237 and RA 11967 Section 23(g)).
-- **Retention Period:** Statutory 10-year retention under NIRC Section 235 and BIR RR 5-2014.
+- **Retention Period:** Statutory 5-year retention under NIRC Section 235, as amended by RA 11976 (EOPT Act), reckoned according to the statutory rule specified in Section 235.
 
 ### 3.4 Payment & Financial Information
 - **Zero Card Storage Architecture:** The platform **NEVER** collects, stores, or processes raw credit/debit card numbers, CVVs, or banking credentials. Payments are tokenized through PCI-DSS certified payment gateways (e.g. PayMongo, Maya, GCash).
@@ -115,7 +115,7 @@ To maintain technical accuracy, the documentation clearly distinguishes statutor
 
 | Data Domain | Applicable Standard | Retention Period | Justification |
 | :--- | :--- | :--- | :--- |
-| **Sales Invoices & Tax Data** | NIRC Sec 235 & RR 5-2014 | **10 Years** | Statutory tax audit obligation. |
+| **Sales Invoices & Tax Data** | NIRC Sec 235, as amended by RA 11976 | **5 Years**, reckoned per Sec 235 | Statutory tax record preservation mandate. |
 | **Order Telemetry & Packing Slips** | Commercial Best Practice | **3 Years** | Recommended policy for dispute resolution. |
 | **Health Consultation Notes** | Clinical & Privacy Best Practice | **5 Years** | Recommended policy; balances continuity of wellness care against data minimization. |
 | **Security & Auth Audit Logs** | NPC Circular 16-04 | **12 Months** | Recommended security monitoring baseline. |

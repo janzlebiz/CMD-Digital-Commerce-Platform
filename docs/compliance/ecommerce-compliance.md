@@ -1,11 +1,11 @@
 # Philippine E-Commerce & Consumer Regulatory Compliance Dossier
 
-**Document ID:** COMP-ECOM-003 (Remediated)  
+**Document ID:** COMP-ECOM-003 (Final Remediation)  
 **Project:** HCI CMD Digital Commerce Platform  
 **Target Territory:** Camarines Norte, Philippines  
-**Audit Phase:** Phase 0 Remediation — Statutory Mapping & Tax Integration  
+**Audit Phase:** Phase 0 Final Remediation — Statutory Mapping, Invoicing & Tax Proof Baseline  
 **Date of Audit:** 2026-09-25  
-**Primary Authorities:** RA 11967, RA 7394, RA 8792, RA 11976 (EOPT), BIR RR 16-2023, RR 15-2024  
+**Primary Authorities:** RA 11967, RA 7394, RA 8792, RA 11976 (EOPT), BIR RMC No. 38-2026, RR 16-2023, RR 15-2024  
 
 ---
 
@@ -26,11 +26,11 @@ The HCI CMD Digital Commerce Platform must comply with the codified legal requir
 │ RA 8792 (Electronic Commerce   │ Legal recognition of electronic data, │
 │ Act of 2000)                   │ signatures, and contracts             │
 ├────────────────────────────────┼───────────────────────────────────────┤
-│ RA 11976 (Ease of Paying Taxes │ "Invoice" as primary substantiation   │
-│ Act of 2024 - EOPT)            │ across goods and services             │
+│ RA 11976 (Ease of Paying Taxes │ "Invoice" as primary substantiation;  │
+│ Act of 2024 - EOPT)            │ NIRC Sec 235 5-year retention rule    │
 ├────────────────────────────────┼───────────────────────────────────────┤
-│ BIR RR 16-2023 & RR 15-2024    │ Online merchant tax registration,     │
-│ (National Internal Revenue)    │ DFSP withholding tax, BIR 2303 display│
+│ BIR RMC 38-2026, RR 16-2023    │ BIR Registration Seal Badge, DFSP     │
+│ & RR 15-2024                   │ withholding tax, online registration  │
 ├────────────────────────────────┼───────────────────────────────────────┤
 │ RA 10173 (Data Privacy         │ Lawful personal & sensitive data      │
 │ Act of 2012)                   │ processing, consent, and security     │
@@ -75,9 +75,11 @@ Under the EOPT Act (effective January 22, 2024, implemented via RR 3-2024 and RR
 - The platform's automated invoicing engine must generate serialized **Sales Invoices** (not Official Receipts) for all product purchases and consultation services.
 - Mandatory invoice details include: Serialized Invoice No., Date, Merchant Legal Name, Address, TIN, Buyer Details (where applicable), line-item breakdown, and explicit VAT/Non-VAT notations.
 
-### 3.2 Mandatory BIR Registration (RR No. 15-2024)
-- Under RR 15-2024, online merchants must be officially registered with the BIR and prominently display their Certificate of Registration (BIR Form 2303) details on the online storefront.
-- **Status:** **BUSINESS CONFIRMATION REQUIRED** (Business owner must provide BIR Form 2303).
+### 3.2 Mandatory Online Registration & BIR Registration Seal Badge (RMC No. 38-2026 & RR 15-2024)
+- **Legal / Regulatory Requirement:** Under BIR RMC No. 38-2026 and RR 15-2024, online merchants must display the BIR-prescribed proof of registration on their website, specifically the **BIR Registration Seal Badge**, which incorporates a QR-code verification mechanism linked to the taxpayer's BIR registration information.
+- **Platform Implementation Requirement:** Phase 1 web layout must reserve a visible, accessible location in the footer for the BIR registration disclosure and Registration Seal Badge asset.
+- **Business Evidence Requirement:** The business owner must supply the official BIR Form 2303 Certificate of Registration and the BIR Registration Seal Badge asset.
+- *Important Distinction:* Displaying the BIR Registration Seal Badge does NOT mean the platform has independently verified the merchant's tax compliance; the platform is implementing the applicable disclosure mechanism based on the business's authoritative BIR registration evidence.
 
 ### 3.3 Withholding Tax on Online Transactions (RR No. 16-2023 & RMC No. 8-2024)
 - **Applicability Analysis:**
@@ -90,6 +92,9 @@ Under the EOPT Act (effective January 22, 2024, implemented via RR 3-2024 and RR
 - The platform does not assume whether the business is VAT-registered or Non-VAT.
 - If annual gross sales exceed ₱3,000,000, the business must register for 12% VAT. If below ₱3,000,000, the business may be registered as Non-VAT subject to percentage tax under Section 116 of the NIRC.
 - **Status:** **BUSINESS CONFIRMATION REQUIRED**.
+
+### 3.5 Statutory Tax Records Retention (NIRC Section 235 as amended by RA 11976)
+- **Statutory Mandate:** NIRC Section 235, as amended by RA 11976, provides for preservation of books of accounts, subsidiary books, and other accounting records for **five (5) years**, reckoned according to the statutory rule specified in Section 235 (i.e. from the day following the deadline in filing a return, or if filed after the deadline, from the date of the actual filing of the return, for the taxable year when the last entry was made in the books of accounts; and until final resolution if there is a pending protest or claim for refund).
 
 ---
 
@@ -115,7 +120,7 @@ In accordance with DTI Department Administrative Orders and RA 7394 (Consumer Ac
 
 ### 5.1 Camarines Norte Geographic Coverage
 The platform serves six designated branch hubs:
-1. **Daet (Central Hub):** Provincial capital, high delivery density, central replenishment depot.
+1. **Daet (Central Hub):** Provincial capital, high delivery density, central replenishment depot (*Operational Assumption*).
 2. **Labo:** Inland municipality, commercial corridor.
 3. **Paracale:** Coastal / mining municipality.
 4. **Panganiban:** Northern municipality.
@@ -123,9 +128,9 @@ The platform serves six designated branch hubs:
 6. **Sta. Elena:** Western boundary municipality (gateway to Quezon province).
 
 ### 5.2 Delivery Terms & Disclosures
-- **Estimated Delivery Windows:** Clear estimates must be shown based on municipal transit times (e.g. Same-day in Daet; 1–3 business days for distant branches like Capalonga or Sta. Elena).
+- **Estimated Delivery Windows:** Clear estimates must be shown based on municipal transit times.
 - **Branch Pickup Rules:**
   - Customers selecting "Branch Pickup" must select their preferred pickup branch.
   - The platform must verify stock availability at that specific branch before order confirmation.
   - Orders ready for pickup must generate a secure Pickup Authorization Code and dynamic QR code.
-  - Branch holding period: 5 business days before stock reservation expires (recommended platform policy).
+  - Branch holding period: 5 business days before stock reservation expires (*Recommended Platform Policy*).

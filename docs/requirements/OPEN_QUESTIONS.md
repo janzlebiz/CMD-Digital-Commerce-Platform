@@ -21,8 +21,8 @@ Questions are categorized by operational domain and prioritized by critical bloc
 
 | Question ID | Domain | Topic | Specific Question & Evidence Required |
 | :--- | :--- | :--- | :--- |
-| **OQ-BUS-01** | Legal | Registered Entity & BIR 2303 | What is the exact registered legal business entity name, Tax Identification Number (TIN), registered business address, and BIR Certificate of Registration (BIR 2303)? |
-| **OQ-BUS-02** | Product | FDA CPR Packaging Annex | While FR-4000008713595 is verified for HCI CMD, what specific packaging volumes (65 mL, 30 mL, etc.) are formally approved on the physical CPR annex? Provide a full PDF scan of the CPR certificate and packaging annex. |
+| **OQ-BUS-01** | Legal | Registered Entity, BIR 2303 & Seal Badge | What is the exact registered legal business entity name, Tax Identification Number (TIN), registered business address, BIR Certificate of Registration (BIR 2303), and BIR Registration Seal Badge asset with QR code (BIR RMC No. 38-2026)? |
+| **OQ-BUS-02** | Product | FDA Packaging Annex Authorization | While FR-4000008713595 is verified for HCI CMD on the FDA portal (with packaging recorded as "WHITE OPAQUE PLASTIC BOTTLE"), what specific commercial packaging presentations (65 mL, 30 mL, etc.) are formally approved on the physical registration certificate annex? Provide a full PDF scan of the official registration certificate and packaging specification annex. |
 | **OQ-BUS-03** | Distribution | HCI Authorization | Does the business possess written documentation from Health Code International Corporation authorizing online retail distribution and dealership in Camarines Norte? |
 | **OQ-CAT-01** | Commercial | SKU Catalog & Official SRP | What is the exact final list of SKUs to be offered at launch, and their official Retail Selling Prices (SRP) in Philippine Peso (PHP)? |
 | **OQ-BRN-01** | Branches | Physical Addresses & Contacts | What are the exact physical street addresses, barangays, landmarks, and telephone numbers for the six branches (Daet, Labo, Paracale, Panganiban, Capalonga, Sta. Elena)? |

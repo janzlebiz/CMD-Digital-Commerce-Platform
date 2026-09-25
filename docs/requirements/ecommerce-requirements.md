@@ -12,7 +12,7 @@
 ## 1. Product Catalog & Storefront Specifications
 
 ### 1.1 Product Representation
-- **SKU Management:** Support individual items (e.g., `CMD-65ML`, `CMD-30ML`), multi-packs, and companion wellness items (*Subject to FDA CPR packaging annex confirmation*).
+- **SKU Management:** Support individual items (e.g., 65 mL, 30 mL dropper bottles), multi-packs, and companion wellness items (*Subject to business providing official FDA registration documentation / packaging annex establishing commercial volume authorization*).
 - **Pricing:** Listed exclusively in Philippine Peso (PHP / ₱) with explicit VAT notation (or Non-VAT notation pursuant to confirmed tax status).
 - **Mandatory Regulatory Banner:** Every product page must dynamically display:
   - English: `"NO APPROVED THERAPEUTIC CLAIMS"`
@@ -94,3 +94,16 @@ Pursuant to RA 11967 Section 23(g) and the Ease of Paying Taxes (EOPT) Act (RA 1
   - Itemized Line Items: SKU, Description, Unit Price (PHP), Quantity, Total.
   - VATable Sales, VAT Amount (12%), VAT-Exempt Sales, Net Amount (or statutory Non-VAT disclosure).
   - Statutory statement: *"This document serves as an electronic sales invoice issued pursuant to the Ease of Paying Taxes Act (RA 11976) and Electronic Commerce Act (RA 8792)."*
+
+---
+
+## 5. Tax Proof Disclosure & Records Retention
+
+### 5.1 BIR Registration Seal Badge & Proof of Registration (RMC No. 38-2026)
+- The platform web layout must reserve a visible, accessible location in the footer for posting the **BIR Registration Seal Badge** containing the QR-code verification mechanism linked to the taxpayer's BIR registration information.
+- The business owner must supply the official BIR registration documentation (BIR Form 2303) and the Registration Seal Badge asset before commercial release.
+- *Notice:* Display of the badge reflects implementation of the BIR disclosure mechanism; it does not constitute an independent audit certification of merchant tax compliance by the platform.
+
+### 5.2 Statutory Tax & Accounting Records Retention (NIRC Section 235 as amended by RA 11976)
+- Sales Invoices, financial transaction ledgers, credit notes, and settlement records must be preserved for **five (5) years**, reckoned according to the statutory rule specified in amended NIRC Section 235.
+- General operational logs and customer service records are retained separately according to internal business policy (e.g. 3 years).

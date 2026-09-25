@@ -1,9 +1,9 @@
 # Philippine Regulatory Research & Evidence Dossier
 
-**Document ID:** COMP-REG-001 (Remediated)  
+**Document ID:** COMP-REG-001 (Final Remediation)  
 **Project:** HCI CMD Digital Commerce Platform  
 **Target Market:** Camarines Norte, Bicol Region, Philippines  
-**Audit Phase:** Phase 0 Remediation — Statutory Evidence & Provenance Audit  
+**Audit Phase:** Phase 0 Final Remediation — Statutory Evidence & Provenance Audit  
 **Status:** Certified Audit Baseline (Qualified with Business Open Questions)  
 **Date of Research:** 2026-09-25  
 **Evidence Standard:** Primary Government & Official Agency Sources (`docs/compliance/source-register.md`)  
@@ -16,21 +16,24 @@ This regulatory research dossier establishes the primary statutory and administr
 
 Based on primary agency records from the Food and Drug Administration (FDA) Philippines, the Department of Trade and Industry (DTI), the Bureau of Internal Revenue (BIR), and the National Privacy Commission (NPC):
 
-1. **Official Product Registration:** The product is officially registered on the FDA Verification Portal under:
-   - **Product Name:** HCI CMD / Cell Mineral Drops (Ionic Mineral Concentrate) Food Supplement Drops
+1. **Official Product Registration:** The product is officially registered on the FDA Verification Portal (`https://verification.fda.gov.ph/FoodProduct_Medriskview.php?ACCOUNTCODE=FR-4000008713595&export=pdf`) under:
+   - **Product Name:** CELL MINERAL DROPS (IONIC MINERAL CONCENTRATE) FOOD SUPPLEMENT DROPS
    - **Brand Name:** HCI CMD™
    - **Registration Number:** **FR-4000008713595**
-   - **Registrant Company:** Health Code International Corporation
+   - **Registrant Company:** HEALTH CODE INTERNATIONAL CORPORATION
    - **Classification:** Medium Risk Food Product — Food Supplement
+   - **Packaging Description:** WHITE OPAQUE PLASTIC BOTTLE
    - **Date of Issuance:** 26 May 2023 | **Date of Expiration:** 18 March 2028
-   - **FDA Product Status:** Registered as a Food Supplement with **NO APPROVED THERAPEUTIC CLAIMS**.
+   - **FDA Statement:** Registered as Food Supplement with **NO APPROVED THERAPEUTIC CLAIMS**.
 2. **Statutory Classification:** Under Republic Act No. 9711 (FDA Act of 2009) and DOH Administrative Order No. 2014-0030, HCI CMD is classified as a **Processed Food Product / Food Supplement**. It is **NOT** a pharmaceutical drug, medicine, or medical device.
 3. **Mandatory Disclaimers:** All consumer-facing product surfaces, advertisements, banners, and digital order confirmations must conspicuously state the mandatory Filipino warning (FDA Memorandum Circular No. 2015-003):
    > **"MAHALAGANG PAALALA: ANG (PANGALAN NG PRODUKTO / HCI CMD) AY HINDI GAMOT AT HINDI DAPAT GAMITING PANGGAMOT SA ANUMANG URI NG SAKIT."**  
    Together with the standard English designation:
    > **"NO APPROVED THERAPEUTIC CLAIMS"**
 4. **Prohibition of Therapeutic Claims:** It is a violation of RA 9711 and RA 7394 to claim, suggest, or imply that HCI CMD diagnoses, cures, treats, mitigates, or prevents any disease (e.g. hypertension, diabetes, kidney disease, cancer, arthritis).
-5. **Platform Ophthalmic Policy:** FDA Public Health Advisories (e.g., FDA Advisory No. 2019-363 regarding "CMD Natural Eye Solution 15 mL" and FDA Advisory No. 2020-1389 regarding "Hyssop Mineral Drops") explicitly establish that promoting hypertonic mineral drop solutions for ocular/eye instillation poses severe chemical burn and blindness hazards. While those advisories adjudicated other specific product preparations, they establish the regulatory basis for the platform's non-negotiable compliance policy: **HCI CMD must NEVER be promoted, described, or recommended as eye drops, cataracts treatment, or ocular solution.**
+5. **Platform Ophthalmic Policy:** FDA Public Health Advisories (e.g. FDA Advisory No. 2019-363 regarding "CMD Natural Eye Solution 15 mL" and FDA Advisory No. 2020-1389 regarding "Hyssop Mineral Drops") explicitly establish that promoting hypertonic mineral drop solutions for ocular/eye instillation poses severe chemical burn and blindness hazards. While those advisories adjudicated other specific product preparations, they establish the regulatory basis for the platform's non-negotiable compliance policy: **HCI CMD must NEVER be promoted, described, or recommended as eye drops, cataracts treatment, or ocular solution.**
+6. **Online Tax Registration & Proof of Registration:** Under BIR RMC No. 38-2026 and RR 15-2024, online merchants must support displaying the BIR-prescribed proof of registration, including the **BIR Registration Seal Badge** and QR verification link.
+7. **Tax Records Retention (EOPT Act):** Under Section 235 of the NIRC, as amended by RA 11976 (Ease of Paying Taxes Act), statutory books of accounts, subsidiary books, and accounting records must be preserved for **five (5) years**, reckoned according to the statutory rule specified in Section 235.
 
 ---
 
@@ -40,10 +43,10 @@ Every statement published or transacted on the platform must be categorized into
 
 | Tier | Category | Legal Definition | Platform Policy Rule |
 | :--- | :--- | :--- | :--- |
-| **Tier A** | **Verified Regulatory Facts** | Facts verified through primary government agency issuances, official gazettes, and verified CPR (FR-4000008713595) records. | Permitted. Must be referenced accurately without extrapolation or exaggeration. |
-| **Tier B** | **Manufacturer Technical Claims** | Technical specifications provided by the mineral harvest source (e.g., Great Salt Lake origin, solar evaporation process, mineral composition analysis). | Permitted only as nutritional/ingredient facts. Cannot assert health disease treatment. |
+| **Tier A** | **Verified Regulatory Facts** | Facts verified through primary government agency issuances, official gazettes, and verified FR-4000008713595 records. | Permitted. Must be referenced accurately without extrapolation or exaggeration. |
+| **Tier B** | **Manufacturer Technical Claims** | Technical specifications provided by the mineral harvest source (e.g. Great Salt Lake origin, solar evaporation process, mineral composition analysis). | Permitted only as nutritional/ingredient facts. Cannot assert health disease treatment. |
 | **Tier C** | **Distributor / Reseller Claims** | Commercial statements made by Health Code International (HCI) or distributors regarding business opportunity, packaging, or recommended beverage dilution. | Permitted if non-therapeutic and compliant with consumer truth-in-advertising laws. |
-| **Tier D** | **Educational Statements** | General nutritional and physiological science (e.g., role of magnesium in electrolyte balance and normal muscle function as established by FNRI/WHO/Codex Alimentarius). | Permitted provided they do not link HCI CMD directly to curing diseases. |
+| **Tier D** | **Educational Statements** | General nutritional and physiological science (e.g. role of magnesium in electrolyte balance and normal muscle function as established by FNRI/WHO/Codex Alimentarius). | Permitted provided they do not link HCI CMD directly to curing diseases. |
 | **Tier E** | **Unverified / Non-Approved Claims** | Any assertion that HCI CMD cures hypertension, diabetes, cancer, kidney stones, cataracts, glaucoma, or acts as an eye drop / topical cure. | **STRICTLY PROHIBITED**. Instant content rejection. |
 
 ---
@@ -51,9 +54,9 @@ Every statement published or transacted on the platform must be categorized into
 ## 3. FDA SKU Evidence & Traceability Status
 
 Refer to `docs/compliance/fda-sku-evidence.md` for the complete SKU Evidence Matrix:
-- **FR-4000008713595** is the sole verified primary registration on the FDA portal.
-- Whether commercial presentations (e.g., 65 mL dropper bottle, 30 mL dropper bottle, 15 mL travel size) are approved as packaging variations under the FR-4000008713595 certificate annex or require separate notifications is **UNVERIFIED**.
-- **Action Required:** The business owner must submit the physical Certificate of Product Registration document and its attached packaging specification sheet before commercial checkout is enabled.
+- **FR-4000008713595** is the verified primary registration on the FDA portal, with packaging recorded as "WHITE OPAQUE PLASTIC BOTTLE".
+- Specific commercial volume allocations (e.g., 65 mL dropper bottle, 30 mL dropper bottle) are **OPEN / BUSINESS EVIDENCE REQUIRED**. Proof that these presentations are covered under the registration annex has not yet been supplied.
+- **Mandatory Blocker:** The business owner must submit the physical registration documentation and attached packaging specification sheet before commercial checkout is enabled.
 
 ---
 
@@ -80,13 +83,10 @@ Refer to `docs/compliance/fda-sku-evidence.md` for the complete SKU Evidence Mat
     > *"MAHALAGANG PAALALA: ANG (PANGALAN NG PRODUKTO) AY HINDI GAMOT AT HINDI DAPAT GAMITING PANGGAMOT SA ANUMANG URI NG SAKIT."*
   - Digital Display Requirements: The text must be legible, uncropped, contrasting against the background, and prominently positioned adjacent to the product title and price.
 
-### 4.4 FDA Public Health Advisories on Mineral Drops
-- **FDA Advisory No. 2019-363 ("CMD Natural Eye Solution 15 mL"):**
-  - Warned the public against an unregistered drug marketed as "CMD Natural Eye Solution 15 mL".
-  - *Context & Limitation:* This advisory adjudicated an unregistered ophthalmic preparation. While not an adjudication against HCI CMD oral food supplement drops, it directly establishes the severe regulatory risk of distributing mineral concentrates for ophthalmic administration.
-- **FDA Advisory No. 2020-1389 ("Mineral Blend Food Supplement Drops"):**
-  - Clarified that while mineral drops may hold valid food supplement registration, promoting or recommending them for instillation into human eyes constitutes unlawful misbranding and poses risks of corneal erosion and blindness.
-- **Platform Policy:** The e-commerce store, product descriptions, FAQs, staff, and naturopathic consultations are strictly forbidden from recommending HCI CMD as an ophthalmic solution or nasal instillation.
+### 4.4 Tax Administration & Invoicing (EOPT Act RA 11976 & RMC 38-2026)
+- **Sales Invoicing:** Primary substantiation for sales of goods and services is the Sales Invoice.
+- **Online Registration Disclosure:** Online merchants must support posting the BIR Registration Seal Badge pursuant to BIR RMC No. 38-2026.
+- **Statutory Accounting Records Retention:** NIRC Section 235, as amended by RA 11976, mandates that books of accounts, subsidiary books, and other accounting records be preserved for **five (5) years**, reckoned according to the statutory rule specified in Section 235.
 
 ---
 
