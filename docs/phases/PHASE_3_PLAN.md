@@ -38,18 +38,30 @@ Relying solely on frontend flags or basic email attributes (e.g. `emailVerified`
 - **Safeguard:** Authorization must be strictly validated server-side by checking the incoming `request.auth.uid` against a protected `/users/{userId}` metadata document inside `firestore.rules` or via a secure backend authentication hook. 
 - Any field that alters user permissions (such as `role`) is strictly immutable by the user and can only be set by verified administrative functions.
 
-#### 3.2 Production Key Management (KMS) Design for Sensitive Personal Information
-Relying on hardcoded or undefined client-side encryption keys for clinical assessments is rejected.
-- **Safeguard:** For fields containing sensitive personal health information (intake answers and clinical session notes), application-layer envelope encryption using `AES-256-GCM` will be managed via **Google Cloud Key Management Service (Cloud KMS)**.
-- Encryption keys are derived per user-session by exchanging a cryptographically signed OAuth session token with a secure server-side proxy endpoint. This proxy queries Cloud KMS to decrypt the session-specific key wrapper. The plaintext data key is only decrypted and held in volatile, non-persistent client memory during an active, authenticated practitioner session, preventing key leakage or persistent client-side key storage.
+#### 3.2 Server-Only Encryption/Decryption Boundary (Cloud KMS)
+The browser client must never receive, store, or process plaintext data-encryption keys.
+- **Safeguard:** For fields containing sensitive personal health information (dietary habits, water consumption, and clinical notes), all encryption and decryption operations are performed exclusively inside the trusted, server-side backend environment (Cloud Functions).
+- Cloud KMS protects the root keys and manages the key hierarchy. 
+- Firestore stores only the resulting ciphertext and the associated encryption metadata (e.g., KMS key version ID, initialization vectors).
+- Authorized wellness practitioners query clinical records through a secure backend API. The backend verifies authorization first, decrypts the ciphertext using KMS, and streams the decrypted results directly to the authorized practitioner's authenticated browser session. No persistent plaintext or keys exist in the client browser.
 
-#### 3.3 Server-Authoritative Commercial Calculations & Inventory Ledger
+#### 3.3 Backend Authorization Enforcement
+Because server-side environments (such as Firebase Cloud Functions and the Firebase Admin SDK) bypass standard Firestore Security Rules, they represent a significant attack surface if left unchecked.
+- **Safeguard:** Every single Cloud Function and Admin SDK transaction must programmatically execute its own independent authorization validation checks before fetching or modifying data.
+- The backend must verify:
+  1. The **Authenticated Firebase UID** derived from the verified token.
+  2. The **Immutable Server-Controlled Role** matching user account configurations.
+  3. The **Practitioner/Staff Scope** authorized for the specific endpoint.
+  4. The **Branch Assignment** boundaries (verifying staff can only access logs within their assigned Camarines Norte branch).
+  5. The **Ownership/Relationship** to the record (such as confirming the practitioner is actively assigned to the target patient's scheduled consultation).
+
+#### 3.4 Server-Authoritative Commercial Calculations & Inventory Ledger
 Allowing the client to post final prices, tax categories, payment states, or inventory decrements directly is rejected.
 - **Safeguard:** The frontend client will only submit a "request to transact" payload containing SKU IDs and quantities. 
 - All final grand totals, VAT/Non-VAT allocations, shipping fees, payment statuses, and inventory counts are computed and verified strictly on the server (via Cloud Functions or secure transaction boundaries) before recording the order document. 
 - Inventory counts must be atomically checked and decremented within an isolated transactional batch to prevent overselling. Fulfillment state transitions (such as advancing from `Pending` to `In Transit`) are validated strictly on the server against authorized staff roles.
 
-#### 3.4 Data Minimization Principles
+#### 3.5 Data Minimization Principles
 The platform will strictly adhere to the principle of data minimization as mandated under **RA 10173**:
 - No corporate TINs, detailed government tax identifiers, consumer birthdays, or secondary PII will be collected or stored in the database without an explicit, verified operational requirement.
 - User data captured will be limited strictly to the minimal fields necessary to execute local sandbox checkout and contact delivery (First Name, Last Name, Email, Phone, and Municipal Delivery Address).
@@ -129,7 +141,7 @@ interface InventoryRecord {
 ```
 
 #### 4.4 Collection: `/consultation_intakes/{intakeId}`
-Enforces highly granular health-data consent tracking and application-layer encryption.
+Enforces highly granular health-data consent tracking and server-only KMS ciphertext mappings.
 ```typescript
 interface ConsultationIntake {
   id: string;                  // Unique appointment ID
@@ -150,11 +162,14 @@ interface ConsultationIntake {
     };
   };
 
-  // SENSITIVE PERSONAL INFORMATION — ENCRYPTED VIA SERVER-PROXY TRANSIT KEY (Cloud KMS)
+  // SENSITIVE PERSONAL INFORMATION — SERVER-ONLY KMS ENCRYPTION (Cloud KMS)
+  // Encrypted and decrypted exclusively within trusted Cloud Functions.
   encryptedClinicalIntake: {
     dietaryHabits: string;      // Ciphertext string
     waterConsumption: string;   // Ciphertext string
     declaredConditions: string; // Ciphertext string
+    kmsKeyId: string;           // Encryption metadata: KMS key resource URI
+    iv: string;                 // Encryption metadata: Initialization Vector
   };
 }
 ```
@@ -166,7 +181,7 @@ interface ConsultationIntake {
 Before Phase 3 features can be fully implemented, compiled, and certified on the live platform, they must clear the following proposed acceptance tests:
 - [ ] **Auth Enforcement Test:** Direct database write attempts from unauthenticated or unverified users are blocked via `firestore.rules`.
 - [ ] **Server-Authoritative Pricing Check:** Any client attempts to checkout with modified item prices or incorrect tax rates must be rejected by the server controller.
-- [ ] **Cloud KMS Key Separation Check:** Direct database dumps of the `/consultation_intakes` collection must yield ciphertext for health-related variables.
+- [ ] **Sensitive Data Key Boundary Test:** No browser, Firestore document, log, or API response may expose plaintext encryption keys.
 - [ ] **Role Validation Test:** Customers or staff attempting to write directly to database roles get blocked instantly.
 
 ---
