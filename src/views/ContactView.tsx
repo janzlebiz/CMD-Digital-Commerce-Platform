@@ -124,22 +124,14 @@ export const ContactView: React.FC<ContactViewProps> = ({ onNavigate }) => {
           <div className="bg-slate-900 border border-slate-800 rounded-xl p-6 sm:p-8 space-y-6">
             {submitted ? (
               <div className="p-8 text-center space-y-4">
-                <div className="w-12 h-12 rounded-full bg-emerald-950 border border-emerald-800 text-emerald-400 flex items-center justify-center mx-auto text-xl font-bold">
-                  ✓
+                <div className="w-12 h-12 rounded-full bg-slate-800 border border-slate-700 text-amber-400 flex items-center justify-center mx-auto text-xl font-bold">
+                  i
                 </div>
                 <h3 className="font-serif font-bold text-white text-xl">
-                  Inquiry Received
+                  Demo Submission
                 </h3>
                 <p className="text-xs sm:text-sm text-slate-300 leading-relaxed max-w-md mx-auto">
-                  Thank you, <strong>{formData.fullName}</strong>. Your message regarding{' '}
-                  <span className="text-amber-300 font-medium">
-                    {formData.branchOrTopic === 'compliance'
-                      ? 'Regulatory Compliance'
-                      : formData.branchOrTopic === 'general'
-                      ? 'General Inquiry'
-                      : `${formData.branchOrTopic.toUpperCase()} Branch`}
-                  </span>{' '}
-                  has been recorded in our Phase 1 regional inquiry log. Our operations team will respond to {formData.email} within 1 to 2 business days.
+                  <strong>Demo submission only — no message has been transmitted or stored.</strong>
                 </p>
                 <div className="pt-4">
                   <button
@@ -156,7 +148,7 @@ export const ContactView: React.FC<ContactViewProps> = ({ onNavigate }) => {
                     }}
                     className="px-4 py-2 bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs rounded transition"
                   >
-                    Submit Another Inquiry
+                    Reset Demo Form
                   </button>
                 </div>
               </div>
@@ -280,7 +272,7 @@ export const ContactView: React.FC<ContactViewProps> = ({ onNavigate }) => {
                 </div>
 
                 <p className="text-[11px] text-slate-400 leading-normal">
-                  By submitting this form, you consent to the processing of your contact details solely for answering your inquiry pursuant to Republic Act No. 10173 (Data Privacy Act of 2012).
+                  Privacy note: This Phase 1 inquiry form is a local demonstration interface. No message is transmitted to a server or stored by the platform. A production inquiry submission workflow will be implemented only in a later authorized phase.
                 </p>
 
                 <button

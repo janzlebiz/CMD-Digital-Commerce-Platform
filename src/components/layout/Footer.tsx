@@ -52,7 +52,7 @@ export const Footer: React.FC<FooterProps> = ({ onNavigate }) => {
                 HCI CMD<span className="text-amber-400 text-xs">™</span> Camarines Norte
               </span>
               <p className="text-xs text-slate-400 mt-1 leading-relaxed">
-                Official regional digital presence and education platform for HCI Cell Mineral Drops across Camarines Norte, Philippines.
+                Regional digital information and education platform for HCI CMD across Camarines Norte.
               </p>
             </div>
 

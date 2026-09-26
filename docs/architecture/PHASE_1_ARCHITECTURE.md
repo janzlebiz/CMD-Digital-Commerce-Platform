@@ -12,7 +12,7 @@
 
 ## 1. Architectural Overview & Design Philosophy
 
-Phase 1 establishes the production-grade application shell, responsive design system, and public-facing informational surfaces for the HCI CMD Digital Commerce Platform across Camarines Norte, Philippines.
+Phase 1 establishes the production-grade application shell, responsive design system, and public-facing informational surfaces for the HCI CMD™ Camarines Norte — Regional Information & Education Platform.
 
 ### Core Architectural Decisions:
 1. **Zero-Pill & Metadata Discipline:** Enforced anti-slop design constitution. Informational metadata (dates, categories, registration numbers) is rendered as clean unboxed text with subtle typographic separators (`·`), while interactive filtering states use functional button elements.
@@ -20,6 +20,7 @@ Phase 1 establishes the production-grade application shell, responsive design sy
 3. **Regulatory Anchor Integration:** Statutory disclaimers required by Philippine Law (FDA Circular No. 2015-003, RA 9711, RA 11967, and DOH AO 2014-0030) are permanently mounted in the application shell via `<StatutoryBanner />` and `<Footer />`.
 4. **URL Hash Synchronized Client Router:** Zero-dependency URL hash routing (`#about`, `#products`, `#branches`, `#faq`, `#compliance`, `#terms`, `#privacy`, `#returns`) enables browser history navigation, back/forward support, and deep-linking without server-side routing complexity.
 5. **Strict Evidence Boundary Maintenance:** Outstanding Phase 0 blockers (TIN, VAT/Non-VAT status, 65 mL/30 mL FDA packaging annexes, exact branch street addresses, and local telephone numbers) are strictly preserved with unambiguous *Pending Business Confirmation* states.
+6. **Local/Non-Persistent Demo Contact Form:** To maintain a strict static presentation boundary without backend data storage, the contact page functions as a client-side mock submission only, clearly informing the user that no data is transmitted or stored.
 
 ---
 
@@ -81,11 +82,11 @@ src/
 - [x] High-contrast statutory banner with mandatory FDA wording
 - [x] Homepage with editorial hero, credentials, and educational pillars
 - [x] About HCI CMD page detailing Great Salt Lake origin and Health Code International Corp.
-- [x] Mineral Science & Dilution Guide with water remineralization and strict eye drop prohibition
+- [x] Mineral Science & Dilution Guide with water dilution and strict eye drop prohibition
 - [x] Product Catalog Architecture with explicit *FDA PRESENTATION EVIDENCE PENDING BUSINESS VERIFICATION*
 - [x] Six-Branch Directory (Daet Central Hub, Labo, Paracale, Jose Panganiban, Capalonga, Sta. Elena) with strict *Pending Business Confirmation* markers for exact addresses and phones
 - [x] Interactive FAQ with search, category filtering, and regulatory citations
-- [x] Regional Contact surface with client-side validated inquiry form
+- [x] Contact surface with local non-persistent demo form
 - [x] Comprehensive Regulatory & Transparency Center
 - [x] Legally sound Terms of Service, Privacy Policy (RA 10173), and Return/Refund Policy (RA 7394)
 - [x] Complete absence of Phase 2 features (no checkout, cart transactions, auth, DB, or CRM)

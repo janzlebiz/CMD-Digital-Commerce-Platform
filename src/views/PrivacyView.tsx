@@ -53,22 +53,18 @@ export const PrivacyView: React.FC<PrivacyViewProps> = ({ onNavigate }) => {
 
         <section className="space-y-3">
           <h2 className="text-lg font-serif font-bold text-white">
-            2. Personal Information Collected & Lawful Processing Bases
+            2. Personal Information Collection Status
           </h2>
           <p>
-            In Phase 1, the Platform collects only information that visitors voluntarily submit through our Contact and Inquiry surfaces:
+            During the Phase 1 public information stage, the Platform does not transmit, store, or process any personal data. The inquiry form on the Contact page is a local demonstration interface only, and any details entered are processed strictly on the client side without server-side persistence. (Provenance: VERIFIED REGULATORY FACT).
           </p>
-          <ul className="space-y-1.5 list-disc list-inside">
-            <li><strong>Inquiry Details:</strong> Name, email address, mobile number, branch preference, and message content.</li>
-            <li><strong>Lawful Basis:</strong> Consent under Section 12(a) of RA 10173, provided freely when submitting inquiry requests.</li>
-          </ul>
 
           <div className="p-4 bg-slate-900 border border-slate-800 rounded space-y-2 mt-3">
             <span className="text-amber-300 font-semibold uppercase tracking-wider text-xs block">
-              Consultation & Health Information Legal Basis Baseline:
+              Proposed Future Consultation Baseline:
             </span>
             <p className="text-xs text-slate-300 leading-relaxed">
-              Based on the currently documented proposed wellness-consultation model, processing is designed to rely on Section 13(a) explicit consent. Reassess Section 13(e) if the service later involves medical treatment, a medical practitioner, or a medical treatment institution.
+              In later authorized phases where data persistence is implemented, any processing of health or wellness consultation information is designed to rely on Section 13(a) explicit consent.
             </p>
           </div>
         </section>

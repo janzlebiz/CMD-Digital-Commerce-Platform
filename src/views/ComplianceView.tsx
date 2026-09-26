@@ -27,7 +27,7 @@ export const ComplianceView: React.FC<ComplianceViewProps> = ({ onNavigate }) =>
           Compliance, Disclaimers & Governance
         </h1>
         <p className="text-base sm:text-lg text-slate-300 max-w-3xl leading-relaxed">
-          Official statutory disclosures, primary regulatory registrations, five-tier product claims demarcation, and Philippine e-commerce legal baselines.
+          Statutory disclosures, primary regulatory registrations, five-tier product claims demarcation, and Philippine e-commerce legal baselines.
         </p>
       </div>
 

@@ -117,10 +117,10 @@ export const FIVE_TIER_CLAIMS: ComplianceArticle[] = [
     tierName: 'Tier 2 — Manufacturer Technical Claims',
     ruleSummary: 'Origin and technical process details originating from mineral extraction sources.',
     permitted: [
-      'Harvested from mineral-rich waters of the Great Salt Lake, Utah, USA.',
-      'Natural solar evaporation concentration process.',
-      'Low sodium profile (~99.5% sodium removed during concentration).',
-      'Presence of natural ionic magnesium and trace minerals.',
+      'Harvested from waters of the Great Salt Lake, Utah, USA. (Provenance: MANUFACTURER-PROVIDED)',
+      'Natural solar concentration process. (Provenance: MANUFACTURER-PROVIDED)',
+      'Reduced sodium profile. (Provenance: MANUFACTURER-PROVIDED)',
+      'Presence of trace minerals. (Provenance: GENERAL EDUCATIONAL INFORMATION)',
     ],
     prohibited: [
       'Framing nutritional mineral presence as clinical disease cures.',
@@ -132,8 +132,8 @@ export const FIVE_TIER_CLAIMS: ComplianceArticle[] = [
     tierName: 'Tier 3 — Distributor Commercial Claims',
     ruleSummary: 'Packaging presentations and suggested dilutive servings across distribution channels.',
     permitted: [
-      'Suggested serving: 5 to 10 drops in water or juice, 2 to 3 times daily.',
-      'Beverage remineralization: 20 to 30 drops per gallon of purified water.',
+      'Manufacturer/Distributor Usage Guidance — not an FDA-approved dosage recommendation: suggested dilution in drinking water. (Provenance: DISTRIBUTOR-PROVIDED)',
+      'Suggested remineralization dilution for water supply. (Provenance: DISTRIBUTOR-PROVIDED)',
       'Commercial packaging sizes (subject to packaging evidence verification).',
     ],
     prohibited: [
@@ -146,9 +146,9 @@ export const FIVE_TIER_CLAIMS: ComplianceArticle[] = [
     tierName: 'Tier 4 — General Educational Statements',
     ruleSummary: 'General nutritional and physiological science grounded in dietary guidelines (FNRI & Codex Alimentarius).',
     permitted: [
-      'Magnesium contributes to normal electrolyte balance and muscle function.',
-      'Essential trace minerals support daily cellular hydration and enzyme activity.',
-      'Restoration of minerals to reverse-osmosis or distilled drinking water.',
+      'Magnesium contributes to normal electrolyte balance and muscle function. (Provenance: GENERAL EDUCATIONAL INFORMATION)',
+      'Essential trace minerals support daily cellular hydration. (Provenance: GENERAL EDUCATIONAL INFORMATION)',
+      'Restoration of minerals to purified drinking water. (Provenance: GENERAL EDUCATIONAL INFORMATION)',
     ],
     prohibited: [
       'Stating or implying that mineral replenishment will treat, reverse, or eradicate disease.',

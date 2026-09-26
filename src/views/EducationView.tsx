@@ -101,54 +101,57 @@ export const EducationView: React.FC<EducationViewProps> = ({ onNavigate }) => {
 
           <div className="bg-slate-900 border border-slate-800 rounded-lg p-5 space-y-2">
             <h3 className="font-serif font-bold text-white text-base flex items-center justify-between">
-              <span>Low-Sodium Balance</span>
-              <span className="text-xs font-mono text-amber-400">~99.5% Precipitated</span>
+              <span>Low-Sodium Profile</span>
+              <span className="text-xs font-mono text-amber-400">Reduced Sodium</span>
             </h3>
             <p className="text-xs text-slate-300 leading-relaxed">
-              Unlike ordinary table salt or unrefined sea water, the solar evaporation process precipitates out sodium, making HCI CMD an ideal mineral supplement for individuals seeking trace elements without excessive sodium loading.
+              Unlike ordinary table salt or unrefined sea water, excess sodium precipitates out during concentration, making this trace mineral supplement suitable for low-sodium lifestyles. (Provenance: MANUFACTURER-PROVIDED).
             </p>
           </div>
         </div>
       </section>
 
-      {/* Section 2: Water Remineralization Protocol */}
+      {/* Section 2: Water Dilution Protocol */}
       <section className="bg-slate-900/60 border border-slate-800 rounded-xl p-6 sm:p-8 space-y-6">
         <div>
           <span className="text-xs font-mono text-amber-400 uppercase tracking-wider">
-            02. Beverage Enhancement
+            02. Beverage Enrichment
           </span>
           <h2 className="text-2xl font-serif font-bold text-white mt-1">
-            Water Remineralization: Bringing Purified Water to Life
+            Water Dilution: Supplementing Purified Water
           </h2>
           <p className="text-xs sm:text-sm text-slate-300 mt-2 leading-relaxed">
-            Modern commercial water treatment processes (Reverse Osmosis, Deionization, and Distillation) strip away virtually all minerals to ensure purity. While clean, this demineralized water can taste flat and lacks natural electrolyte content.
+            Modern commercial water treatment processes (Reverse Osmosis, Deionization, and Distillation) strip away co-occurring minerals to ensure purity. Adding mineral drops is suggested for replenishing trace elements in purified drinking water. (Provenance: DISTRIBUTOR-PROVIDED).
           </p>
         </div>
 
         <div className="bg-slate-950 border border-slate-800 rounded-lg p-5 space-y-4">
-          <h3 className="font-serif font-bold text-amber-300 text-sm">
-            Household Remineralization Protocol
+          <div className="text-xs text-amber-300 font-bold uppercase tracking-wider">
+            Manufacturer/Distributor Usage Guidance — not an FDA-approved dosage recommendation.
+          </div>
+          <h3 className="font-serif font-bold text-white text-sm">
+            Suggested Dilution Ratios (Provenance: DISTRIBUTOR-PROVIDED)
           </h3>
           <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 text-xs text-slate-300">
             <div className="p-3 bg-slate-900/80 rounded border border-slate-800 space-y-1">
               <span className="font-bold text-white block">Per Glass (250 mL)</span>
-              <p className="text-amber-400 font-mono text-sm">5 to 10 Drops</p>
+              <p className="text-amber-400 font-mono text-sm">Suggested Dilution</p>
               <p className="text-slate-400 text-[11px]">
-                Stir into a single glass of water, coconut water, or fruit juice, 2 to 3 times daily.
+                Stir drops into a glass of water or beverage. (Provenance: DISTRIBUTOR-PROVIDED).
               </p>
             </div>
             <div className="p-3 bg-slate-900/80 rounded border border-slate-800 space-y-1">
               <span className="font-bold text-white block">Per Pitcher (1 Liter)</span>
-              <p className="text-amber-400 font-mono text-sm">8 to 12 Drops</p>
+              <p className="text-amber-400 font-mono text-sm">Diluted for Day</p>
               <p className="text-slate-400 text-[11px]">
-                Maintains a subtle, smooth mineral profile for daytime hydration.
+                Maintains a subtle mineral profile for daytime drinking. (Provenance: DISTRIBUTOR-PROVIDED).
               </p>
             </div>
             <div className="p-3 bg-slate-900/80 rounded border border-slate-800 space-y-1">
               <span className="font-bold text-white block">Per Gallon (3.8 Liters)</span>
-              <p className="text-amber-400 font-mono text-sm">20 to 30 Drops</p>
+              <p className="text-amber-400 font-mono text-sm">Gallon Dilution</p>
               <p className="text-slate-400 text-[11px]">
-                Restores complete electrolyte balance for whole-family daily drinking containers.
+                Restores trace elements in larger household water containers. (Provenance: DISTRIBUTOR-PROVIDED).
               </p>
             </div>
           </div>
@@ -165,11 +168,11 @@ export const EducationView: React.FC<EducationViewProps> = ({ onNavigate }) => {
         </h2>
         <div className="text-slate-300 text-sm leading-relaxed space-y-3">
           <p>
-            Because of the high concentration of natural ionic magnesium, consuming HCI CMD undiluted will result in an intense, bitter saline taste. <strong>Always dilute the drops in liquid.</strong>
+            Because of the high concentration of natural mineral salts, consuming HCI CMD undiluted will result in an intense saline taste. <strong>Always dilute the drops in liquid.</strong>
           </p>
           <ul className="space-y-2 list-disc list-inside text-xs sm:text-sm">
             <li>
-              <strong>Acclimation Phase:</strong> For first-time users, start with 3 to 5 drops per glass for the first week to allow your digestive tract to adjust to ionic magnesium.
+              <strong>Acclimation Phase:</strong> For first-time users, start with a few drops per glass to allow your digestive tract to adjust. (Provenance: DISTRIBUTOR-PROVIDED).
             </li>
             <li>
               <strong>Beverage Pairings:</strong> Pure calamansi juice, fresh lemon water, herbal teas, or fresh fruit smoothies naturally complement the mild mineral flavor.
@@ -191,7 +194,7 @@ export const EducationView: React.FC<EducationViewProps> = ({ onNavigate }) => {
         </h2>
         <div className="text-slate-300 text-xs sm:text-sm leading-relaxed space-y-3">
           <p>
-            HCI CMD is a naturally concentrated mineral solution that remains chemically stable over extended periods without synthetic preservatives.
+            HCI CMD is a naturally concentrated mineral solution that remains chemically stable over extended periods without added preservatives. (Provenance: MANUFACTURER-PROVIDED).
           </p>
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4 pt-1">
             <div className="p-4 bg-slate-950/70 border border-slate-800 rounded space-y-1">

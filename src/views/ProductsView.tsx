@@ -154,7 +154,7 @@ export const ProductsView: React.FC<ProductsViewProps> = ({ onNavigate }) => {
           Mineral Profile & Dietary Nature
         </h2>
         <p className="text-xs sm:text-sm text-slate-300 leading-relaxed">
-          HCI CMD is an unadulterated ionic liquid mineral concentrate harvested via natural solar evaporation. The following overview details the nutritional nature of its primary constituent ions:
+          HCI CMD is a trace mineral drops supplement. The following overview details the nutritional nature of primary constituent ions: (Provenance: GENERAL EDUCATIONAL INFORMATION)
         </p>
 
         <div className="overflow-x-auto pt-2">
@@ -189,8 +189,8 @@ export const ProductsView: React.FC<ProductsViewProps> = ({ onNavigate }) => {
               </tr>
               <tr>
                 <td className="py-3 px-4 font-semibold text-white">Sodium (Low)</td>
-                <td className="py-3 px-4 text-emerald-400 font-mono">Precipitated Out (~99.5%)</td>
-                <td className="py-3 px-4">Reduced sodium profile ensures mineral intake without unwanted sodium loading.</td>
+                <td className="py-3 px-4 text-emerald-400 font-mono">Precipitated Out</td>
+                <td className="py-3 px-4">Reduced sodium profile ensures mineral intake without excessive sodium loading. (Provenance: MANUFACTURER-PROVIDED).</td>
               </tr>
               <tr>
                 <td className="py-3 px-4 font-semibold text-white">Trace Elements</td>

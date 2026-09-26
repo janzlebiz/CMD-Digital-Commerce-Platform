@@ -34,7 +34,7 @@ export const HomeView: React.FC<HomeViewProps> = ({ onNavigate }) => {
             </div>
 
             <p className="text-base sm:text-lg text-slate-300 leading-relaxed max-w-2xl">
-              HCI Cell Mineral Drops (CMD) is a concentrated dietary food supplement harvested from Utah's Great Salt Lake. Naturally rich in bioavailable ionic magnesium, chloride, and essential electrolytes to support daily hydration and remineralize drinking water.
+              HCI Cell Mineral Drops (CMD) is a concentrated dietary food supplement harvested from Utah's Great Salt Lake. Naturally rich in dissolved magnesium, chloride, and trace elements to support daily trace mineral dietary intake. (Provenance: GENERAL EDUCATIONAL INFORMATION).
             </p>
 
             {/* Mandatory Regulatory Affirmation */}
@@ -73,9 +73,9 @@ export const HomeView: React.FC<HomeViewProps> = ({ onNavigate }) => {
             <div className="flex items-center gap-3 text-xs text-slate-400 pt-2 border-t border-slate-800/80">
               <span>Food Supplement</span>
               <span aria-hidden="true">·</span>
-              <span>Low Sodium (~99.5% removed)</span>
+              <span>Low Sodium Profile</span>
               <span aria-hidden="true">·</span>
-              <span>Bioavailable Ionic Liquid</span>
+              <span>Dissolved Trace Minerals</span>
               <span aria-hidden="true">·</span>
               <span>Non-Medicinal</span>
             </div>
@@ -157,7 +157,7 @@ export const HomeView: React.FC<HomeViewProps> = ({ onNavigate }) => {
               Why Ionic Minerals Matter to Daily Wellness
             </h2>
             <p className="text-sm sm:text-base text-slate-300 leading-relaxed">
-              Trace minerals act as catalysts for thousands of metabolic and enzymatic processes. Our bodies require minerals in bioavailable, water-soluble forms.
+              Trace minerals act as catalysts for metabolic and enzymatic processes. Our bodies require minerals in dissolved, water-soluble forms. (Provenance: GENERAL EDUCATIONAL INFORMATION).
             </p>
           </div>
 
@@ -170,40 +170,40 @@ export const HomeView: React.FC<HomeViewProps> = ({ onNavigate }) => {
                 Evaporated by Sun and Wind
               </h3>
               <p className="text-xs text-slate-300 leading-relaxed">
-                Concentrated over an extensive multi-month solar evaporation cycle in Utah's pristine northern arm of the Great Salt Lake, precipitating excess sodium and yielding dense, bio-accessible ionic mineral brine.
+                Concentrated over a solar evaporation cycle in Utah's Great Salt Lake, precipitating excess sodium and yielding a dense trace mineral solution. (Provenance: MANUFACTURER-PROVIDED).
               </p>
               <div className="text-[11px] text-slate-400 pt-2 border-t border-slate-800">
-                Natural mineral brine naturally self-preserves without chemical stabilizers.
+                Natural mineral brine is formulated without added chemical preservatives or coloring. (Provenance: MANUFACTURER-PROVIDED).
               </div>
             </div>
 
             <div className="bg-slate-900/90 border border-slate-800 rounded-lg p-6 space-y-4">
               <span className="text-xs font-mono text-amber-400 uppercase tracking-wider">
-                02. Bioavailable Ionic Form
+                02. Dissolved Mineral Ions
               </span>
               <h3 className="text-lg font-serif font-bold text-white">
                 Liquid Dissolved Ions
               </h3>
               <p className="text-xs text-slate-300 leading-relaxed">
-                Unlike synthetic mineral salts or compressed tablets that require aggressive stomach breakdown, ionic minerals are already dissolved in their electric charge states, ready for cellular osmosis and cellular transport.
+                Unlike compressed solid tablets, these minerals are already dissolved in aqueous liquid form, ready for normal cellular transport. (Provenance: GENERAL EDUCATIONAL INFORMATION).
               </p>
               <div className="text-[11px] text-slate-400 pt-2 border-t border-slate-800">
-                Formulated as drops for custom dilution in water or pure fruit juice.
+                Formulated as drops for custom dilution in beverages. (Provenance: DISTRIBUTOR-PROVIDED).
               </div>
             </div>
 
             <div className="bg-slate-900/90 border border-slate-800 rounded-lg p-6 space-y-4">
               <span className="text-xs font-mono text-amber-400 uppercase tracking-wider">
-                03. Water Remineralization
+                03. Trace Mineral Supplementation
               </span>
               <h3 className="text-lg font-serif font-bold text-white">
-                Restoring "Dead" Water
+                Replenishing Purified Water
               </h3>
               <p className="text-xs text-slate-300 leading-relaxed">
-                Reverse-osmosis and distilled drinking water are stripped of beneficial electrolytes. Adding 20–30 drops of HCI CMD per gallon restores wholesome ionic equilibrium, improving hydration efficiency and taste.
+                Purification systems strip away dissolved minerals along with contaminants. Adding drops of HCI CMD per gallon is suggested for replenishing trace elements in purified drinking water. (Provenance: DISTRIBUTOR-PROVIDED).
               </p>
               <div className="text-[11px] text-slate-400 pt-2 border-t border-slate-800">
-                Groundwater and municipal drinking water enhancement.
+                Enhances trace mineral profile of distilled or reverse-osmosis drinking water. (Provenance: GENERAL EDUCATIONAL INFORMATION).
               </div>
             </div>
           </div>

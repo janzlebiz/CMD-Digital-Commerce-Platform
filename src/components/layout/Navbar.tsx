@@ -49,7 +49,7 @@ export const Navbar: React.FC<NavbarProps> = ({ currentView, onNavigate }) => {
               </span>
             </div>
             <span className="text-[11px] text-slate-400 font-sans tracking-wide">
-              Cell Mineral Drops · Official Regional Information & Distribution
+              Cell Mineral Drops · Regional Information & Education Platform
             </span>
           </button>
 

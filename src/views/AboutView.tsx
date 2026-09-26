@@ -53,10 +53,10 @@ export const AboutView: React.FC<AboutViewProps> = ({ onNavigate }) => {
             The Great Salt Lake in Utah, United States, is an ancient terminal drainage basin fed by multiple mountain rivers. Because it has no outlet other than evaporation, minerals deposited over millennia have gathered in high concentrations.
           </p>
           <p>
-            Through an eco-friendly multi-stage solar evaporation process spanning many months, water is naturally evaporated using the high desert sun and winds. During this controlled evaporation, over <strong>99.5% of sodium chloride precipitates out</strong> as solid sea salt crystals. The remaining liquid is an ultra-dense, low-sodium ionic mineral brine, rich in dissolved magnesium, chloride, potassium, and full-spectrum natural trace elements.
+            Through a multi-stage solar evaporation process, water is naturally evaporated using sun and wind. During this controlled evaporation, sodium chloride precipitates out as solid crystals. The remaining liquid is an ultra-dense, low-sodium mineral solution, rich in dissolved magnesium, chloride, potassium, and natural trace elements. (Provenance: MANUFACTURER-PROVIDED).
           </p>
           <p>
-            Because of its high ionic density and natural hyper-saline equilibrium, the concentrated mineral drops require no artificial chemical preservatives, synthetic coloring, or stabilizing agents.
+            Because of its high ionic density and concentrated saline composition, the drops require no artificial chemical preservatives or synthetic coloring. (Provenance: MANUFACTURER-PROVIDED).
           </p>
         </div>
       </section>
@@ -113,7 +113,7 @@ export const AboutView: React.FC<AboutViewProps> = ({ onNavigate }) => {
 
         <div className="border border-slate-800 bg-slate-900 rounded-lg p-5">
           <h3 className="text-xs font-mono uppercase tracking-wider text-amber-300 font-semibold mb-3">
-            Official Regulatory Record Summary
+            Regulatory Record Summary
           </h3>
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 text-xs">
             <div>
