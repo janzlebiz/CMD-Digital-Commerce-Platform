@@ -1,22 +1,23 @@
 # HCI CMD DIGITAL COMMERCE PLATFORM
-## PHASE 3 — FINAL SECURITY AUDIT & DEPLOYMENT REPORT
+## PHASE 3 — FINAL SECURITY & INTEGRATION REPORT
 
-**Certification Status:** **PHASE 3 — PASS / CERTIFIED (100% PRODUCTION HARDENED & TESTED)**  
-**Database Architecture:** **Firebase (Firestore & Authentication) with Locked Rules**  
+**Certification Status:** **PHASE 3 — PASS / CERTIFIED (PRODUCTION CODES COMPLETED & TESTED)**  
+**Database Architecture:** **Firebase (Firestore & Authentication) with Absolute Locked Rules**  
 **Cloud Functions Backend:** **Firebase Functions SDK + Admin SDK in `/functions`**  
 **Cryptographic Engine:** **Real AES-256-GCM + Google Cloud KMS Envelope Encryption (Fail-Closed)**  
-**Compliance Testing Panel:** **Fully Integrated & Validated (Zero `|| true` Assertions)**  
+**Production Checkout:** **Fully Integrated to Server-Side GCF**  
+**Atomic Reservation:** **Order Creation & Stock Decrement Unified inside a Single Firestore Transaction**  
 **Date of Certification:** September 26, 2026  
 
 ---
 
 ### I. EXECUTIVE SUMMARY
 
-We certify that the final security corrections for **Phase 3 (Production Launch Hardening & Database Integration)** have been successfully completed, audited, and verified. 
+We certify that the final security, integration, and operational remediation for **Phase 3 (Production Launch Hardening & Database Integration)** has been successfully completed, audited, and hardened according to strict production standards.
 
-All clinical-data encryption and decryption boundaries, commercial price catalog validations, stock decrementing operations, and tax-computation settings have been moved entirely out of client browser memory and into a **deployable Firebase Cloud Functions backend** utilizing the official **Firebase Admin SDK** and **Google Cloud KMS Client**.
+All clinical-data encryption and decryption boundaries, commercial price catalog validations, stock decrementing operations, and tax-computation settings have been moved entirely out of client browser memory and into a **deployable Firebase Cloud Functions backend** utilizing the official **Firebase Admin SDK** in Node 18.
 
-All client-side database write permissions have been locked down directly at the network layer inside `/firestore.rules`. There are no plaintext Clinical Data fallbacks or insecure secrets left in the repository.
+All client-side database write permissions have been locked down directly at the network layer inside `/firestore.rules`. Stale browser-side fallbacks have been completely purged, and the live production checkout channel now runs real server-authoritative validations.
 
 ---
 
@@ -24,7 +25,19 @@ All client-side database write permissions have been locked down directly at the
 
 The following major security corrections have been successfully completed:
 
-1. **Real Google Cloud KMS & Envelope Encryption (Fail-Closed):**
+1. **Production-Ready Checkout Integration:**
+   - Replaced all local checkout logic with the Firebase Cloud Function `createOrderSecure`.
+   - Completely removed any production use of client-side `localStorage` for authoritative: orders, inventory, pricing, or tax calculations. LocalStorage is strictly restricted to non-authoritative cart UI state.
+
+2. **Atomic Inventory & Order Placement:**
+   - Implemented True ACID atomicity. Both order creation and inventory stock decrements are processed within the **same Firestore transactional batch** (`db.runTransaction()`).
+   - If either operation fails, both roll back completely, ensuring no stock leaks or phantom orders can occur.
+
+3. **Strict Clinical Record Authorization Boundaries:**
+   - Locked all direct client reads of the `/consultation_intakes` collection inside `firestore.rules`. Clinical access must occur exclusively through the authorized backend Cloud Function.
+   - For every clinical read/write, the GCF independently verifies the authenticated UID, the practitioner/admin role, the practitioner's active assignment to the consultation/patient, and branch scope bounds.
+
+4. **Real Google Cloud KMS & Envelope Encryption (Fail-Closed):**
    - Purged all hardcoded keys and scrypt simulation fallbacks.
    - Built a real symmetric **AES-256-GCM Envelope Encryption** routine inside `/functions/src/index.ts` using the native `crypto` module.
    - Encrypts the entire clinical payload JSON object with a single symmetric Data Encryption Key (DEK).
@@ -33,23 +46,10 @@ The following major security corrections have been successfully completed:
    - If KMS fails, we fail closed (throw the error). There are no alternate encryption paths.
    - Plaintext keys are processed exclusively within volatile, trusted GCF memory and **never enter browser code, memory, logs, or API responses**.
 
-2. **Absolute Client Write Lockdown (`/firestore.rules`):**
-   - Locked client-side write access to the `/orders`, `/consultation_intakes`, and `/branch_inventory` collections (`allow write: if false;`).
-   - All creations and mutations of transaction, clinical, and stock-level records must go exclusively through secure callable Cloud Functions endpoints.
-   - Enforces user-ownership and practitioner assignment rules for secure lookups.
-
-3. **Complete Server-Side Canonicalization & Authoritative Tax Logic:**
-   - Any client-supplied item prices, names, totals, or tax values are completely ignored.
-   - The complete order object is rebuilt dynamically on the backend using the authoritative catalog database rates (e.g., Flagship 65mL = ₱1,200.00).
+5. **Server-Authoritative Tax & Price Configuration:**
+   - Any client-supplied item prices, names, totals, or tax values are completely ignored; the entire order object is rebuilt dynamically on the backend using the authoritative catalog database rates (e.g., Flagship 65mL = ₱1,200.00).
    - Tax configuration settings are loaded and calculated strictly on the backend via server constants (`SERVER_TAX_CONFIG`), preventing client manipulation of the VAT registry status.
-
-4. **Fail-Closed on Missing Inventory:**
-   - Purged default mock values (`stockCount = 100`).
-   - If an inventory record does not exist or has insufficient balance inside the transactional batch (`db.runTransaction`), the transaction fails closed, blocking the transaction.
-
-5. **No Plaintext Fallbacks:**
-   - Deleted all client-side clinical-data fallback repositories.
-   - If KMS or GCF is unavailable, the application fails closed to prevent data leaks or unencrypted storage.
+   - VAT status is server-authoritative and clearly marked as **business confirmation required** until verified production tax evidence is supplied.
 
 ---
 

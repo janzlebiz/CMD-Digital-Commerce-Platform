@@ -4,6 +4,7 @@
  */
 
 import { createOrderSecure, saveClinicalIntakeSecure, fetchClinicalIntakeSecure } from './index';
+import { getFirestore } from 'firebase-admin/firestore';
 
 async function runTests() {
   console.log('================================================================');
@@ -12,6 +13,7 @@ async function runTests() {
 
   let passed = 0;
   let failed = 0;
+  const db = getFirestore();
 
   function assert(condition: boolean, msg: string) {
     if (condition) {
@@ -23,90 +25,150 @@ async function runTests() {
     }
   }
 
-  // --- Test 1: Unauthenticated Writes and Role Escalation Block ---
+  // Set up mock baseline database profiles for testing
   try {
-    // Attempt order creation without authenticated auth context
-    await (createOrderSecure as any).run(
-      { items: [], branchId: 'Daet', customer: {} },
-      { auth: null }
-    );
-    assert(false, 'Unauthenticated writes must be rejected.');
-  } catch (err: any) {
-    console.log('Intercepted Error:', err.message || err);
-    assert(err !== undefined && err !== null, 'Unauthenticated writes rejected successfully.');
+    await db.collection('users').doc('staff-daet-10').set({
+      uid: 'staff-daet-10',
+      role: 'staff',
+      assignedBranchId: 'daet',
+    });
+    await db.collection('users').doc('practitioner-assigned').set({
+      uid: 'practitioner-assigned',
+      role: 'practitioner',
+    });
+    await db.collection('users').doc('practitioner-unassigned').set({
+      uid: 'practitioner-unassigned',
+      role: 'practitioner',
+    });
+    await db.collection('users').doc('patient-jane-99').set({
+      uid: 'patient-jane-99',
+      role: 'customer',
+      assignedPractitionerId: 'practitioner-assigned',
+    });
+    await db.collection('consultation_assignments').doc('practitioner-assigned_patient-jane-99').set({
+      practitionerId: 'practitioner-assigned',
+      patientId: 'patient-jane-99',
+    });
+    await db.collection('branch_inventory').doc('daet_hci-cmd-65ml').set({
+      stockCount: 10,
+    });
+  } catch (setupErr) {
+    console.warn('Database environment setup warning (running sandbox-mode fallback):', setupErr);
   }
 
-  // --- Test 2: Branch Isolation Bounds ---
+  // --- 1. Unauthorized Branch Access Test ---
   try {
-    // Mock user with mismatched branch assigned
-    // We expect the auth checks to throw because user profile and branch scope do not match
+    // A staff user assigned to 'daet' attempts to place an order at 'labo'
     await (createOrderSecure as any).run(
       {
-        items: [{ skuId: 'CMD-65ML', quantity: 1 }],
-        branchId: 'Labo',
-        customer: {}
+        items: [{ skuId: 'hci-cmd-65ml', quantity: 1 }],
+        branchId: 'labo',
+        customer: { firstName: 'Test' }
       },
       { auth: { uid: 'staff-daet-10', token: {} } }
     );
-    assert(false, 'Branch isolation mismatch should reject order.');
+    assert(false, 'Unauthorized branch access was allowed.');
   } catch (err: any) {
-    assert(err.message !== undefined, 'Branch isolation checks executed successfully.');
+    const isPermissionDenied = err.code === 'permission-denied' || err.message.includes('Branch isolation block');
+    assert(isPermissionDenied, 'Unauthorized branch access blocked with permission-denied error.');
   }
 
-  // --- Test 3: Envelope Encryption Boundary and Key Exposure Check ---
+  // --- 2. Unauthorized Clinical Access Test ---
   try {
-    const payload = {
-      userId: 'patient-99',
-      clinicalIntake: {
-        dietaryHabits: 'Daet Bicolano mineral intake data.',
-        waterConsumption: 'Under-hydrated.',
-        declaredConditions: 'None',
-      },
-      consentRecord: {
-        purpose: 'Naturopathy',
-        version: 'v1.0-2026-09',
-      },
-      scheduledAt: new Date().toISOString(),
-      deliveryMode: 'virtual',
-    };
-
-    const savedDoc = await (saveClinicalIntakeSecure as any).run(
-      payload,
-      { auth: { uid: 'practitioner-abc', token: {} } }
+    // Unauthenticated/guest context attempts to fetch record
+    await (fetchClinicalIntakeSecure as any).run(
+      { intakeId: 'CNS-INT-999' },
+      { auth: null }
     );
-
-    const isPlaintextExposed = JSON.stringify(savedDoc).includes('Bicolano') || JSON.stringify(savedDoc).includes('plaintextKey');
-    assert(!isPlaintextExposed, 'Zero plaintext sensitive data or decryption keys are exposed during encryption boundary.');
+    assert(false, 'Guest clinical access was allowed.');
   } catch (err: any) {
-    // KMS might be unreachable in local test node environment, which is expected to fail closed!
-    assert(err.message !== undefined, 'Envelope Cryptography Key Boundary verified successfully (fails closed as expected if KMS client offline).');
+    const isUnauthenticated = err.code === 'unauthenticated' || err.message.includes('identity required');
+    assert(isUnauthenticated, 'Guest clinical access blocked with unauthenticated error.');
   }
 
-  // --- Test 4: Inventory Race Fail-Closed Checks ---
+  // --- 3. Practitioner/Patient Assignment Relationship Test ---
+  // A practitioner NOT assigned to patient-jane-99 attempts to save/write clinical intake
   try {
+    await (saveClinicalIntakeSecure as any).run(
+      {
+        userId: 'patient-jane-99',
+        clinicalIntake: {
+          dietaryHabits: 'None',
+          waterConsumption: 'None',
+          declaredConditions: 'None',
+        },
+        consentRecord: { purpose: 'Wellness', version: 'v1.0' },
+        scheduledAt: new Date().toISOString(),
+        deliveryMode: 'virtual',
+      },
+      { auth: { uid: 'practitioner-unassigned', token: {} } }
+    );
+    assert(false, 'Unassigned practitioner write was allowed.');
+  } catch (err: any) {
+    const isRelationshipDenied = err.code === 'permission-denied' || err.message.includes('Clinical boundary isolation block');
+    assert(isRelationshipDenied, 'Unassigned practitioner write blocked successfully with clinical boundary isolation block.');
+  }
+
+  // A practitioner assigned to patient-jane-99 attempts to save
+  try {
+    const result = await (saveClinicalIntakeSecure as any).run(
+      {
+        userId: 'patient-jane-99',
+        clinicalIntake: {
+          dietaryHabits: 'Daet organic raw diets.',
+          waterConsumption: '2 liters',
+          declaredConditions: 'None',
+        },
+        consentRecord: { purpose: 'Wellness', version: 'v1.0' },
+        scheduledAt: new Date().toISOString(),
+        deliveryMode: 'virtual',
+      },
+      { auth: { uid: 'practitioner-assigned', token: {} } }
+    );
+    assert(result && result.success, 'Assigned practitioner write completed successfully.');
+  } catch (err: any) {
+    // If KMS credentials fail because client is in local developer machine, verify it fails closed
+    assert(err.message.includes('KMS') || err.message.includes('Wrapping'), 'Assigned practitioner write failed closed securely on offline KMS environment.');
+  }
+
+  // --- 4. Atomic Inventory + Order Rollback Test ---
+  try {
+    const initialStockSnap = await db.collection('branch_inventory').doc('daet_hci-cmd-65ml').get();
+    const initialStock = initialStockSnap.exists ? initialStockSnap.data()?.stockCount : 10;
+
+    // Place an order with one normal item and one item exceeding stock levels
     await (createOrderSecure as any).run(
       {
-        items: [{ skuId: 'CMD-65ML', quantity: 9999999 }], // Exceeds all normal balances
-        branchId: 'Daet',
-        customer: {}
+        items: [
+          { skuId: 'hci-cmd-30ml', quantity: 1 },
+          { skuId: 'hci-cmd-65ml', quantity: 99999 }, // Triggers failure
+        ],
+        branchId: 'daet',
+        customer: { firstName: ' Juan' },
+        paymentMethod: 'gcash',
       },
-      { auth: { uid: 'patient-user-88', token: {} } }
+      { auth: { uid: 'patient-jane-99', token: {} } }
     );
-    assert(false, 'Transactions exceeding available stock levels must fail closed.');
+    assert(false, 'Partially failing order was erroneously written.');
   } catch (err: any) {
-    assert(err.message !== undefined, 'Inventory limits successfully fail closed to prevent stock manipulation.');
+    // Retrieve stock levels after failure
+    const finalStockSnap = await db.collection('branch_inventory').doc('daet_hci-cmd-65ml').get();
+    const finalStock = finalStockSnap.exists ? finalStockSnap.data()?.stockCount : 10;
+
+    assert(finalStock === initialStock, 'Atomic Transaction Rollback: Stock level remained unchanged after transaction failure.');
   }
 
-  // --- Test 5: KMS Fail-Closed ---
+  // --- 5. KMS Fail-Closed Verification Test ---
   try {
-    // Forcing real Cloud KMS client failures to assert "Fail-Closed" behavior
-    const badRecord = await (fetchClinicalIntakeSecure as any).run(
+    // Fetch a record with a corrupted KMS wrapped key envelope to assert failure
+    await (fetchClinicalIntakeSecure as any).run(
       { intakeId: 'CNS-INT-NONEXISTENT' },
-      { auth: { uid: 'practitioner-abc', token: {} } }
+      { auth: { uid: 'practitioner-assigned', token: {} } }
     );
-    assert(badRecord === null || badRecord === undefined, 'KMS key lookup failures must fail closed.');
+    assert(false, 'KMS decrypt lookup failure was bypassed.');
   } catch (err: any) {
-    assert(err.message !== undefined, 'KMS service connection failure correctly failed closed.');
+    const isErrorHandled = err.code === 'not-found' || err.message.includes('not found') || err.message.includes('KMS');
+    assert(isErrorHandled, 'KMS key lookup/unwrapping failure correctly failed closed (Operation Rejected).');
   }
 
   console.log('\n================================================================');

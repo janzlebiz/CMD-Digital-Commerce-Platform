@@ -23,7 +23,7 @@ interface CheckoutViewProps {
     fulfillmentMethod: FulfillmentMethod,
     paymentMethod: PaymentMethod,
     pickupBranchId?: string
-  ) => Order | null;
+  ) => Promise<any>;
 }
 
 const CAMARINES_NORTE_MUNICIPALITIES = [
@@ -59,6 +59,7 @@ export const CheckoutView: React.FC<CheckoutViewProps> = ({
   const [addressLine1, setAddressLine1] = useState('');
   const [barangay, setBarangay] = useState('');
   const [municipality, setMunicipality] = useState('Daet');
+  const [isPlacing, setIsPlacing] = useState(false);
   
   // Logistics states
   const [fulfillmentMethod, setFulfillmentMethod] = useState<FulfillmentMethod>('pickup');
@@ -97,7 +98,7 @@ export const CheckoutView: React.FC<CheckoutViewProps> = ({
     return item.quantity <= stock;
   });
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
 
     if (!firstName || !lastName || !email || !phone) {
@@ -126,10 +127,17 @@ export const CheckoutView: React.FC<CheckoutViewProps> = ({
       province: 'Camarines Norte',
     };
 
-    const newOrder = placeOrder(customer, fulfillmentMethod, paymentMethod, pickupBranchId);
-    if (newOrder) {
-      // Redirect to orders page with URL anchor to view the newly placed order!
-      onNavigate('orders');
+    setIsPlacing(true);
+    try {
+      const newOrder = await placeOrder(customer, fulfillmentMethod, paymentMethod, pickupBranchId);
+      if (newOrder) {
+        // Redirect to orders page with URL anchor to view the newly placed order!
+        onNavigate('orders');
+      }
+    } catch (err: any) {
+      alert(`Checkout failed: ${err.message || err}`);
+    } finally {
+      setIsPlacing(false);
     }
   };
 
@@ -615,12 +623,12 @@ export const CheckoutView: React.FC<CheckoutViewProps> = ({
             </div>
 
             <button
-              type="submit"
-              disabled={!inventoryCheckPassed}
-              className="w-full py-3 bg-amber-500 hover:bg-amber-400 disabled:bg-slate-800 disabled:text-slate-600 disabled:cursor-not-allowed text-slate-950 font-bold text-xs rounded transition flex items-center justify-center gap-2"
-            >
-              Confirm and Create Order <ArrowRight className="w-3.5 h-3.5" />
-            </button>
+               type="submit"
+               disabled={!inventoryCheckPassed || isPlacing}
+               className="w-full py-3 bg-amber-500 hover:bg-amber-400 disabled:bg-slate-800 disabled:text-slate-600 disabled:cursor-not-allowed text-slate-950 font-bold text-xs rounded transition flex items-center justify-center gap-2"
+             >
+               {isPlacing ? 'Processing Order...' : 'Confirm and Create Order'} <ArrowRight className="w-3.5 h-3.5" />
+             </button>
           </div>
         </div>
       </form>
