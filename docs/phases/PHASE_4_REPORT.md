@@ -1,36 +1,80 @@
 # HCI CMD DIGITAL COMMERCE PLATFORM
-## PHASE 4 — FULL-STACK SERVER INTEGRATION & SECURITY REPORT
+## PHASE 4 — REMEDIATED FULL-STACK SERVER & SECURITY VERIFICATION REPORT
 
-**Document Version:** Phase 4 Full-Stack Server Integration & Smoke Test  
+**Document Version:** Phase 4 Remediated Full-Stack Server Integration  
 **Architecture Model:** Full-Stack Node/Express Applet Server (`server.ts`) + Live Firestore (`ai-studio-cmddigitalcommer-8d70f45b-1636-42ba-9e2d-f063a7b0e086`)  
 **GCP Project Number / ID:** `212282537635` / `gen-lang-client-0427039673`  
+**KMS Key Resource:** `projects/gen-lang-client-0427039673/locations/global/keyRings/hic-cmd-keyring/cryptoKeys/clinical-spi-key`  
 **Security Rules:** LIVE DEPLOYED & ACTIVE  
-**Audit Timestamp:** 2026-09-26T08:48:35-07:00  
-**Phase 4 Certification Status:** **PASS — FULL-STACK SERVER & LIVE SECURITY RULES ACTIVE**  
+**Audit Timestamp:** 2026-09-26T09:20:00-07:00  
+**Phase 4 Certification Status:** **PASS — STRICT REMEDIATED SERVER & PHASE 3 SECURITY MODEL ACTIVE**  
 
 ---
 
-### I. EXECUTIVE SUMMARY
+### I. REMEDIATION SUMMARY & ZERO-FALLBACK ENFORCEMENT
 
-To eliminate the $30 GCP Cloud Build prepayment requirement while preserving 100% server-side authority, clinical isolation, and cryptographic envelopes:
-1. The 4 secure backend operations were mounted into the application's dedicated full-stack Express server (`server.ts`).
-2. Live Firestore Security Rules remain actively enforced on database `ai-studio-cmddigitalcommer-8d70f45b-1636-42ba-9e2d-f063a7b0e086`.
-3. The frontend `TrustedServerController` seamlessly connects to the server API routes (`/api/calculate-order`, `/api/create-order`, `/api/clinical-intake/save`, `/api/clinical-intake/fetch`).
+The full-stack Express server (`server.ts`) has been completely remediated to enforce the Phase 3 Security Model without any compromise or fallback logic:
+
+1. **Zero KMS Fallbacks:**
+   - Removed all AES-CBC and derived local secret fallbacks.
+   - Any Google Cloud KMS encryption or decryption failure immediately halts execution and returns HTTP 500 (Fail-Closed).
+   - Unwrapped Data Encryption Keys (DEKs) are zeroed out in memory immediately after use.
+
+2. **Zero Memory / Persistence Fallbacks:**
+   - Removed `localRuntimeStore` and all in-memory map fallbacks for orders, inventory, or clinical records.
+   - Any database failure (e.g., Firestore network or write error) immediately returns HTTP 500 error. Operations never report false success.
+
+3. **Strict Inventory Enforcement:**
+   - Missing inventory tracking documents immediately abort order creation (HTTP 400).
+   - Insufficient branch inventory immediately aborts the transaction (HTTP 400).
+   - Orders are created only if all requested SKUs are valid and atomically reserved in Firestore.
+
+4. **Token-Only Authentication:**
+   - Accepts exclusively verified Firebase ID Tokens (`Bearer <token>`) via `auth.verifyIdToken()`.
+   - Header or body spoofing (`x-user-id` or `userId`) is rejected with HTTP 401.
+
+5. **Phase 3 Authorization Matrix Restored:**
+   - `create-order`: Verified Firebase UID + Branch Isolation (`user.assignedBranchId === branchId` or `super_admin`).
+   - `clinical-intake/save`: Practitioner/Admin role requirement + Practitioner-Patient Assignment verification.
+   - `clinical-intake/fetch`: Customer ownership (`userId === uid`), Practitioner assignment check, or Super Admin role.
 
 ---
 
-### II. SERVER API VERIFICATION MATRIX
+### II. REMEDIATED SERVER SECURITY TEST RESULTS
 
-| Endpoint | Method | Security Checks Enforced | Live Smoke Test Result |
-| :--- | :--- | :--- | :--- |
-| `/api/calculate-order` | `POST` | Positive integer validation, SKU catalog mapping, non-VAT calculation | **PASS (200 OK & 400 rejection on negative quantity)** |
-| `/api/create-order` | `POST` | Quantity checks, branch authorization, transactional inventory decrement | **PASS (Order ID generated, inventory updated)** |
-| `/api/clinical-intake/save` | `POST` | Practitioner/patient assignment verification, AES-256-GCM + KMS envelope encryption | **PASS (Encrypted intake ID saved)** |
-| `/api/clinical-intake/fetch` | `POST` | Role authorization, assignment verification, fail-closed DEK decryption | **PASS (Encrypted intake decrypted only on server)** |
+```bash
+================================================================
+    HCI CMD REMEDIATED SERVER.TS INTEGRATION & SECURITY SUITE   
+================================================================
+
+[PASS] Test 1.1: Missing Authorization header is rejected with HTTP 401
+[PASS] Test 1.2: Invalid Firebase ID token is rejected with HTTP 401
+[PASS] Test 1.3: Request with only x-user-id header is rejected with HTTP 401
+[PASS] Test 2: Unassigned practitioner clinical save is rejected with HTTP 403
+[PASS] Test 2.1: Error message explicitly enforces Clinical Boundary Block
+[PASS] Test 3: Missing inventory record causes order creation failure with HTTP 400
+[PASS] Test 3.1: Error message explicitly reports Missing Inventory Record
+[PASS] Test 4: Firestore database failure returns HTTP 500 error instead of false success
+[PASS] Test 5: Cloud KMS encryption failure fails closed with HTTP 500
+[PASS] Test 5.1: Error message explicitly reports Cloud KMS Encryption Failure
+[PASS] Test 6: Order placed successfully (HTTP 200)
+[PASS] Test 6.1: Valid canonical Order ID returned
+[PASS] Test 6.2: Order document was persisted in Firestore store
+[PASS] Test 7.1: Clinical intake saved with HTTP 200
+[PASS] Test 7.2: Clinical intake ID returned
+[PASS] Test 7.3: Intake document persisted in Firestore
+[PASS] Test 7.4: Intake is stored with full AES-256-GCM + KMS encrypted envelope (no plaintext clinical data)
+[PASS] Test 7.5: Clinical intake retrieved with HTTP 200
+[PASS] Test 7.6: Clinical intake successfully decrypted on server with 100% data integrity
+
+================================================================
+      TEST SUITE COMPLETE: 19 PASSED, 0 FAILED      
+================================================================
+```
 
 ---
 
-### III. AUTOMATED TEST SUITE AUDIT
+### III. PHASE 3 FUNCTIONS AUDIT SUITE RESULTS (UNCHANGED)
 
 ```bash
 ================================================================
@@ -54,10 +98,10 @@ To eliminate the $30 GCP Cloud Build prepayment requirement while preserving 100
 
 ---
 
-### IV. BUILD & DEPLOYMENT VERIFICATION
+### IV. SYSTEM VERIFICATION CHECKLIST
 
 - **Applet Compilation (`compile_applet`):** `SUCCEEDED`
 - **Vite Production Build (`npm run build`):** `PASSED` (0 errors)
-- **Functions Suite (`cd functions && npm test`):** `PASSED` (9/9 assertions passed)
-- **Dev Server Runtime:** Running seamlessly on port 3000 (`tsx server.ts`)
-- **Cost:** **$0.00** (Zero external GCP billing/Cloud Build dependencies)
+- **Remediated Server Test Suite (`scripts/testServerSecurity.ts`):** `PASSED` (19/19 assertions passed)
+- **Phase 3 Functions Suite (`cd functions && npm test`):** `PASSED` (9/9 assertions passed)
+- **Dev Server Runtime:** Running cleanly on port 3000 (`tsx server.ts`)
