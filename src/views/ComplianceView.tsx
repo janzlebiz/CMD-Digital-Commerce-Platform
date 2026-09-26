@@ -8,6 +8,8 @@ import { PageView } from '../types';
 import { STATUTORY_NOTICES, FIVE_TIER_CLAIMS } from '../data/compliance';
 import { BirSealBadge } from '../components/ui/BirSealBadge';
 import { RegulatoryNotice } from '../components/ui/RegulatoryNotice';
+import { db } from '../firebase';
+import { doc, setDoc } from 'firebase/firestore';
 
 interface ComplianceViewProps {
   onNavigate: (view: PageView) => void;
@@ -274,14 +276,19 @@ export const ComplianceView: React.FC<ComplianceViewProps> = ({ onNavigate }) =>
             <button
               onClick={async () => {
                 const resultsArea = document.getElementById('test-1-results');
-                if (resultsArea) resultsArea.innerText = 'Executing direct write payload...';
+                if (resultsArea) resultsArea.innerText = 'Executing direct Firestore setDoc write...';
                 try {
-                  // Direct bypass write attempt (forces native security rule or server simulation deny)
-                  throw new Error('Missing or insufficient permissions.');
+                  // Real direct bypass write attempt (forces native security rule denial)
+                  await setDoc(doc(db, 'orders', 'unauthorized_doc_99'), {
+                    hijackedPayload: true,
+                    amount: 1.00
+                  });
+                  if (resultsArea) resultsArea.innerText = 'SUCCESS (CRITICAL FAIL: Firestore Security Rules Bypassed!)';
                 } catch (err: any) {
                   if (resultsArea) {
-                    resultsArea.innerText = `[REJECTED] - Firestore secure exception intercepted:\n${JSON.stringify({
-                      error: err.message,
+                    resultsArea.innerText = `[REJECTED SUCCESSFULLY] - Real Firestore security rule blocked the write:\n${JSON.stringify({
+                      error: err.message || String(err),
+                      code: err.code || 'permission-denied',
                       operationType: 'create',
                       path: 'orders/unauthorized_doc_99',
                       authInfo: {

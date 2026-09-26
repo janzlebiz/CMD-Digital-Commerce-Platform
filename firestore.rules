@@ -1,0 +1,101 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // Global Safety Net: Default deny catch-all
+    match /{document=**} {
+      allow read, write: if false;
+    }
+
+    // --- REUSABLE SECURITY PRIMITIVES ---
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    function isOwner(userId) {
+      return isSignedIn() && request.auth.uid == userId;
+    }
+
+    function incoming() {
+      return request.resource.data;
+    }
+
+    function existing() {
+      return resource.data;
+    }
+
+    function isValidId(id) {
+      return id is string && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-]+$');
+    }
+
+    // Role Lookup: Look up role from trusted user document
+    function getUserRole() {
+      return get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role;
+    }
+
+    function hasRole(role) {
+      return isSignedIn() && getUserRole() == role;
+    }
+
+    function isStaffOrManager() {
+      return hasRole('staff') || hasRole('manager') || hasRole('admin');
+    }
+
+    // --- COLLECTION MATCHES ---
+
+    // 1. Users Collection rules
+    match /users/{userId} {
+      allow get: if isSignedIn() && (isOwner(userId) || isStaffOrManager());
+      allow list: if isSignedIn() && isStaffOrManager();
+      
+      // Creating a profile
+      allow create: if isSignedIn() && isOwner(userId) 
+                    && incoming().keys().hasAll(['uid', 'email', 'firstName', 'lastName', 'role', 'createdAt', 'updatedAt'])
+                    && incoming().keys().hasOnly(['uid', 'email', 'firstName', 'lastName', 'role', 'createdAt', 'updatedAt', 'assignedBranchId'])
+                    && incoming().role == 'customer'; // Regular users cannot assign roles on create
+                    
+      // Prevent role escalation by regular users
+      allow update: if isSignedIn() && isOwner(userId) 
+                    && incoming().role == existing().role
+                    && incoming().diff(existing()).affectedKeys().hasOnly(['firstName', 'lastName', 'phone'])
+                    || hasRole('admin'); // Admins can assign roles
+    }
+
+    // 2. Orders Collection rules
+    match /orders/{orderId} {
+      allow get: if isSignedIn() && (existing().userId == request.auth.uid || isStaffOrManager());
+      allow list: if isSignedIn() && (resource.data.userId == request.auth.uid || isStaffOrManager());
+      
+      // Order writes are handled by the server (Admin SDK) but allowed to user for secure offline batch syncs
+      allow create: if isSignedIn() && incoming().userId == request.auth.uid;
+      allow update: if isSignedIn() && isStaffOrManager();
+    }
+
+    // 3. Branch Inventory rules
+    match /branch_inventory/{inventoryId} {
+      allow read: if isSignedIn();
+      // Only staff/managers can edit branch inventory
+      allow write: if isSignedIn() && isStaffOrManager();
+    }
+
+    // 4. Consultation Intakes rules
+    match /consultation_intakes/{intakeId} {
+      // Sensitive clinical records are strictly isolated (DPA RA 10173 Health Data Boundary)
+      allow get: if isSignedIn() && (
+        existing().userId == request.auth.uid || 
+        hasRole('practitioner') || 
+        hasRole('admin')
+      );
+      
+      allow list: if isSignedIn() && (
+        resource.data.userId == request.auth.uid || 
+        hasRole('practitioner') || 
+        hasRole('admin')
+      );
+
+      // Writes are made only through the trusted backend (Admin SDK), but let rules permit authenticated owner consent creation
+      allow create: if isSignedIn() && incoming().userId == request.auth.uid;
+      allow update: if isSignedIn() && (existing().userId == request.auth.uid || hasRole('practitioner'));
+    }
+  }
+}
