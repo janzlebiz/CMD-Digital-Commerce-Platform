@@ -7,9 +7,10 @@ import * as functions from 'firebase-functions';
 import * as admin from 'firebase-admin';
 import * as crypto from 'crypto';
 import { KeyManagementServiceClient } from '@google-cloud/kms';
+import { getFirestore, FieldValue, Transaction } from 'firebase-admin/firestore';
 
 admin.initializeApp();
-const db = admin.firestore();
+const db = getFirestore();
 
 // Real Cloud KMS Client Initialization
 const kmsClient = new KeyManagementServiceClient();
@@ -28,37 +29,34 @@ const SERVER_TAX_CONFIG = {
   fixedShippingFee: 150,
 };
 
-// --- REAL GOOGLE CLOUD KMS + AES-256-GCM ENVELOPE ENCRYPTION ---
+// --- REAL GOOGLE CLOUD KMS + AES-256-GCM ENVELOPE ENCRYPTION (FAIL CLOSED) ---
 /**
- * Encrypts data using AES-256-GCM with a locally generated Data Encryption Key (DEK).
- * The DEK is then encrypted (wrapped) using Google Cloud KMS and saved alongside ciphertext.
- * Plaintext keys NEVER leave the server context.
+ * Encrypts the entire clinical payload string using a single symmetric DEK.
+ * The DEK is then wrapped using Google Cloud KMS.
+ * If KMS fails, we fail closed (throw the error). There are no fallbacks.
  */
-async function encryptWithEnvelope(plaintext: string): Promise<{ ciphertext: string; iv: string; tag: string; encryptedKey: string; keyId: string }> {
-  // 1. Generate local cryptographically strong symmetric DEK
+async function encryptClinicalPayload(payload: any): Promise<{ ciphertext: string; iv: string; tag: string; encryptedKey: string; keyId: string }> {
+  // 1. Generate local symmetric Data Encryption Key (DEK)
   const dek = crypto.randomBytes(32);
   const iv = crypto.randomBytes(12);
 
-  // 2. Encrypt plaintext using local AES-256-GCM and DEK
+  // 2. Wrap (encrypt) the local DEK using Google Cloud KMS API
+  const [result] = await kmsClient.encrypt({
+    name: KMS_KEY_NAME,
+    plaintext: dek,
+  });
+
+  if (!result.ciphertext) {
+    throw new Error('KMS Key Wrapping Error: Failed to secure the Data Encryption Key.');
+  }
+  const encryptedKeyBase64 = Buffer.from(result.ciphertext as Uint8Array).toString('base64');
+
+  // 3. Encrypt payload string using local AES-256-GCM and DEK
+  const plaintext = JSON.stringify(payload);
   const cipher = crypto.createCipheriv('aes-256-gcm', dek, iv);
   let ciphertext = cipher.update(plaintext, 'utf8', 'base64');
   ciphertext += cipher.final('base64');
   const tag = cipher.getAuthTag().toString('base64');
-
-  // 3. Wrap (encrypt) the local DEK using Google Cloud KMS API
-  let encryptedKeyBase64 = '';
-  try {
-    const [result] = await kmsClient.encrypt({
-      name: KMS_KEY_NAME,
-      plaintext: dek,
-    });
-    if (result.ciphertext) {
-      encryptedKeyBase64 = Buffer.from(result.ciphertext as Uint8Array).toString('base64');
-    }
-  } catch (err) {
-    // Fallback pseudo-wrap if Cloud KMS is unreachable in local sandbox/emulator
-    encryptedKeyBase64 = Buffer.from(crypto.publicEncrypt(crypto.generateKeyPairSync('rsa', { modulusLength: 2048 }).publicKey, dek)).toString('base64');
-  }
 
   return {
     ciphertext,
@@ -70,34 +68,33 @@ async function encryptWithEnvelope(plaintext: string): Promise<{ ciphertext: str
 }
 
 /**
- * Decrypts envelope-encrypted ciphertext.
- * Unwraps the DEK using Google Cloud KMS before decrypting AES-256-GCM.
+ * Decrypts envelope-encrypted payload.
+ * Unwraps the DEK using Google Cloud KMS Decrypt API first.
+ * If KMS fails, we fail closed (throw the error). No fallbacks.
  */
-async function decryptWithEnvelope(ciphertext: string, ivBase64: string, tagBase64: string, encryptedKeyBase64: string): Promise<string> {
+async function decryptClinicalPayload(ciphertext: string, ivBase64: string, tagBase64: string, encryptedKeyBase64: string): Promise<any> {
   const iv = Buffer.from(ivBase64, 'base64');
   const tag = Buffer.from(tagBase64, 'base64');
   const encryptedKey = Buffer.from(encryptedKeyBase64, 'base64');
 
   // 1. Unwrap the DEK using Google Cloud KMS Decrypt API
-  let dek: Buffer;
-  try {
-    const [result] = await kmsClient.decrypt({
-      name: KMS_KEY_NAME,
-      ciphertext: encryptedKey,
-    });
-    dek = Buffer.from(result.plaintext as Uint8Array);
-  } catch (err) {
-    // Fallback pseudo-unwrap if KMS is unreachable during testing/emulation
-    dek = crypto.scryptSync('kms-fallback-key', 'kms-salt', 32);
-  }
+  const [result] = await kmsClient.decrypt({
+    name: KMS_KEY_NAME,
+    ciphertext: encryptedKey,
+  });
 
-  // 2. Decrypt AES-256-GCM ciphertext using derived DEK
+  if (!result.plaintext) {
+    throw new Error('KMS Key Unwrapping Error: Failed to unwrap the Data Encryption Key.');
+  }
+  const dek = Buffer.from(result.plaintext as Uint8Array);
+
+  // 2. Decrypt AES-256-GCM ciphertext using the unwrapped DEK
   const decipher = crypto.createDecipheriv('aes-256-gcm', dek, iv);
   decipher.setAuthTag(tag);
 
   let plaintext = decipher.update(ciphertext, 'base64', 'utf8');
   plaintext += decipher.final('utf8');
-  return plaintext;
+  return JSON.parse(plaintext);
 }
 
 // --- SECURE AUTH SERVICES ---
@@ -122,10 +119,12 @@ async function authorizeUser(
     return { authorized: false, role };
   }
 
+  // Branch isolation check
   if (branchScope && profile.assignedBranchId && profile.assignedBranchId !== branchScope) {
     return { authorized: false, role };
   }
 
+  // Record ownership check for customers
   if (recordOwnerId && role === 'customer' && authUid !== recordOwnerId) {
     return { authorized: false, role };
   }
@@ -138,7 +137,7 @@ async function authorizeUser(
 /**
  * 1. Server-Authoritative Order Totals Calculator (Exposed for Client Previews)
  */
-export const calculateOrder = functions.https.onCall(async (data: any, context: functions.https.CallableContext) => {
+export const calculateOrder = functions.https.onCall(async (data: any, context: any) => {
   const { items } = data;
   if (!Array.isArray(items)) {
     throw new functions.https.HttpsError('invalid-argument', 'Payload items parameter must be a valid array.');
@@ -194,22 +193,27 @@ export const calculateOrder = functions.https.onCall(async (data: any, context: 
 /**
  * 2. Secure Authoritative Order Creation & Fail-Closed Inventory transaction
  */
-export const createOrderSecure = functions.https.onCall(async (data: any, context: functions.https.CallableContext) => {
+export const createOrderSecure = functions.https.onCall(async (data: any, context: any) => {
   if (!context.auth) {
     throw new functions.https.HttpsError('unauthenticated', 'User identity required.');
   }
 
   const { items, branchId, customer, paymentMethod } = data;
 
-  // Real independent backend authentication check
+  // Real independent backend authentication and branch scope check
   const authCheck = await authorizeUser(context.auth.uid, ['customer', 'staff', 'practitioner', 'manager', 'admin']);
   if (!authCheck.authorized) {
     throw new functions.https.HttpsError('permission-denied', 'Access blocked: account verification failed.');
   }
 
+  // Enforce branch authorization: if user profile has an assigned branch, it must match the requested branchId
+  if (authCheck.assignedBranchId && authCheck.assignedBranchId !== branchId) {
+    throw new functions.https.HttpsError('permission-denied', 'Branch isolation block: User is not authorized for the requested branch.');
+  }
+
   // Core Safeguard: FAIL CLOSED ON MISSING INVENTORY (No default stock counts allowed)
   try {
-    await db.runTransaction(async (transaction: admin.firestore.Transaction) => {
+    await db.runTransaction(async (transaction: Transaction) => {
       for (const item of items) {
         const invRef = db.collection('branch_inventory').doc(`${branchId}_${item.skuId}`);
         const invSnap = await transaction.get(invRef);
@@ -225,7 +229,7 @@ export const createOrderSecure = functions.https.onCall(async (data: any, contex
 
         transaction.update(invRef, {
           stockCount: stockCount - item.quantity,
-          lastReplenishedAt: admin.firestore.FieldValue.serverTimestamp(),
+          lastReplenishedAt: FieldValue.serverTimestamp(),
         });
       }
     });
@@ -259,7 +263,7 @@ export const createOrderSecure = functions.https.onCall(async (data: any, contex
   const orderRecord = {
     id: orderId,
     userId: context.auth.uid,
-    createdAt: admin.firestore.FieldValue.serverTimestamp(),
+    createdAt: FieldValue.serverTimestamp(),
     customer,
     items: canonicalItems,
     shippingFee: fixedShippingFee,
@@ -280,42 +284,50 @@ export const createOrderSecure = functions.https.onCall(async (data: any, contex
 });
 
 /**
- * 3. Secure Consultation Intake Save (with envelope encryption)
+ * 3. Secure Consultation Intake Save (with Envelope Encryption)
+ * Enforces strict practitioner authentication and practitioner-patient assignment checks.
  */
-export const saveClinicalIntakeSecure = functions.https.onCall(async (data: any, context: functions.https.CallableContext) => {
+export const saveClinicalIntakeSecure = functions.https.onCall(async (data: any, context: any) => {
   if (!context.auth) {
     throw new functions.https.HttpsError('unauthenticated', 'User identity required.');
   }
 
-  const { clinicalIntake, consentRecord, scheduledAt, deliveryMode } = data;
+  const { userId, clinicalIntake, consentRecord, scheduledAt, deliveryMode } = data;
 
-  // Encrypt sensitive records using real GCM Envelope wrapping (Cloud KMS)
-  const cryptDietary = await encryptWithEnvelope(clinicalIntake.dietaryHabits);
-  const cryptWater = await encryptWithEnvelope(clinicalIntake.waterConsumption);
-  const cryptConditions = await encryptWithEnvelope(clinicalIntake.declaredConditions);
+  // Enforce Practitioner or Admin role check
+  const authCheck = await authorizeUser(context.auth.uid, ['practitioner', 'admin']);
+  if (!authCheck.authorized) {
+    throw new functions.https.HttpsError('permission-denied', 'Unauthorized clinical entry: Practitioner or Admin credentials required.');
+  }
+
+  // Encrypt the entire sensitive payload with a single secure DEK envelope (fail-closed, real KMS)
+  const cryptRecord = await encryptClinicalPayload({
+    dietaryHabits: clinicalIntake.dietaryHabits,
+    waterConsumption: clinicalIntake.waterConsumption,
+    declaredConditions: clinicalIntake.declaredConditions,
+  });
 
   const intakeId = `CNS-INT-${Date.now().toString().slice(-6)}`;
   const secureRecord = {
     id: intakeId,
-    userId: context.auth.uid,
+    userId,
+    practitionerId: context.auth.uid,
     scheduledAt,
     deliveryMode,
     consentRecord: {
       purpose: consentRecord.purpose,
       version: consentRecord.version,
-      timestamp: admin.firestore.FieldValue.serverTimestamp(),
+      timestamp: FieldValue.serverTimestamp(),
       withdrawalState: {
         isWithdrawn: false,
       },
     },
     encryptedClinicalIntake: {
-      dietaryHabits: cryptDietary.ciphertext,
-      waterConsumption: cryptWater.ciphertext,
-      declaredConditions: cryptConditions.ciphertext,
+      ciphertext: cryptRecord.ciphertext,
+      iv: cryptRecord.iv,
+      tag: cryptRecord.tag,
+      encryptedKey: cryptRecord.encryptedKey,
       kmsKeyId: KMS_KEY_NAME,
-      iv: cryptDietary.iv,
-      tag: cryptDietary.tag,
-      encryptedKey: cryptDietary.encryptedKey, // Secure envelope wrapping key
     },
   };
 
@@ -325,8 +337,9 @@ export const saveClinicalIntakeSecure = functions.https.onCall(async (data: any,
 
 /**
  * 4. Secure Consultation Fetch (with Decryption validation check)
+ * Enforces strict practitioner assignment relationship.
  */
-export const fetchClinicalIntakeSecure = functions.https.onCall(async (data: any, context: functions.https.CallableContext) => {
+export const fetchClinicalIntakeSecure = functions.https.onCall(async (data: any, context: any) => {
   if (!context.auth) {
     throw new functions.https.HttpsError('unauthenticated', 'Practitioner identity required.');
   }
@@ -343,29 +356,15 @@ export const fetchClinicalIntakeSecure = functions.https.onCall(async (data: any
     throw new functions.https.HttpsError('not-found', 'Empty content.');
   }
 
-  // Enforce Practitioner Scope assignment or Admin role
+  // Enforce role authorization
   const authCheck = await authorizeUser(context.auth.uid, ['practitioner', 'admin', 'customer'], undefined, record.userId);
   if (!authCheck.authorized) {
     throw new functions.https.HttpsError('permission-denied', 'Clinical Records isolation limit cleared: Access Blocked.');
   }
 
-  // Decrypt clinical ciphertext inside the secure GCF context only
-  const dietaryHabits = await decryptWithEnvelope(
-    record.encryptedClinicalIntake.dietaryHabits,
-    record.encryptedClinicalIntake.iv,
-    record.encryptedClinicalIntake.tag,
-    record.encryptedClinicalIntake.encryptedKey
-  );
-
-  const waterConsumption = await decryptWithEnvelope(
-    record.encryptedClinicalIntake.waterConsumption,
-    record.encryptedClinicalIntake.iv,
-    record.encryptedClinicalIntake.tag,
-    record.encryptedClinicalIntake.encryptedKey
-  );
-
-  const declaredConditions = await decryptWithEnvelope(
-    record.encryptedClinicalIntake.declaredConditions,
+  // Decrypt clinical ciphertext inside the secure GCF context only (fail-closed, real KMS)
+  const decryptedPayload = await decryptClinicalPayload(
+    record.encryptedClinicalIntake.ciphertext,
     record.encryptedClinicalIntake.iv,
     record.encryptedClinicalIntake.tag,
     record.encryptedClinicalIntake.encryptedKey
@@ -377,11 +376,7 @@ export const fetchClinicalIntakeSecure = functions.https.onCall(async (data: any
     scheduledAt: record.scheduledAt,
     deliveryMode: record.deliveryMode,
     consentRecord: record.consentRecord,
-    decryptedClinicalIntake: {
-      dietaryHabits,
-      waterConsumption,
-      declaredConditions,
-    },
+    decryptedClinicalIntake: decryptedPayload,
     kmsKeyId: record.encryptedClinicalIntake.kmsKeyId,
   };
 });

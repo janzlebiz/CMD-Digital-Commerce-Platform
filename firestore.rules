@@ -55,9 +55,10 @@ service cloud.firestore {
     }
 
     // 3. Branch Inventory rules
+    // Locked down: Clients can only READ inventory. All writes must go through Cloud Functions.
     match /branch_inventory/{inventoryId} {
       allow read: if isSignedIn();
-      allow write: if isSignedIn() && isStaffOrManager();
+      allow write: if false; // Absolute lock down of client writes
     }
 
     // 4. Consultation Intakes rules

@@ -383,7 +383,7 @@ export const ComplianceView: React.FC<ComplianceViewProps> = ({ onNavigate }) =>
                   const savedDoc = await TrustedServerController.saveClinicalIntake('practitioner-user-09', samplePayload);
                   
                   const isPlaintextExposed = JSON.stringify(savedDoc).includes('Bicolano') || JSON.stringify(savedDoc).includes('plaintextKey');
-                  const containsKmsReference = savedDoc.encryptedClinicalIntake?.kmsKeyId?.includes('cryptoKeys/clinical-spi-key') || true;
+                  const containsKmsReference = savedDoc.encryptedClinicalIntake?.kmsKeyId?.includes('cryptoKeys/clinical-spi-key');
 
                   if (resultsArea) {
                     resultsArea.innerText = `[KMS SECURE ENVELOPE] - Document ciphertext generated strictly server-side:\n` +
