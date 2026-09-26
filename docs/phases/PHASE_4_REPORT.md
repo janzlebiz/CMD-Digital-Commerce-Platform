@@ -1,72 +1,59 @@
 # HCI CMD DIGITAL COMMERCE PLATFORM
-## PHASE 4 — LIVE INFRASTRUCTURE & INTEGRATION VERIFICATION REPORT
+## PHASE 4 — LIVE DEPLOYMENT, SMOKE TEST & INFRASTRUCTURE REPORT
 
-**Document Type:** Phase 4 Live Environment, Infrastructure & Deployment Verification  
+**Document Version:** Phase 4 Final Live Deployment & Integration Verification  
 **GCP / Firebase Project ID:** `gen-lang-client-0427039673`  
 **Firestore Database ID:** `ai-studio-cmddigitalcommer-8d70f45b-1636-42ba-9e2d-f063a7b0e086`  
 **KMS Key Hierarchy:** `projects/gen-lang-client-0427039673/locations/global/keyRings/hic-cmd-keyring/cryptoKeys/clinical-spi-key`  
-**Date of Verification:** September 26, 2026  
-**Phase 4 Evaluation Status:** **LIVE INFRASTRUCTURE AUDITED & VERIFIED (READY FOR PRODUCTION DEPLOYMENT)**  
+**Date of Audit:** September 26, 2026  
+**Phase 4 Status:** **LIVE SECURITY RULES DEPLOYED & TESTED · FUNCTIONS COMPILED · CLOUD DEPLOYMENT BLOCKERS IDENTIFIED**  
 
 ---
 
-### I. EXECUTIVE SUMMARY
+### I. EXECUTIVE SUMMARY & LIVE DEPLOYMENT STATE
 
-This Phase 4 report establishes the live environment verification, deployed security rules, cryptographic boundaries, and infrastructure prerequisites for the HCI CMD Digital Commerce Platform.
+Phase 4 evaluated the live deployment readiness and real infrastructure integration for the HCI CMD Digital Commerce Platform across Firebase Firestore, Authentication, Cloud Functions, and Google Cloud KMS.
 
-The Phase 3 implementation has been maintained as the baseline. All security boundaries, Cloud Functions controllers, envelope cryptography, and transactional isolation layers have been evaluated against live Google Cloud and Firebase services.
+1. **Firestore Security Rules (Live Deployed):**  
+   Deployed to the live production database (`ai-studio-cmddigitalcommer-8d70f45b-1636-42ba-9e2d-f063a7b0e086`) via `deploy_firebase`. Live network probes confirmed that unauthorized writes to `/orders` and direct client reads to `/consultation_intakes` are actively rejected with `PERMISSION_DENIED`.
 
----
-
-### II. INFRASTRUCTURE COMPONENT VERIFICATION
-
-#### 1. Firebase Firestore Security Rules (LIVE DEPLOYED)
-- **Deployment Status:** **DEPLOYED TO LIVE GCP/FIREBASE PROJECT** via `deploy_firebase`.
-- **Deployed Ruleset Scope:**
-  - **Clinical Lockdown:** Direct client read and write operations to `/consultation_intakes` are locked (`allow read, write: if false;`).
-  - **Orders Protection:** Direct client writes to `/orders` are blocked (`allow write: if false;`).
-  - **Branch Inventory:** Client writes blocked (`allow write: if false;`); read-only catalog access.
-  - **Global Catch-All:** `match /{document=**} { allow read, write: if false; }`.
-- **Verification Method:** Platform rule deployment pipeline completed successfully against the live Firestore instance `ai-studio-cmddigitalcommer-8d70f45b-1636-42ba-9e2d-f063a7b0e086`.
-
-#### 2. Cloud Functions Backend (`/functions`)
-- **Controllers Implemented:**
-  1. `calculateOrder`: Server-authoritative calculation with line-item positive integer validation (`quantity > 0 && Number.isInteger(quantity)`).
-  2. `createOrderSecure`: ACID transactional multi-item inventory decrement and order creation with branch scope enforcement.
-  3. `saveClinicalIntakeSecure`: Encrypts clinical data via AES-256-GCM + Google Cloud KMS envelope wrapping and writes intake record with practitioner assignment validation.
-  4. `fetchClinicalIntakeSecure`: Verifies practitioner-patient relationship and unwraps DEK via Cloud KMS to decrypt clinical payload in server memory.
-- **Build & Compilation Status:** `PASSED` (`cd functions && npm run build` exited with code 0).
-- **Deployment Requirement:** Production deployment requires GCP deployment pipeline execution (`firebase deploy --only functions`) with Cloud Functions / Cloud Run service enablement.
-
-#### 3. Google Cloud KMS Cryptographic Engine
-- **Implementation:** Native `@google-cloud/kms` Client SDK (`KeyManagementServiceClient`).
-- **Resource Identifier:**
-  `projects/gen-lang-client-0427039673/locations/global/keyRings/hic-cmd-keyring/cryptoKeys/clinical-spi-key`
-- **Envelope Encryption Design:**
-  - Data payload encrypted via local AES-256-GCM using an ephemeral 256-bit DEK, 12-byte IV, and 16-byte authentication tag.
-  - DEK wrapped via Cloud KMS `encrypt` API.
-  - Plaintext DEK resides exclusively in ephemeral Cloud Function runtime memory and is never logged, stored, or sent to client browsers.
-- **Fail-Closed Verification:** Verified in test harness with corrupted DEK envelope payload (`CNS-INT-CORRUPTED-KMS`), confirming that unwrap failures strictly reject operations.
-- **IAM Permission Requirement:** Cloud Functions service identity requires `roles/cloudkms.cryptoKeyEncrypterDecrypter` on the target key.
-
-#### 4. Real Firestore Transactions & Multi-Item Atomicity
-- **Implementation:** `db.runTransaction()` batch in `createOrderSecure`.
-- **Atomicity Invariant:**
-  - Stock levels for all ordered SKUs are checked and decremented together.
-  - If any SKU lacks stock or if any write operation fails, the transaction aborts with zero inventory modifications and zero order documents written.
-- **Validation Invariant:** Line-item quantities are verified before transaction entry to reject zero, negative, floating-point, or non-numeric values with `invalid-argument`.
-
-#### 5. Client Configuration & Non-Authoritative UI Preview
-- **Configuration File:** `firebase-applet-config.json` containing live project and client IDs.
-- **Frontend State:**
-  - Client-side stock helpers (`getStockLevel`) and totals calculations (`calculateTotals`) in `useEcommerce.ts` are explicitly documented and treated as non-authoritative UI previews (`isUiPreviewOnly: true`).
-  - Checkout orders and clinical intake saves route directly to backend Cloud Function entry points in `TrustedServerController`.
+2. **Cloud Functions Backend (Source & Build Ready):**  
+   All four server-side controllers (`calculateOrder`, `createOrderSecure`, `saveClinicalIntakeSecure`, `fetchClinicalIntakeSecure`) compiled with 0 errors (`tsc` passed). CLI deployment to GCP identified cloud service prerequisites.
 
 ---
 
-### III. AUTOMATED VERIFICATION SUITE RESULTS
+### II. LIVE ENVIRONMENT TESTS & PROBE RESULTS
 
-The test suite executed with all 9 compliance and security checks passing:
+#### A. Live Firebase Firestore Security Rules Probes
+
+Direct live network probes were executed against the production database `ai-studio-cmddigitalcommer-8d70f45b-1636-42ba-9e2d-f063a7b0e086`:
+
+| Test / Probe | Target Path | Expected Invariant | Actual Result | Status |
+| :--- | :--- | :--- | :--- | :--- |
+| **Live Probe 1** | `/orders/live_unauthorized_probe` | Unauthenticated direct client write must be rejected | `7 PERMISSION_DENIED: Missing or insufficient permissions` | **PASS (LIVE VERIFIED)** |
+| **Live Probe 2** | `/consultation_intakes/test_intake_record` | Direct client clinical document read must be rejected | `PERMISSION_DENIED: Missing or insufficient permissions` | **PASS (LIVE VERIFIED)** |
+
+#### B. Cloud Functions Live Deployment Diagnosis
+
+We executed `firebase deploy --only functions --project gen-lang-client-0427039673`:
+
+- **Actual CLI Output:**
+  ```text
+  === Deploying to 'gen-lang-client-0427039673'...
+  i  deploying functions
+  Error: Request to https://cloudresourcemanager.googleapis.com/v1/projects/gen-lang-client-0427039673 had HTTP Error: 403, 
+  Cloud Resource Manager API has not been used in project 212282537635 before or it is disabled.
+  ```
+- **Deployment Blockers & Cloud Configuration Requirements:**
+  1. **Cloud Resource Manager API:** Must be enabled on GCP project `212282537635` / `gen-lang-client-0427039673`.
+  2. **Cloud Functions & Cloud Build APIs:** Must be enabled (`cloudfunctions.googleapis.com`, `cloudbuild.googleapis.com`).
+  3. **KMS IAM Role:** The default runtime service account (`gen-lang-client-0427039673@appspot.gserviceaccount.com`) must be assigned `roles/cloudkms.cryptoKeyEncrypterDecrypter` on key ring `hic-cmd-keyring/cryptoKeys/clinical-spi-key`.
+
+---
+
+### III. TEST-HARNESS VERIFICATION SUITE (BUSINESS & SECURITY INVARIANTS)
+
+Under the programmatic test harness (`cd functions && npm test`), all 9 core security and transactional invariants passed:
 
 ```bash
 ================================================================
@@ -90,24 +77,11 @@ The test suite executed with all 9 compliance and security checks passing:
 
 ---
 
-### IV. LIVE DEPLOYMENT & PRODUCTION CONFIGURATION PREREQUISITES
+### IV. TECHNICAL VERIFICATION SUMMARY
 
-| Component | Target Resource / Configuration | Deployment Prerequisite | Live Status |
-| :--- | :--- | :--- | :--- |
-| **Firestore Rules** | `firestore.rules` | Platform deployment | **DEPLOYED (LIVE)** |
-| **Firestore Database** | `ai-studio-cmddigitalcommer-8d70f45b-1636-42ba-9e2d-f063a7b0e086` | Project provisioning | **PROVISIONED (LIVE)** |
-| **Cloud Functions** | `calculateOrder`, `createOrderSecure`, `saveClinicalIntakeSecure`, `fetchClinicalIntakeSecure` | `firebase deploy --only functions` | **COMPILED & VERIFIED** |
-| **Cloud KMS** | `hic-cmd-keyring/clinical-spi-key` | IAM `cloudkms.cryptoKeyEncrypterDecrypter` | **CONFIGURED IN SOURCE** |
-| **Web Client** | Vite React SPA | `npm run build` | **COMPILED (0 ERRORS)** |
-
----
-
-### V. FINAL PHASE 4 VERIFICATION SUMMARY
-
-- **Root Frontend Compilation (`npm run build`):** `PASSED` (0 errors)
-- **Root TypeScript Check (`npx tsc --noEmit`):** `PASSED` (0 errors)
+- **Root Frontend Build (`npm run build`):** `PASSED` (0 errors)
+- **Root Typecheck (`npx tsc --noEmit`):** `PASSED` (0 errors)
 - **Functions Test Suite (`cd functions && npm test`):** `PASSED` (9/9 assertions passed)
-- **Functions Build (`cd functions && npm run build`):** `PASSED` (0 errors)
-- **Firestore Security Rules Deployment (`deploy_firebase`):** `SUCCESS`
-
-**PHASE 4 STATUS:** **LIVE INFRASTRUCTURE & INTEGRATION AUDIT COMPLETE**
+- **Functions Compilation (`cd functions && npm run build`):** `PASSED` (0 errors)
+- **Live Firestore Security Rules Deployment:** `PASSED` (Rules active and verified via live probe)
+- **Live Cloud Functions Deployment:** Blocked pending GCP Cloud Resource Manager API activation.
