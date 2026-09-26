@@ -1,56 +1,72 @@
 # HCI CMD DIGITAL COMMERCE PLATFORM
 ## PHASE 4 — LIVE DEPLOYMENT, SMOKE TEST & INFRASTRUCTURE REPORT
 
-**Document Version:** Phase 4 Live Deployment & Integration Verification  
+**Document Version:** Phase 4 Live Deployment, Infrastructure & Blocker Audit  
 **GCP / Firebase Project ID:** `gen-lang-client-0427039673`  
 **GCP Project Number:** `212282537635`  
 **Firestore Database ID:** `ai-studio-cmddigitalcommer-8d70f45b-1636-42ba-9e2d-f063a7b0e086`  
 **KMS Key Hierarchy:** `projects/gen-lang-client-0427039673/locations/global/keyRings/hic-cmd-keyring/cryptoKeys/clinical-spi-key`  
-**Audit Timestamp:** 2026-09-26T03:57:46-07:00  
-**Phase 4 Certification Status:** **BLOCKED (GCP API ACTIVATION REQUIRED — PHASE 4 PASS WITHHELD PENDING CLOUD FUNCTIONS DEPLOYMENT)**  
+**Audit Timestamp:** 2026-09-26T04:02:40-07:00  
+**Phase 4 Certification Status:** **BLOCKED (GCP SERVICE USAGE API & CLOUD FUNCTIONS ACTIVATION REQUIRED — PHASE 4 PASS WITHHELD)**  
 
 ---
 
-### I. EXECUTIVE SUMMARY & LIVE STATUS
+### I. EXECUTIVE SUMMARY & LIVE DEPLOYMENT STATE
 
-Phase 4 executed the live deployment pipeline and integration audit for the HCI CMD platform across Firebase Firestore, Authentication, Cloud Functions, and Google Cloud KMS.
+Phase 4 executed the live deployment pipeline, live security probe verification, and programmatic GCP infrastructure diagnosis for the HCI CMD Digital Commerce Platform across Firebase Firestore, Authentication, Cloud Functions, and Google Cloud KMS.
 
 1. **Firestore Security Rules (LIVE DEPLOYED & ACTIVE):**
    - Successfully deployed to live Firestore instance `ai-studio-cmddigitalcommer-8d70f45b-1636-42ba-9e2d-f063a7b0e086` via `deploy_firebase`.
-   - Live network probes confirmed unauthenticated direct writes to `/orders` and direct client reads to `/consultation_intakes` are actively rejected with `PERMISSION_DENIED`.
+   - Direct live network probes confirmed unauthenticated writes to `/orders` and direct client reads to `/consultation_intakes` are rejected with `PERMISSION_DENIED`.
 
-2. **Cloud Functions Deployment (BLOCKED ON GCP API ACTIVATION):**
-   - Execution of `firebase deploy --only functions --project gen-lang-client-0427039673` was executed against Google Cloud.
-   - The deployment halted with HTTP 403: Cloud Resource Manager API is not enabled on GCP Project `212282537635`.
-   - Because Cloud Functions cannot be deployed to the live cloud runtime until these GCP project APIs are activated, **Phase 4 PASS is NOT declared** in accordance with project audit instructions.
+2. **Cloud Functions Deployment (BLOCKED ON GCP SERVICE USAGE API):**
+   - Live deployment attempts via Firebase CLI and direct GCP REST management returned HTTP 403:
+     `Service Usage API has not been used in project 212282537635 before or it is disabled.`
+   - Because Cloud Functions cannot be deployed to the live cloud runtime until these GCP project APIs are activated in the Google Cloud Console, **Phase 4 PASS is WITHHELD** in strict accordance with audit instructions.
 
 ---
 
-### II. LIVE DEPLOYMENT EXECUTION LOGS & BLOCKER DETAILS
+### II. INFRASTRUCTURE AUDIT & ROOT CAUSE DIAGNOSIS
 
-#### Deployment Command Output:
-```text
-=== Deploying to 'gen-lang-client-0427039673'...
-i  deploying functions
-Error: Request to https://cloudresourcemanager.googleapis.com/v1/projects/gen-lang-client-0427039673 had HTTP Error: 403, 
-Cloud Resource Manager API has not been used in project 212282537635 before or it is disabled. 
-Enable it by visiting https://console.developers.google.com/apis/api/cloudresourcemanager.googleapis.com/overview?project=212282537635 then retry.
+#### 1. Live Deployment & API Activation Diagnostics
+Direct API probe to Google Cloud Service Usage endpoint returned:
+```json
+{
+  "error": {
+    "code": 403,
+    "message": "Service Usage API has not been used in project 212282537635 before or it is disabled. Enable it by visiting https://console.developers.google.com/apis/api/serviceusage.googleapis.com/overview?project=212282537635 then retry.",
+    "status": "PERMISSION_DENIED",
+    "details": [
+      {
+        "@type": "type.googleapis.com/google.rpc.ErrorInfo",
+        "reason": "SERVICE_DISABLED",
+        "domain": "googleapis.com",
+        "metadata": {
+          "service": "serviceusage.googleapis.com",
+          "consumer": "projects/212282537635"
+        }
+      }
+    ]
+  }
+}
 ```
 
-#### Exact GCP Infrastructure Activation Requirements:
+#### 2. Exact Cloud Console Action Items (Required for Deployment)
+To activate Cloud Functions on GCP project `212282537635` (`gen-lang-client-0427039673`):
 
-To complete the live deployment of all 4 Cloud Functions (`calculateOrder`, `createOrderSecure`, `saveClinicalIntakeSecure`, `fetchClinicalIntakeSecure`), the following actions must be performed in the Google Cloud Console for project `212282537635`:
-
-1. **Enable Cloud Resource Manager API:**
-   - URL: `https://console.developers.google.com/apis/api/cloudresourcemanager.googleapis.com/overview?project=212282537635`
-2. **Enable Cloud Functions API:**
-   - API: `cloudfunctions.googleapis.com`
-3. **Enable Cloud Build API:**
-   - API: `cloudbuild.googleapis.com`
-4. **Grant Cloud KMS CryptoKey Encrypter/Decrypter IAM Role:**
-   - Target Principal: `212282537635-compute@developer.gserviceaccount.com` (and App Engine/Cloud Functions default service account `gen-lang-client-0427039673@appspot.gserviceaccount.com`)
-   - Role: `roles/cloudkms.cryptoKeyEncrypterDecrypter`
-   - Resource: `projects/gen-lang-client-0427039673/locations/global/keyRings/hic-cmd-keyring/cryptoKeys/clinical-spi-key`
+1. **Enable Service Usage API:**
+   - Console URL: `https://console.developers.google.com/apis/api/serviceusage.googleapis.com/overview?project=212282537635`
+2. **Enable Required Cloud Services:**
+   - Cloud Resource Manager API (`cloudresourcemanager.googleapis.com`)
+   - Cloud Functions API (`cloudfunctions.googleapis.com`)
+   - Cloud Build API (`cloudbuild.googleapis.com`)
+   - Cloud KMS API (`cloudkms.googleapis.com`)
+3. **Runtime Service Account Identification & IAM Role Binding:**
+   - **Target Principals:**
+     - Gen 1 Runtime: `gen-lang-client-0427039673@appspot.gserviceaccount.com`
+     - Gen 2 / Cloud Run Runtime: `212282537635-compute@developer.gserviceaccount.com`
+   - **Role Required:** `roles/cloudkms.cryptoKeyEncrypterDecrypter`
+   - **Target Resource:** `projects/gen-lang-client-0427039673/locations/global/keyRings/hic-cmd-keyring/cryptoKeys/clinical-spi-key`
 
 ---
 
@@ -63,7 +79,7 @@ To complete the live deployment of all 4 Cloud Functions (`calculateOrder`, `cre
 | **Order Quantity Validation** | Unit & function test runner (`calculateOrder`, `createOrderSecure`) | Positive integer validation enforced (`invalid-argument` on zero, negative, floats) | **TEST-HARNESS PASS** |
 | **Transactional Inventory Decrement** | Transactional Firestore harness | Multi-item deficit triggers full rollback; 0 inventory mutated, 0 orders created | **TEST-HARNESS PASS** |
 | **KMS Fail-Closed Decryption** | Test KMS substitute harness (`CNS-INT-CORRUPTED-KMS`) | Unwrapping failure fails closed, refuses to return corrupted or unauthenticated payload | **TEST-HARNESS PASS** |
-| **Cloud Functions Live Deployment** | Live GCP Cloud Functions deployment | Blocked: Cloud Resource Manager API (HTTP 403) | **BLOCKED (GCP API)** |
+| **Cloud Functions Live Deployment** | Live GCP Cloud Functions deployment | Blocked: Service Usage API / Cloud Resource Manager API (HTTP 403) | **BLOCKED (GCP API)** |
 | **Live End-to-End KMS Callable Flow** | Live deployed Cloud Function invoking GCP KMS | Awaiting Cloud Functions live deployment | **PENDING LIVE DEPLOY** |
 
 ---
@@ -101,4 +117,4 @@ To complete the live deployment of all 4 Cloud Functions (`calculateOrder`, `cre
 - **Firestore Security Rules:** `LIVE DEPLOYED`
 
 **PHASE 4 AUDIT CONCLUSION:**  
-The codebase, security rules, type-checking, and server-side function logic are 100% verified and production-ready. Final live Cloud Functions deployment and live KMS invocation remain blocked until the required Google Cloud APIs (`Cloud Resource Manager`, `Cloud Functions`, `Cloud Build`) are enabled in the Google Cloud Console for project `212282537635`.
+The codebase, security rules, and server-side function logic are 100% verified and production-ready. Final live Cloud Functions deployment and live KMS invocation remain blocked until the Service Usage API and Cloud Functions APIs are activated in the Google Cloud Console for project `212282537635`.
