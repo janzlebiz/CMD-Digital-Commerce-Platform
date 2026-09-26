@@ -16,19 +16,6 @@ service cloud.firestore {
       return isSignedIn() && request.auth.uid == userId;
     }
 
-    function incoming() {
-      return request.resource.data;
-    }
-
-    function existing() {
-      return resource.data;
-    }
-
-    function isValidId(id) {
-      return id is string && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-]+$');
-    }
-
-    // Role Lookup: Look up role from trusted user document
     function getUserRole() {
       return get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role;
     }
@@ -48,54 +35,45 @@ service cloud.firestore {
       allow get: if isSignedIn() && (isOwner(userId) || isStaffOrManager());
       allow list: if isSignedIn() && isStaffOrManager();
       
-      // Creating a profile
+      // Creating a profile - regular users cannot escalate roles
       allow create: if isSignedIn() && isOwner(userId) 
-                    && incoming().keys().hasAll(['uid', 'email', 'firstName', 'lastName', 'role', 'createdAt', 'updatedAt'])
-                    && incoming().keys().hasOnly(['uid', 'email', 'firstName', 'lastName', 'role', 'createdAt', 'updatedAt', 'assignedBranchId'])
-                    && incoming().role == 'customer'; // Regular users cannot assign roles on create
+                    && request.resource.data.role == 'customer';
                     
-      // Prevent role escalation by regular users
-      allow update: if isSignedIn() && isOwner(userId) 
-                    && incoming().role == existing().role
-                    && incoming().diff(existing()).affectedKeys().hasOnly(['firstName', 'lastName', 'phone'])
-                    || hasRole('admin'); // Admins can assign roles
+      // Only admins can change user roles
+      allow update: if isSignedIn() && (
+        hasRole('admin') || 
+        (isOwner(userId) && request.resource.data.role == resource.data.role)
+      );
     }
 
     // 2. Orders Collection rules
+    // Locked down: Clients can only READ their orders. All WRITES must go through Cloud Functions.
     match /orders/{orderId} {
-      allow get: if isSignedIn() && (existing().userId == request.auth.uid || isStaffOrManager());
+      allow get: if isSignedIn() && (resource.data.userId == request.auth.uid || isStaffOrManager());
       allow list: if isSignedIn() && (resource.data.userId == request.auth.uid || isStaffOrManager());
-      
-      // Order writes are handled by the server (Admin SDK) but allowed to user for secure offline batch syncs
-      allow create: if isSignedIn() && incoming().userId == request.auth.uid;
-      allow update: if isSignedIn() && isStaffOrManager();
+      allow write: if false; // Absolute lock down of client writes
     }
 
     // 3. Branch Inventory rules
     match /branch_inventory/{inventoryId} {
       allow read: if isSignedIn();
-      // Only staff/managers can edit branch inventory
       allow write: if isSignedIn() && isStaffOrManager();
     }
 
     // 4. Consultation Intakes rules
+    // Locked down: Clients can only READ clinical records. All WRITES must go through Cloud Functions.
     match /consultation_intakes/{intakeId} {
-      // Sensitive clinical records are strictly isolated (DPA RA 10173 Health Data Boundary)
       allow get: if isSignedIn() && (
-        existing().userId == request.auth.uid || 
+        resource.data.userId == request.auth.uid || 
         hasRole('practitioner') || 
         hasRole('admin')
       );
-      
       allow list: if isSignedIn() && (
         resource.data.userId == request.auth.uid || 
         hasRole('practitioner') || 
         hasRole('admin')
       );
-
-      // Writes are made only through the trusted backend (Admin SDK), but let rules permit authenticated owner consent creation
-      allow create: if isSignedIn() && incoming().userId == request.auth.uid;
-      allow update: if isSignedIn() && (existing().userId == request.auth.uid || hasRole('practitioner'));
+      allow write: if false; // Absolute lock down of client writes
     }
   }
 }
