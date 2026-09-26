@@ -11,7 +11,7 @@
 
 Phase 2 of the HCI CMD Digital Commerce Platform has been successfully developed, compiled, and audited. The implementation provides a complete, high-fidelity sandbox e-commerce foundation for the regional platform across Camarines Norte.
 
-All features run locally on the client-side utilizing React, TypeScript, and local browser cache storage, maintaining 100% compliance with strict privacy and medical-claim boundaries.
+All features run locally on the client-side utilizing React, TypeScript, and local browser cache storage. **Sandbox implementation and technical verification completed; production tax, regulatory, payment, and business evidence remain subject to verification.**
 
 ---
 
@@ -43,7 +43,7 @@ All features run locally on the client-side utilizing React, TypeScript, and loc
    - Interactive Operations Hub Simulator allowing auditors to advance fulfillment states (`Pending` ➔ `In Transit` / `Ready` ➔ `Completed`) or void orders.
    - **Sandbox Sales Invoice Simulation:** Outputs a beautiful sandbox layout featuring:
      - Clear headers with corporate identification placeholders.
-     - Accurate tax-ready breakdowns (including vatable sales, output VAT amount, exempt sales, shipping fees, and grand total).
+     - Sandbox-recalculated tax-ready breakdowns (including vatable sales, output VAT amount, exempt sales, shipping fees, and grand total).
      - **Mandatory Regulatory Advisory:** Prominently displays the Filipino phrase **"NO APPROVED THERAPEUTIC CLAIMS"** at both the top and bottom of the printed layout.
      - Responsive print stylesheets formatting perfectly for desktop paper and PDF outputs.
 
@@ -51,7 +51,7 @@ All features run locally on the client-side utilizing React, TypeScript, and loc
 
 ### III. COMPLIANCE CONTROL MATRIX & SOURCE-CODE AUDIT
 
-Maintain absolute compliance with all Phase 0 and Phase 1 controls:
+Maintain Phase 0 and Phase 1 controls under sandbox environments:
 
 | Control ID | Control Specification | Implementation Status | Evidence / Source-Code Path |
 | :--- | :--- | :--- | :--- |
@@ -84,7 +84,7 @@ The following items have **NOT** been implemented in this phase, preserving prop
 
 ### VI. PHASE 2 CERTIFICATION STATEMENT
 
-This regional platform is hereby certified as having completed all Phase 2 e-commerce foundation requirements in absolute compliance with the authorized scope.
+This regional platform has completed all Phase 2 e-commerce foundation requirements. **Sandbox implementation and technical verification completed; production tax, regulatory, payment, and business evidence remain subject to verification.**
 
 **STAGE GATE:** The platform has now entered a **STOP** status. We await explicit business authorization and the supply of verified corporate TIN/BIR/SRP records before beginning Phase 3 (Production Launch Hardening & Database Integration).
 

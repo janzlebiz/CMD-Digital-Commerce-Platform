@@ -241,7 +241,7 @@ export const CartView: React.FC<CartViewProps> = ({
               ) : (
                 <>
                   <div className="flex justify-between text-slate-500">
-                    <span>Non-VAT Exempt Sales:</span>
+                    <span>Non-VAT Sales:</span>
                     <span className="font-mono">₱{nonVatExempt.toLocaleString('en-US', { minimumFractionDigits: 2 })}</span>
                   </div>
                   <div className="flex justify-between text-emerald-400/80">

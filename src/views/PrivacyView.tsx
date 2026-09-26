@@ -20,13 +20,13 @@ export const PrivacyView: React.FC<PrivacyViewProps> = ({ onNavigate }) => {
         <div className="flex items-center gap-2 text-xs font-mono text-amber-400 uppercase tracking-widest">
           <span>Data Privacy & User Rights</span>
           <span aria-hidden="true">·</span>
-          <span>RA 10173 & NPC Compliant</span>
+          <span>RA 10173 Privacy Baseline</span>
         </div>
         <h1 className="text-3xl sm:text-5xl font-serif font-black tracking-tight text-white">
           Privacy Policy
         </h1>
         <p className="text-xs sm:text-sm text-slate-400">
-          Last Updated & Certified: September 2026 (Phase 1 Baseline)
+          Last Updated & Certified: September 2026 (Phase 2 Sandbox Baseline)
         </p>
       </div>
 

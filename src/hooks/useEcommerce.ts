@@ -195,7 +195,7 @@ export const useEcommerce = () => {
       vatZeroRatedSales = 0;
       nonVatExempt = 0;
     } else {
-      // Non-VAT entity: total sales are exempt from VAT but classified under Non-VAT
+      // Non-VAT Registered treatment: total sales are under Non-VAT sales
       vatableSales = 0;
       vatAmount = 0;
       vatExemptSales = 0;

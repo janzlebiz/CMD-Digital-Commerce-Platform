@@ -67,6 +67,19 @@ export const OrdersView: React.FC<OrdersViewProps> = ({
     }
   };
 
+  const getPaymentStatusLabel = (status: string) => {
+    switch (status) {
+      case 'pending_payment':
+        return 'Pending Payment';
+      case 'paid':
+        return 'Paid & Verified';
+      case 'payment_verification_required':
+        return 'Payment Verification Required (Sandbox)';
+      default:
+        return status;
+    }
+  };
+
   const handlePrint = () => {
     window.print();
   };
@@ -373,9 +386,17 @@ export const OrdersView: React.FC<OrdersViewProps> = ({
                           <strong>FDA circular reference:</strong> Product registered under Food Supplement status. Not authorized for ocular, direct mucosal, or ophthalmic application. Dilution strictly mandated.
                         </p>
                         <p>
-                          <strong>Payment channel clearance:</strong> Paid via{' '}
-                          <span className="font-bold text-slate-800 uppercase">{activeOrder.paymentMethod}</span>.
-                          Fulfillment status: <span className="font-semibold text-slate-800">{getFulfillmentLabel(activeOrder.fulfillmentStatus)}</span>.
+                          <strong>Payment channel clearance:</strong> Selected payment method:{' '}
+                          <span className="font-bold text-slate-800 uppercase">{activeOrder.paymentMethod.replace(/_/g, ' ')}</span>.
+                        </p>
+                        <p>
+                          <strong>Simulated Payment status:</strong>{' '}
+                          <span className="font-semibold text-slate-800">
+                            {getPaymentStatusLabel(activeOrder.paymentStatus)}
+                          </span>
+                        </p>
+                        <p>
+                          <strong>Fulfillment status:</strong> <span className="font-semibold text-slate-800">{getFulfillmentLabel(activeOrder.fulfillmentStatus)}</span>.
                         </p>
                       </div>
                       
@@ -412,12 +433,12 @@ export const OrdersView: React.FC<OrdersViewProps> = ({
                       ) : (
                         <>
                           <div className="flex justify-between md:justify-end gap-6 border-b border-slate-100 py-1 text-[11px] text-slate-600">
-                            <span className="text-slate-500 text-left">Non-VAT Exempt Sales:</span>
+                            <span className="text-slate-500 text-left">Non-VAT Sales:</span>
                             <span>₱{activeOrder.nonVatExempt.toLocaleString('en-US', { minimumFractionDigits: 2 })}</span>
                           </div>
                           <div className="flex justify-between md:justify-end gap-6 border-b border-slate-100 py-1 text-[11px] text-emerald-700 font-bold">
                             <span className="text-left">Output VAT (0%):</span>
-                            <span>EXEMPT (Non-VAT)</span>
+                            <span>Non-VAT Registered — Non-VAT treatment</span>
                           </div>
                         </>
                       )}
