@@ -241,12 +241,16 @@ export const useEcommerce = () => {
     }
   };
 
-  const advanceOrderStatus = (orderId: string) => {
-    // Handled strictly by backend status managers or operations dashboard.
+  const advanceOrderStatus = async (orderId: string, currentFulfillmentStatus: string) => {
+    let nextStatus = 'ready_for_pickup';
+    if (currentFulfillmentStatus === 'pending_processing') nextStatus = 'ready_for_pickup';
+    else if (currentFulfillmentStatus === 'ready_for_pickup' || currentFulfillmentStatus === 'in_transit') nextStatus = 'completed';
+
+    await TrustedServerController.updateOrderStatus(orderId, undefined, nextStatus);
   };
 
-  const cancelOrder = (orderId: string) => {
-    // Handled strictly via authenticated backend.
+  const cancelOrder = async (orderId: string) => {
+    await TrustedServerController.updateOrderStatus(orderId, undefined, 'cancelled');
   };
 
   return {

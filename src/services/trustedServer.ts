@@ -155,4 +155,69 @@ export class TrustedServerController {
     }
     throw new Error(`Inventory Missing Block: Stock level record does not exist for SKU ${skuId} at branch ${branchId}`);
   }
+
+  /**
+   * 6. Admin: Fetch orders for staff branch with server-side branch isolation
+   */
+  public static async fetchAdminOrders(branchId?: string): Promise<any> {
+    const headers = await this.getAuthHeaders();
+    const query = branchId ? `?branchId=${encodeURIComponent(branchId)}` : '';
+    const res = await fetch(`/api/admin/orders${query}`, {
+      method: 'GET',
+      headers,
+    });
+
+    if (!res.ok) {
+      const errData = await res.json().catch(() => ({ error: 'Order query failed' }));
+      throw new Error(errData.error || `HTTP error ${res.status}`);
+    }
+
+    return res.json();
+  }
+
+  /**
+   * 7. Admin: Authoritative status transition
+   */
+  public static async updateOrderStatus(
+    orderId: string,
+    paymentStatus?: string,
+    fulfillmentStatus?: string
+  ): Promise<any> {
+    const headers = await this.getAuthHeaders();
+    const res = await fetch('/api/admin/orders/update-status', {
+      method: 'POST',
+      headers,
+      body: JSON.stringify({ orderId, paymentStatus, fulfillmentStatus }),
+    });
+
+    if (!res.ok) {
+      const errData = await res.json().catch(() => ({ error: 'Status update failed' }));
+      throw new Error(errData.error || `HTTP error ${res.status}`);
+    }
+
+    return res.json();
+  }
+
+  /**
+   * 8. Admin: Replenish branch inventory stock
+   */
+  public static async replenishInventory(
+    branchId: string,
+    skuId: string,
+    quantity: number
+  ): Promise<any> {
+    const headers = await this.getAuthHeaders();
+    const res = await fetch('/api/admin/inventory/replenish', {
+      method: 'POST',
+      headers,
+      body: JSON.stringify({ branchId, skuId, quantity }),
+    });
+
+    if (!res.ok) {
+      const errData = await res.json().catch(() => ({ error: 'Inventory replenishment failed' }));
+      throw new Error(errData.error || `HTTP error ${res.status}`);
+    }
+
+    return res.json();
+  }
 }

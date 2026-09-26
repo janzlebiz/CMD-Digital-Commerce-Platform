@@ -506,6 +506,249 @@ export function createExpressApp(deps: ServerDependencies = {}): Express {
     }
   });
 
+  // --- 5. GET /api/admin/orders ---
+  app.get('/api/admin/orders', async (req: Request, res: Response): Promise<void> => {
+    const user = await requireAuth(req, res);
+    if (!user) return;
+
+    // Authorization: Only staff, branch_manager, regional_director, super_admin allowed
+    const isStaff = user.role === 'branch_manager' || user.role === 'regional_director' || user.role === 'super_admin' || (user.role as string) === 'staff' || (user.role as string) === 'admin';
+    if (!isStaff) {
+      res.status(403).json({ error: `Administrative Access Denied: User role '${user.role}' is not authorized to access administrative order data.` });
+      return;
+    }
+
+    try {
+      const requestedBranchId = req.query.branchId as string | undefined;
+
+      // Branch Isolation Enforcer
+      if (user.assignedBranchId && user.role !== 'super_admin' && user.role !== 'regional_director') {
+        if (requestedBranchId && requestedBranchId !== user.assignedBranchId) {
+          res.status(403).json({ error: `Branch Isolation Block: User assigned to branch '${user.assignedBranchId}' cannot query administrative orders for branch '${requestedBranchId}'.` });
+          return;
+        }
+      }
+
+      let ordersQuery: any = db.collection('orders');
+      const targetBranchId = user.assignedBranchId && user.role !== 'super_admin' && user.role !== 'regional_director'
+        ? user.assignedBranchId
+        : requestedBranchId;
+
+      if (targetBranchId) {
+        ordersQuery = ordersQuery.where('branchId', '==', targetBranchId);
+      }
+
+      const snap = await ordersQuery.get();
+      const docs: any[] = [];
+      snap.forEach((doc: any) => {
+        docs.push(doc.data());
+      });
+
+      res.json({ orders: docs, count: docs.length });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  // --- 6. POST /api/admin/orders/update-status ---
+  app.post('/api/admin/orders/update-status', async (req: Request, res: Response): Promise<void> => {
+    const user = await requireAuth(req, res);
+    if (!user) return;
+
+    // Authorization: Staff / Admin roles
+    const isStaff = user.role === 'branch_manager' || user.role === 'regional_director' || user.role === 'super_admin' || (user.role as string) === 'staff' || (user.role as string) === 'admin';
+    if (!isStaff) {
+      res.status(403).json({ error: `Administrative Access Denied: User role '${user.role}' is not authorized to update order status.` });
+      return;
+    }
+
+    try {
+      const { orderId, paymentStatus, fulfillmentStatus } = req.body;
+      if (!orderId) {
+        res.status(400).json({ error: 'orderId parameter is required.' });
+        return;
+      }
+
+      if (!paymentStatus && !fulfillmentStatus) {
+        res.status(400).json({ error: 'At least one of paymentStatus or fulfillmentStatus must be provided for status transition.' });
+        return;
+      }
+
+      const orderRef = db.collection('orders').doc(orderId);
+      const orderSnap = await orderRef.get();
+      if (!orderSnap.exists) {
+        res.status(404).json({ error: `Order '${orderId}' not found.` });
+        return;
+      }
+
+      const orderData = orderSnap.data();
+      if (!orderData) {
+        res.status(404).json({ error: `Order '${orderId}' data record is missing.` });
+        return;
+      }
+
+      const orderBranchId = orderData.branchId || orderData.pickupBranchId;
+
+      // Branch Isolation Check
+      if (user.assignedBranchId && user.assignedBranchId !== orderBranchId && user.role !== 'super_admin' && user.role !== 'regional_director') {
+        res.status(403).json({ error: `Branch Isolation Block: User assigned to branch '${user.assignedBranchId}' cannot modify order '${orderId}' belonging to branch '${orderBranchId}'.` });
+        return;
+      }
+
+      // Canonical Order Status Transition Matrix Validation
+      const currentPaymentStatus = orderData.paymentStatus || 'pending_payment';
+      const currentFulfillmentStatus = orderData.fulfillmentStatus || 'pending_processing';
+
+      // Valid payment states: pending_payment -> paid | payment_verification_required; payment_verification_required -> paid
+      if (paymentStatus) {
+        const validPaymentStatuses = ['pending_payment', 'paid', 'payment_verification_required'];
+        if (!validPaymentStatuses.includes(paymentStatus)) {
+          res.status(400).json({ error: `Invalid Payment Status: '${paymentStatus}' is not a valid status value.` });
+          return;
+        }
+
+        if (currentPaymentStatus === 'paid' && paymentStatus !== 'paid') {
+          res.status(400).json({ error: `Invalid Status Transition: Cannot transition payment status from terminal state 'paid' to '${paymentStatus}'.` });
+          return;
+        }
+      }
+
+      // Valid fulfillment states: pending_processing -> ready_for_pickup | in_transit | cancelled
+      // ready_for_pickup -> completed | cancelled
+      // in_transit -> completed | cancelled
+      // completed or cancelled -> terminal
+      if (fulfillmentStatus) {
+        const validFulfillmentStatuses = ['pending_processing', 'ready_for_pickup', 'in_transit', 'completed', 'cancelled'];
+        if (!validFulfillmentStatuses.includes(fulfillmentStatus)) {
+          res.status(400).json({ error: `Invalid Fulfillment Status: '${fulfillmentStatus}' is not a valid status value.` });
+          return;
+        }
+
+        if (currentFulfillmentStatus === 'completed' || currentFulfillmentStatus === 'cancelled') {
+          res.status(400).json({ error: `Invalid Status Transition: Cannot transition fulfillment status from terminal state '${currentFulfillmentStatus}' to '${fulfillmentStatus}'.` });
+          return;
+        }
+
+        if (currentFulfillmentStatus === 'ready_for_pickup' && !['completed', 'cancelled', 'ready_for_pickup'].includes(fulfillmentStatus)) {
+          res.status(400).json({ error: `Invalid Status Transition: Cannot transition from 'ready_for_pickup' to '${fulfillmentStatus}'.` });
+          return;
+        }
+
+        if (currentFulfillmentStatus === 'in_transit' && !['completed', 'cancelled', 'in_transit'].includes(fulfillmentStatus)) {
+          res.status(400).json({ error: `Invalid Status Transition: Cannot transition from 'in_transit' to '${fulfillmentStatus}'.` });
+          return;
+        }
+      }
+
+      const isCancelling = fulfillmentStatus === 'cancelled' && currentFulfillmentStatus !== 'cancelled';
+
+      await db.runTransaction(async (transaction) => {
+        // If order is being cancelled, transactionally restock reserved items back into branch inventory
+        if (isCancelling && Array.isArray(orderData.items)) {
+          for (const item of orderData.items) {
+            const invRef = db.collection('branch_inventory').doc(`${orderBranchId}_${item.skuId}`);
+            const invSnap = await transaction.get(invRef);
+            if (invSnap.exists) {
+              const currentStock = invSnap.get('stockCount') || 0;
+              transaction.update(invRef, {
+                stockCount: currentStock + item.quantity,
+                lastReplenishedAt: FieldValue.serverTimestamp(),
+              });
+            }
+          }
+        }
+
+        const updates: any = {
+          updatedAt: FieldValue.serverTimestamp(),
+          updatedBy: user.uid,
+        };
+        if (paymentStatus) updates.paymentStatus = paymentStatus;
+        if (fulfillmentStatus) updates.fulfillmentStatus = fulfillmentStatus;
+
+        transaction.update(orderRef, updates);
+      });
+
+      res.json({
+        success: true,
+        orderId,
+        paymentStatus: paymentStatus || currentPaymentStatus,
+        fulfillmentStatus: fulfillmentStatus || currentFulfillmentStatus,
+      });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  // --- 7. POST /api/admin/inventory/replenish ---
+  app.post('/api/admin/inventory/replenish', async (req: Request, res: Response): Promise<void> => {
+    const user = await requireAuth(req, res);
+    if (!user) return;
+
+    // Authorization: Staff / Admin roles
+    const isStaff = user.role === 'branch_manager' || user.role === 'regional_director' || user.role === 'super_admin' || (user.role as string) === 'staff' || (user.role as string) === 'admin';
+    if (!isStaff) {
+      res.status(403).json({ error: `Administrative Access Denied: User role '${user.role}' is not authorized to replenish inventory.` });
+      return;
+    }
+
+    try {
+      const { branchId, skuId, quantity } = req.body;
+
+      if (!branchId || !skuId) {
+        res.status(400).json({ error: 'branchId and skuId parameters are required.' });
+        return;
+      }
+
+      if (typeof quantity !== 'number' || !Number.isInteger(quantity) || quantity <= 0) {
+        res.status(400).json({ error: 'quantity parameter must be a positive integer greater than 0.' });
+        return;
+      }
+
+      if (!PRODUCTS_CATALOG[skuId]) {
+        res.status(400).json({ error: `Invalid SKU identifier: '${skuId}'.` });
+        return;
+      }
+
+      // Branch Isolation Check
+      if (user.assignedBranchId && user.assignedBranchId !== branchId && user.role !== 'super_admin' && user.role !== 'regional_director') {
+        res.status(403).json({ error: `Branch Isolation Block: User assigned to branch '${user.assignedBranchId}' cannot replenish inventory for branch '${branchId}'.` });
+        return;
+      }
+
+      const invRef = db.collection('branch_inventory').doc(`${branchId}_${skuId}`);
+
+      let newStockCount = quantity;
+      await db.runTransaction(async (transaction) => {
+        const invSnap = await transaction.get(invRef);
+        if (invSnap.exists) {
+          const currentStock = invSnap.get('stockCount') || 0;
+          newStockCount = currentStock + quantity;
+          transaction.update(invRef, {
+            stockCount: newStockCount,
+            lastReplenishedAt: FieldValue.serverTimestamp(),
+          });
+        } else {
+          transaction.set(invRef, {
+            branchId,
+            skuId,
+            stockCount: quantity,
+            lastReplenishedAt: FieldValue.serverTimestamp(),
+          });
+        }
+      });
+
+      res.json({
+        success: true,
+        branchId,
+        skuId,
+        addedQuantity: quantity,
+        newStockCount,
+      });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
   return app;
 }
 
