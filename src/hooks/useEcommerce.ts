@@ -182,7 +182,7 @@ export const useEcommerce = () => {
     let vatableSales = 0;
     let vatExemptSales = 0;
     let vatZeroRatedSales = 0;
-    let nonVatExempt = 0;
+    let nonVatSales = 0;
 
     if (vatConfig.isVatRegistered) {
       // VAT is inclusive in base price (standard BIR practice for retail)
@@ -193,14 +193,14 @@ export const useEcommerce = () => {
       vatAmount = subtotal - vatableSales;
       vatExemptSales = 0;
       vatZeroRatedSales = 0;
-      nonVatExempt = 0;
+      nonVatSales = 0;
     } else {
       // Non-VAT Registered treatment: total sales are under Non-VAT sales
       vatableSales = 0;
       vatAmount = 0;
       vatExemptSales = 0;
       vatZeroRatedSales = 0;
-      nonVatExempt = subtotal; // Total classified as non-VAT
+      nonVatSales = subtotal; // Total classified as non-VAT
     }
 
     return {
@@ -211,7 +211,7 @@ export const useEcommerce = () => {
       vatableSales,
       vatExemptSales,
       vatZeroRatedSales,
-      nonVatExempt,
+      nonVatSales,
       total: grandTotal,
       isVatRegistered: vatConfig.isVatRegistered,
     };
@@ -256,7 +256,7 @@ export const useEcommerce = () => {
       shippingFee: totals.shippingFee,
       subtotal: totals.subtotal,
       vatAmount: totals.vatAmount,
-      nonVatExempt: totals.nonVatExempt,
+      nonVatSales: totals.nonVatSales,
       total: totals.total,
       isVatRegistered: totals.isVatRegistered,
       paymentMethod,

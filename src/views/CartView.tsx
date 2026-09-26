@@ -51,13 +51,13 @@ export const CartView: React.FC<CartViewProps> = ({
   // Calculate tax preview
   let vatableSales = 0;
   let vatAmount = 0;
-  let nonVatExempt = 0;
+  let nonVatSales = 0;
 
   if (vatConfig.isVatRegistered) {
     vatableSales = subtotal / (1 + vatConfig.vatRatePercent / 100);
     vatAmount = subtotal - vatableSales;
   } else {
-    nonVatExempt = subtotal;
+    nonVatSales = subtotal;
   }
 
   const handleQtyChange = (skuId: string, newQty: number) => {
@@ -242,7 +242,7 @@ export const CartView: React.FC<CartViewProps> = ({
                 <>
                   <div className="flex justify-between text-slate-500">
                     <span>Non-VAT Sales:</span>
-                    <span className="font-mono">₱{nonVatExempt.toLocaleString('en-US', { minimumFractionDigits: 2 })}</span>
+                    <span className="font-mono">₱{nonVatSales.toLocaleString('en-US', { minimumFractionDigits: 2 })}</span>
                   </div>
                   <div className="flex justify-between text-emerald-400/80">
                     <span>Value-Added Tax (0%):</span>

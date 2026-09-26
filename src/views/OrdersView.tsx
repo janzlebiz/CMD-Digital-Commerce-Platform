@@ -434,7 +434,7 @@ export const OrdersView: React.FC<OrdersViewProps> = ({
                         <>
                           <div className="flex justify-between md:justify-end gap-6 border-b border-slate-100 py-1 text-[11px] text-slate-600">
                             <span className="text-slate-500 text-left">Non-VAT Sales:</span>
-                            <span>₱{activeOrder.nonVatExempt.toLocaleString('en-US', { minimumFractionDigits: 2 })}</span>
+                            <span>₱{activeOrder.nonVatSales.toLocaleString('en-US', { minimumFractionDigits: 2 })}</span>
                           </div>
                           <div className="flex justify-between md:justify-end gap-6 border-b border-slate-100 py-1 text-[11px] text-emerald-700 font-bold">
                             <span className="text-left">Output VAT (0%):</span>

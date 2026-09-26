@@ -58,7 +58,7 @@ export interface Order {
   shippingFee: number;
   subtotal: number;
   vatAmount: number;
-  nonVatExempt: number;
+  nonVatSales: number;
   total: number;
   isVatRegistered: boolean;
   paymentMethod: PaymentMethod;

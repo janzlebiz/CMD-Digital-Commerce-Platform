@@ -560,7 +560,7 @@ export const CheckoutView: React.FC<CheckoutViewProps> = ({
                   <div className="flex justify-between text-slate-500">
                     <span>Non-VAT Sales:</span>
                     <span className="font-mono">
-                      ₱{totals.nonVatExempt.toLocaleString('en-US', { minimumFractionDigits: 2 })}
+                      ₱{totals.nonVatSales.toLocaleString('en-US', { minimumFractionDigits: 2 })}
                     </span>
                   </div>
                   <div className="flex justify-between text-emerald-400/80">
