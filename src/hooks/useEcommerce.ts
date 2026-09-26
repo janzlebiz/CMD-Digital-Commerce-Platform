@@ -130,10 +130,13 @@ export const useEcommerce = () => {
     setCart([]);
   };
 
-  // Authoritative dynamic database stock level getter
-  const getStockLevel = (skuId: string): number => {
-    // Non-authoritative default preview lookup. Production transactions enforce this strictly on the backend.
-    return 10; 
+  // --- NON-AUTHORITATIVE STOCK LEVEL (UI PREVIEW HELPER ONLY) ---
+  // Authoritative branch stock counts and transactional decrements are enforced strictly on the server.
+  // This helper returns a non-authoritative client input cap (99) strictly for frontend quantity pickers.
+  const getStockLevel = (_skuId: string): number => {
+    // Non-authoritative UI stepper bound only. Real inventory is server-authoritative.
+    const NON_AUTHORITATIVE_UI_STEPPER_CAP = 99;
+    return NON_AUTHORITATIVE_UI_STEPPER_CAP;
   };
 
   const updateStockLevel = (skuId: string, newCount: number) => {

@@ -203,8 +203,18 @@ async function verifyPractitionerAssignment(practitionerId, patientId) {
  */
 exports.calculateOrder = functions.https.onCall(async (data, context) => {
     const { items } = data;
-    if (!Array.isArray(items)) {
-        throw new functions.https.HttpsError('invalid-argument', 'Payload items parameter must be a valid array.');
+    if (!Array.isArray(items) || items.length === 0) {
+        throw new functions.https.HttpsError('invalid-argument', 'Payload items parameter must be a valid non-empty array.');
+    }
+    // Validate every order item before pricing or calculations
+    for (const item of items) {
+        if (typeof item !== 'object' ||
+            item === null ||
+            typeof item.quantity !== 'number' ||
+            !Number.isInteger(item.quantity) ||
+            item.quantity <= 0) {
+            throw new functions.https.HttpsError('invalid-argument', 'Each item quantity must be a positive integer greater than 0.');
+        }
     }
     let subtotal = 0;
     const canonicalItems = items.map((item) => {
@@ -259,6 +269,19 @@ exports.createOrderSecure = functions.https.onCall(async (data, context) => {
         throw new functions.https.HttpsError('unauthenticated', 'User identity required.');
     }
     const { items, branchId, customer, paymentMethod } = data;
+    if (!Array.isArray(items) || items.length === 0) {
+        throw new functions.https.HttpsError('invalid-argument', 'Payload items parameter must be a valid non-empty array.');
+    }
+    // Validate every order item before pricing or inventory mutation
+    for (const item of items) {
+        if (typeof item !== 'object' ||
+            item === null ||
+            typeof item.quantity !== 'number' ||
+            !Number.isInteger(item.quantity) ||
+            item.quantity <= 0) {
+            throw new functions.https.HttpsError('invalid-argument', 'Each item quantity must be a positive integer greater than 0.');
+        }
+    }
     // Real independent backend authentication and branch scope check
     const authCheck = await authorizeUser(context.auth.uid, ['customer', 'staff', 'practitioner', 'manager', 'admin']);
     if (!authCheck.authorized) {
