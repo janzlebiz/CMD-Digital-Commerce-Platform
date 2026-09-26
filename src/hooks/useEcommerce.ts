@@ -9,6 +9,7 @@ import { PRODUCTS_CATALOG } from '../data/products';
 import { TrustedServerController } from '../services/trustedServer';
 import { db, auth } from '../firebase';
 import { collection, query, where, onSnapshot } from 'firebase/firestore';
+import { onAuthStateChanged } from 'firebase/auth';
 
 import { INITIAL_PRICING_CONFIGS } from '../data/ecommerceConfig';
 
@@ -37,44 +38,55 @@ export const useEcommerce = () => {
     localStorage.setItem('hci_cmd_cart', JSON.stringify(cart));
   }, [cart]);
 
-  // Real-time Firestore Sync for Orders (No localStorage caching)
+  // Real-time Firestore Sync for Customer Orders (No localStorage caching)
   useEffect(() => {
-    const user = auth.currentUser;
-    if (!user) {
-      setOrders([]);
-      return;
-    }
+    let unsubscribeOrders: (() => void) | null = null;
 
-    const q = query(collection(db, 'orders'), where('userId', '==', user.uid));
-    const unsubscribe = onSnapshot(q, (snapshot) => {
-      const docs: Order[] = [];
-      snapshot.forEach((doc) => {
-        const d = doc.data();
-        docs.push({
-          id: d.id,
-          createdAt: d.createdAt?.seconds ? new Date(d.createdAt.seconds * 1000).toISOString() : new Date().toISOString(),
-          customer: d.customer,
-          items: d.items,
-          fulfillmentMethod: d.fulfillmentMethod || 'pickup',
-          pickupBranchId: d.branchId,
-          shippingFee: d.shippingFee,
-          subtotal: d.subtotal,
-          vatAmount: d.vatAmount,
-          nonVatSales: d.nonVatSales,
-          total: d.total,
-          isVatRegistered: d.isVatRegistered,
-          paymentMethod: d.paymentMethod,
-          paymentStatus: d.paymentStatus,
-          fulfillmentStatus: d.fulfillmentStatus,
-          vatableSales: d.vatableSales,
-          vatExemptSales: d.vatExemptSales,
-          vatZeroRatedSales: d.vatZeroRatedSales,
+    const unsubscribeAuth = onAuthStateChanged(auth, (user) => {
+      if (unsubscribeOrders) {
+        unsubscribeOrders();
+        unsubscribeOrders = null;
+      }
+
+      if (!user) {
+        setOrders([]);
+        return;
+      }
+
+      const q = query(collection(db, 'orders'), where('userId', '==', user.uid));
+      unsubscribeOrders = onSnapshot(q, (snapshot) => {
+        const docs: Order[] = [];
+        snapshot.forEach((doc) => {
+          const d = doc.data();
+          docs.push({
+            id: d.id,
+            createdAt: d.createdAt?.seconds ? new Date(d.createdAt.seconds * 1000).toISOString() : new Date().toISOString(),
+            customer: d.customer,
+            items: d.items,
+            fulfillmentMethod: d.fulfillmentMethod || 'pickup',
+            pickupBranchId: d.branchId,
+            shippingFee: d.shippingFee,
+            subtotal: d.subtotal,
+            vatAmount: d.vatAmount,
+            nonVatSales: d.nonVatSales,
+            total: d.total,
+            isVatRegistered: d.isVatRegistered,
+            paymentMethod: d.paymentMethod,
+            paymentStatus: d.paymentStatus,
+            fulfillmentStatus: d.fulfillmentStatus,
+            vatableSales: d.vatableSales,
+            vatExemptSales: d.vatExemptSales,
+            vatZeroRatedSales: d.vatZeroRatedSales,
+          });
         });
+        setOrders(docs.sort((a, b) => b.id.localeCompare(a.id)));
       });
-      setOrders(docs.sort((a, b) => b.id.localeCompare(a.id)));
     });
 
-    return () => unsubscribe();
+    return () => {
+      unsubscribeAuth();
+      if (unsubscribeOrders) unsubscribeOrders();
+    };
   }, []);
 
   // Cart Operations

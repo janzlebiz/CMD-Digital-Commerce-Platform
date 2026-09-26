@@ -142,3 +142,15 @@ export interface ComplianceArticle {
   permitted: string[];
   prohibited: string[];
 }
+
+export type UserRole = 'customer' | 'practitioner' | 'branch_manager' | 'regional_director' | 'super_admin';
+
+export interface UserProfile {
+  uid: string;
+  email: string;
+  firstName?: string;
+  lastName?: string;
+  role: UserRole;
+  assignedBranchId?: string;
+  createdAt?: string;
+}

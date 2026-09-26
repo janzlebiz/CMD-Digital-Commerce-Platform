@@ -26,8 +26,17 @@ import { CartView } from './views/CartView';
 import { CheckoutView } from './views/CheckoutView';
 import { OrdersView } from './views/OrdersView';
 import { useEcommerce } from './hooks/useEcommerce';
+import { AuthProvider } from './context/AuthContext';
 
 export default function App() {
+  return (
+    <AuthProvider>
+      <MainLayout />
+    </AuthProvider>
+  );
+}
+
+function MainLayout() {
   const [currentView, setCurrentView] = useState<PageView>('home');
   const ecommerce = useEcommerce();
 

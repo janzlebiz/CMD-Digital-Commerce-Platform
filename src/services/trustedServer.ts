@@ -22,10 +22,9 @@ export class TrustedServerController {
       if (currentUser) {
         const idToken = await currentUser.getIdToken();
         headers['Authorization'] = `Bearer ${idToken}`;
-        headers['x-user-id'] = currentUser.uid;
       }
     } catch {
-      // Dev mode fallback
+      // Token retrieval failure
     }
     return headers;
   }
