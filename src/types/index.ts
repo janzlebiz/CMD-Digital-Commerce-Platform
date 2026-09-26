@@ -14,7 +14,67 @@ export type PageView =
   | 'compliance'
   | 'terms'
   | 'privacy'
-  | 'returns';
+  | 'returns'
+  | 'cart'
+  | 'checkout'
+  | 'orders';
+
+export interface CartItem {
+  skuId: string;
+  quantity: number;
+}
+
+export type PaymentMethod = 'gcash' | 'maya' | 'bank_transfer' | 'cash_on_pickup';
+
+export type FulfillmentMethod = 'pickup' | 'delivery';
+
+export interface CustomerInfo {
+  firstName: string;
+  lastName: string;
+  email: string;
+  phone: string;
+  addressLine1?: string;
+  barangay?: string;
+  municipality: string;
+  province: string;
+}
+
+export interface OrderItem {
+  skuId: string;
+  name: string;
+  volume: string;
+  quantity: number;
+  unitPrice: number;
+  totalPrice: number;
+}
+
+export interface Order {
+  id: string;
+  createdAt: string;
+  customer: CustomerInfo;
+  items: OrderItem[];
+  fulfillmentMethod: FulfillmentMethod;
+  pickupBranchId?: string;
+  shippingFee: number;
+  subtotal: number;
+  vatAmount: number;
+  nonVatExempt: number;
+  total: number;
+  isVatRegistered: boolean;
+  paymentMethod: PaymentMethod;
+  paymentStatus: 'pending_payment' | 'paid' | 'payment_verification_required';
+  fulfillmentStatus: 'pending_processing' | 'ready_for_pickup' | 'in_transit' | 'completed' | 'cancelled';
+  // VAT breakdown info
+  vatableSales: number;
+  vatExemptSales: number;
+  vatZeroRatedSales: number;
+}
+
+export interface VatConfiguration {
+  isVatRegistered: boolean;
+  vatRatePercent: number; // usually 12
+  isConfiguredByBusiness: boolean; // default false
+}
 
 export interface BranchRecord {
   id: string;

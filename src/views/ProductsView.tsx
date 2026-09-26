@@ -11,24 +11,53 @@ import { RegulatoryNotice } from '../components/ui/RegulatoryNotice';
 
 interface ProductsViewProps {
   onNavigate: (view: PageView) => void;
+  addToCart: (skuId: string, quantity: number) => void;
+  getStockLevel: (skuId: string) => number;
+  getSkuPrice: (skuId: string) => number;
 }
 
-export const ProductsView: React.FC<ProductsViewProps> = ({ onNavigate }) => {
+export const ProductsView: React.FC<ProductsViewProps> = ({
+  onNavigate,
+  addToCart,
+  getStockLevel,
+  getSkuPrice,
+}) => {
+  const [quantities, setQuantities] = React.useState<Record<string, number>>({
+    'hci-cmd-65ml': 1,
+    'hci-cmd-30ml': 1,
+  });
+
+  const handleQuantityChange = (skuId: string, val: number) => {
+    const stock = getStockLevel(skuId);
+    setQuantities((prev) => ({
+      ...prev,
+      [skuId]: Math.max(1, Math.min(stock, val)),
+    }));
+  };
+
   return (
     <div className="max-w-6xl mx-auto px-4 sm:px-6 lg:px-8 py-10 sm:py-16 space-y-12">
       {/* Header */}
-      <div className="space-y-3 border-b border-slate-800 pb-8">
-        <div className="flex items-center gap-2 text-xs font-mono text-amber-400 uppercase tracking-widest">
-          <span>Catalog Architecture & Presentation Boundaries</span>
-          <span aria-hidden="true">·</span>
-          <span>FR-4000008713595</span>
+      <div className="space-y-3 border-b border-slate-800 pb-8 flex flex-col md:flex-row md:items-end md:justify-between gap-6">
+        <div className="space-y-3">
+          <div className="flex items-center gap-2 text-xs font-mono text-amber-400 uppercase tracking-widest">
+            <span>Catalog Architecture & Presentation Boundaries</span>
+            <span aria-hidden="true">·</span>
+            <span>FR-4000008713595</span>
+          </div>
+          <h1 className="text-3xl sm:text-5xl font-serif font-black tracking-tight text-white">
+            HCI Cell Mineral Drops Catalog
+          </h1>
+          <p className="text-base sm:text-lg text-slate-300 max-w-2xl leading-relaxed">
+            Explore the formulation specifications, mineral profile, and upcoming commercial presentations of authentic HCI CMD ionic mineral concentrate.
+          </p>
         </div>
-        <h1 className="text-3xl sm:text-5xl font-serif font-black tracking-tight text-white">
-          HCI Cell Mineral Drops Catalog
-        </h1>
-        <p className="text-base sm:text-lg text-slate-300 max-w-3xl leading-relaxed">
-          Explore the formulation specifications, mineral profile, and upcoming commercial presentations of authentic HCI CMD ionic mineral concentrate.
-        </p>
+        <button
+          onClick={() => onNavigate('cart')}
+          className="px-5 py-3 bg-slate-900 border border-slate-800 hover:border-slate-700 text-amber-400 hover:text-amber-300 font-bold text-xs rounded transition flex items-center gap-2"
+        >
+          <span>🛒 View Shopping Cart</span>
+        </button>
       </div>
 
       {/* Mandatory Statutory Notice */}
@@ -44,7 +73,7 @@ export const ProductsView: React.FC<ProductsViewProps> = ({ onNavigate }) => {
       {/* Phase 0 Evidence Blocker Transparency Banner */}
       <RegulatoryNotice
         level="info"
-        title="Phase 1 Catalog Architecture Disclosure"
+        title="Phase 2 Commercial Checkout Activated"
         citation="COMP-FDA-002 & FAR-04"
       >
         <div className="space-y-1.5 text-xs text-slate-300 leading-relaxed">
@@ -52,97 +81,154 @@ export const ProductsView: React.FC<ProductsViewProps> = ({ onNavigate }) => {
             <strong>Registration Verification Status:</strong> The parent product formulation <em>CELL MINERAL DROPS (IONIC MINERAL CONCENTRATE) FOOD SUPPLEMENT DROPS</em> is verified under FDA Registration <strong>FR-4000008713595</strong> to Health Code International Corp., recorded with packaging description <em>WHITE OPAQUE PLASTIC BOTTLE</em>.
           </p>
           <p>
-            <strong>Packaging Annex Boundary:</strong> Under FDA CFRR procedures, commercial packaging allocations (such as 65 mL and 30 mL) are specified in the official registration certificate annex. Commercial checkout and cart ordering will unlock in Phase 2 upon formal submission and verification of the registration annex and official SRP price list.
+            <strong>Phase 2 Commercial Sandbox:</strong> Ordering is fully unlocked for system integration testing. Real-time simulated stock checking, tax calculation configuration (VAT vs Non-VAT), and branch pickup locations are active.
           </p>
         </div>
       </RegulatoryNotice>
 
       {/* Product Presentations Grid */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
-        {PRODUCTS_CATALOG.map((sku) => (
-          <div
-            key={sku.id}
-            className="bg-slate-900 border border-slate-800 rounded-xl p-6 sm:p-8 space-y-6 flex flex-col justify-between"
-          >
-            <div className="space-y-4">
-              <div>
-                <span className="text-xs font-mono text-amber-400 uppercase tracking-wider">
-                  {sku.nominalVolume} Dropper Bottle Presentation
-                </span>
-                <h2 className="text-xl sm:text-2xl font-serif font-bold text-white mt-1">
-                  {sku.name}
-                </h2>
-              </div>
+        {PRODUCTS_CATALOG.map((sku) => {
+          const stock = getStockLevel(sku.id);
+          const price = getSkuPrice(sku.id);
+          const qty = quantities[sku.id] || 1;
+          const outOfStock = stock <= 0;
 
-              {/* Status Marker */}
-              <div className="p-3 bg-amber-950/40 border border-amber-800/60 rounded text-xs text-amber-200 space-y-1">
-                <div className="font-mono uppercase font-bold text-[10px] text-amber-300 tracking-wider">
-                  Packaging Verification Status
+          return (
+            <div
+              key={sku.id}
+              className="bg-slate-900 border border-slate-800 rounded-xl p-6 sm:p-8 space-y-6 flex flex-col justify-between"
+            >
+              <div className="space-y-4">
+                <div>
+                  <span className="text-xs font-mono text-amber-400 uppercase tracking-wider">
+                    {sku.nominalVolume} Dropper Bottle Presentation
+                  </span>
+                  <h2 className="text-xl sm:text-2xl font-serif font-bold text-white mt-1">
+                    {sku.name}
+                  </h2>
                 </div>
-                <p className="font-semibold text-amber-100">
-                  {sku.statusDisplay}
+
+                {/* Status Marker */}
+                <div className="p-3 bg-amber-950/40 border border-amber-800/60 rounded text-xs text-amber-200 space-y-1">
+                  <div className="font-mono uppercase font-bold text-[10px] text-amber-300 tracking-wider">
+                    Packaging Verification Status
+                  </div>
+                  <p className="font-semibold text-amber-100">
+                    {sku.statusDisplay}
+                  </p>
+                </div>
+
+                <p className="text-xs sm:text-sm text-slate-300 leading-relaxed">
+                  {sku.description}
                 </p>
+
+                {/* Specifications Table */}
+                <div className="space-y-2 pt-2 border-t border-slate-800 text-xs">
+                  <div className="flex justify-between py-1 border-b border-slate-800/80">
+                    <span className="text-slate-400">Nominal Content:</span>
+                    <span className="font-mono text-slate-200 font-semibold">{sku.nominalVolume}</span>
+                  </div>
+                  <div className="flex justify-between py-1 border-b border-slate-800/80">
+                    <span className="text-slate-400">Packaging Format:</span>
+                    <span className="text-slate-200 text-right">{sku.packagingType}</span>
+                  </div>
+                  <div className="flex justify-between py-1 border-b border-slate-800/80">
+                    <span className="text-slate-400">Estimated Servings:</span>
+                    <span className="text-slate-200 text-right">{sku.servingsPerBottle}</span>
+                  </div>
+                  <div className="flex justify-between py-1 border-b border-slate-800/80">
+                    <span className="text-slate-400">Retail SRP (MOCK):</span>
+                    <span className="font-mono text-amber-300 font-bold">
+                      ₱{price.toLocaleString('en-US', { minimumFractionDigits: 2 })}
+                    </span>
+                  </div>
+                  <div className="flex justify-between py-1">
+                    <span className="text-slate-400">Parent FDA Reg.:</span>
+                    <span className="font-mono text-amber-300">{sku.parentRegistrationNumber}</span>
+                  </div>
+                </div>
+
+                {/* Simulated stock level indicators */}
+                <div className="p-3 bg-slate-950 border border-slate-800 rounded flex items-center justify-between text-xs">
+                  <span className="text-slate-400">Simulated Inventory Check:</span>
+                  {outOfStock ? (
+                    <span className="font-mono font-black text-red-400 uppercase tracking-wide">Out of Stock</span>
+                  ) : stock <= 5 ? (
+                    <span className="font-mono font-bold text-amber-400 uppercase tracking-wide">Low Stock ({stock} left)</span>
+                  ) : (
+                    <span className="font-mono font-bold text-emerald-400 uppercase tracking-wide">{stock} available</span>
+                  )}
+                </div>
+
+                {/* Recommended Use */}
+                <div className="bg-slate-950/80 border border-slate-800/80 rounded p-4 text-xs space-y-1">
+                  <span className="font-semibold text-amber-300 uppercase tracking-wider text-[11px] block">
+                    Suggested Dietary Serving
+                  </span>
+                  <p className="text-slate-300 leading-relaxed">
+                    {sku.recommendedUse}
+                  </p>
+                </div>
+
+                {/* Key Highlights */}
+                <div className="space-y-1 text-xs text-slate-300">
+                  <span className="font-semibold text-slate-200 block mb-1">
+                    Composition Highlights:
+                  </span>
+                  <ul className="space-y-1 list-disc list-inside text-slate-400">
+                    {sku.mineralHighlights.map((highlight, idx) => (
+                      <li key={idx}>{highlight}</li>
+                    ))}
+                  </ul>
+                </div>
               </div>
 
-              <p className="text-xs sm:text-sm text-slate-300 leading-relaxed">
-                {sku.description}
-              </p>
+              {/* Commercial Action Fully Unlocked in Phase 2 */}
+              <div className="pt-4 border-t border-slate-800 space-y-3">
+                {!outOfStock ? (
+                  <div className="flex items-center gap-2">
+                    {/* Quantity Adjustment */}
+                    <div className="flex items-center bg-slate-950 rounded border border-slate-800 shrink-0">
+                      <button
+                        onClick={() => handleQuantityChange(sku.id, qty - 1)}
+                        className="px-2.5 py-1.5 text-slate-400 hover:text-slate-200 transition"
+                      >
+                        -
+                      </button>
+                      <span className="px-3 font-mono text-xs text-slate-200">{qty}</span>
+                      <button
+                        onClick={() => handleQuantityChange(sku.id, qty + 1)}
+                        disabled={qty >= stock}
+                        className="px-2.5 py-1.5 text-slate-400 hover:text-slate-200 disabled:opacity-30 transition"
+                      >
+                        +
+                      </button>
+                    </div>
 
-              {/* Specifications Table */}
-              <div className="space-y-2 pt-2 border-t border-slate-800 text-xs">
-                <div className="flex justify-between py-1 border-b border-slate-800/80">
-                  <span className="text-slate-400">Nominal Content:</span>
-                  <span className="font-mono text-slate-200 font-semibold">{sku.nominalVolume}</span>
-                </div>
-                <div className="flex justify-between py-1 border-b border-slate-800/80">
-                  <span className="text-slate-400">Packaging Format:</span>
-                  <span className="text-slate-200 text-right">{sku.packagingType}</span>
-                </div>
-                <div className="flex justify-between py-1 border-b border-slate-800/80">
-                  <span className="text-slate-400">Estimated Servings:</span>
-                  <span className="text-slate-200 text-right">{sku.servingsPerBottle}</span>
-                </div>
-                <div className="flex justify-between py-1 border-b border-slate-800/80">
-                  <span className="text-slate-400">Retail SRP:</span>
-                  <span className="font-mono text-amber-300 font-semibold">{sku.pricingDisplay}</span>
-                </div>
-                <div className="flex justify-between py-1">
-                  <span className="text-slate-400">Parent FDA Reg.:</span>
-                  <span className="font-mono text-amber-300">{sku.parentRegistrationNumber}</span>
-                </div>
-              </div>
-
-              {/* Recommended Use */}
-              <div className="bg-slate-950/80 border border-slate-800/80 rounded p-4 text-xs space-y-1">
-                <span className="font-semibold text-amber-300 uppercase tracking-wider text-[11px] block">
-                  Suggested Dietary Serving
-                </span>
-                <p className="text-slate-300 leading-relaxed">
-                  {sku.recommendedUse}
-                </p>
-              </div>
-
-              {/* Key Highlights */}
-              <div className="space-y-1 text-xs text-slate-300">
-                <span className="font-semibold text-slate-200 block mb-1">
-                  Composition Highlights:
-                </span>
-                <ul className="space-y-1 list-disc list-inside text-slate-400">
-                  {sku.mineralHighlights.map((highlight, idx) => (
-                    <li key={idx}>{highlight}</li>
-                  ))}
-                </ul>
+                    <button
+                      onClick={() => {
+                        addToCart(sku.id, qty);
+                        // Reset local quantity to 1
+                        setQuantities((prev) => ({ ...prev, [sku.id]: 1 }));
+                      }}
+                      className="flex-1 py-2 bg-amber-500 hover:bg-amber-400 text-slate-950 font-bold text-xs rounded shadow transition"
+                    >
+                      🛒 Add to Cart
+                    </button>
+                  </div>
+                ) : (
+                  <button
+                    disabled
+                    className="w-full py-2 bg-slate-800 text-slate-500 cursor-not-allowed font-bold text-xs rounded border border-slate-700 transition"
+                  >
+                    Out of Simulated Stock
+                  </button>
+                )}
               </div>
             </div>
-
-            {/* Commercial Action Disabled in Phase 1 */}
-            <div className="pt-4 border-t border-slate-800">
-              <div className="p-3 bg-slate-950/60 border border-slate-800 rounded text-center text-xs text-slate-400">
-                <span>Phase 1 Platform: Commercial ordering opens in Phase 2 upon business evidence verification.</span>
-              </div>
-            </div>
-          </div>
-        ))}
+          );
+        })}
       </div>
 
       {/* Verified Formulation Composition Table */}

@@ -21,8 +21,15 @@ import { TermsView } from './views/TermsView';
 import { PrivacyView } from './views/PrivacyView';
 import { ReturnsView } from './views/ReturnsView';
 
+// Phase 2 E-Commerce Views & Hooks
+import { CartView } from './views/CartView';
+import { CheckoutView } from './views/CheckoutView';
+import { OrdersView } from './views/OrdersView';
+import { useEcommerce } from './hooks/useEcommerce';
+
 export default function App() {
   const [currentView, setCurrentView] = useState<PageView>('home');
+  const ecommerce = useEcommerce();
 
   // Sync route with URL hash for bookmarking and browser back/forward buttons
   useEffect(() => {
@@ -40,6 +47,9 @@ export default function App() {
         'terms',
         'privacy',
         'returns',
+        'cart',
+        'checkout',
+        'orders',
       ];
       if (validViews.includes(hash)) {
         setCurrentView(hash);
@@ -70,7 +80,14 @@ export default function App() {
       case 'education':
         return <EducationView onNavigate={handleNavigate} />;
       case 'products':
-        return <ProductsView onNavigate={handleNavigate} />;
+        return (
+          <ProductsView
+            onNavigate={handleNavigate}
+            addToCart={ecommerce.addToCart}
+            getStockLevel={ecommerce.getStockLevel}
+            getSkuPrice={ecommerce.getSkuPrice}
+          />
+        );
       case 'branches':
         return <BranchesView onNavigate={handleNavigate} />;
       case 'faq':
@@ -85,10 +102,48 @@ export default function App() {
         return <PrivacyView onNavigate={handleNavigate} />;
       case 'returns':
         return <ReturnsView onNavigate={handleNavigate} />;
+      
+      // Phase 2 cases
+      case 'cart':
+        return (
+          <CartView
+            cart={ecommerce.cart}
+            onNavigate={handleNavigate}
+            updateCartQuantity={ecommerce.updateCartQuantity}
+            removeFromCart={ecommerce.removeFromCart}
+            getSkuPrice={ecommerce.getSkuPrice}
+            getStockLevel={ecommerce.getStockLevel}
+            vatConfig={ecommerce.vatConfig}
+            setVatConfig={ecommerce.setVatConfig}
+          />
+        );
+      case 'checkout':
+        return (
+          <CheckoutView
+            cart={ecommerce.cart}
+            onNavigate={handleNavigate}
+            getSkuPrice={ecommerce.getSkuPrice}
+            getStockLevel={ecommerce.getStockLevel}
+            calculateTotals={ecommerce.calculateTotals}
+            placeOrder={ecommerce.placeOrder}
+          />
+        );
+      case 'orders':
+        return (
+          <OrdersView
+            orders={ecommerce.orders}
+            onNavigate={handleNavigate}
+            advanceOrderStatus={ecommerce.advanceOrderStatus}
+            cancelOrder={ecommerce.cancelOrder}
+            restockAll={ecommerce.restockAll}
+          />
+        );
       default:
         return <HomeView onNavigate={handleNavigate} />;
     }
   };
+
+  const totalCartCount = ecommerce.cart.reduce((sum, item) => sum + item.quantity, 0);
 
   return (
     <div className="min-h-screen bg-slate-950 text-slate-100 flex flex-col font-sans selection:bg-amber-500 selection:text-slate-950">
@@ -96,7 +151,7 @@ export default function App() {
       <StatutoryBanner />
 
       {/* Responsive Main Navigation Header */}
-      <Navbar currentView={currentView} onNavigate={handleNavigate} />
+      <Navbar currentView={currentView} onNavigate={handleNavigate} cartCount={totalCartCount} />
 
       {/* Main Content Area */}
       <main id="main-content" className="flex-1 focus:outline-none">
