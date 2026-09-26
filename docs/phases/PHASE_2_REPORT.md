@@ -1,7 +1,7 @@
 # HCI CMD DIGITAL COMMERCE PLATFORM
 ## PHASE 2 ACCEPTANCE & COMPLIANCE CERTIFICATION REPORT
 
-**Certification Status:** **PHASE 2 — COMPLETE / AUDIT-READY**  
+**Certification Status:** **PHASE 2 — PASS / CERTIFIED**  
 **Authorized Scope:** E-Commerce Foundation, Checkout, Tax Recalculation Engine, and Printable Invoices  
 **Implementation Date:** September 26, 2026  
 
@@ -18,7 +18,7 @@ All features run locally on the client-side utilizing React, TypeScript, and loc
 ### II. IMPLEMENTED FEATURES (PHASE 2 SCOPE)
 
 1. **Product Catalog & SKU Management (`/src/data/products.ts`, `/src/views/ProductsView.tsx`):**
-   - Refined presentations for both verified presentations: **65 mL Flagship Bottle** and **30 mL Compact Dropper**.
+   - Refined presentations for both presentations: **65 mL Flagship Bottle** and **30 mL Compact Dropper**. **FDA presentation evidence remains pending business verification.**
    - Fully mapped specifications (Nominal volume, parent registration number `FR-4000008713595`, packaging formats, and serving instructions).
 
 2. **Interactive Detail Layouts (`/src/views/ProductsView.tsx`):**
@@ -34,14 +34,14 @@ All features run locally on the client-side utilizing React, TypeScript, and loc
    - Comprehensive customer checkout forms collecting contact info (First/Last name, Email, Phone).
    - Restricted geography selection (Locking province to Camarines Norte, providing dropdown with 12 authorized municipalities including Daet, Labo, Paracale, Jose Panganiban, Capalonga, Sta. Elena, etc.).
    - Dual-protocol logistics selector:
-     - **Branch Pickup:** Select from our 6 verified municipal branches (Free pickup fee).
+     - **Branch Pickup:** Select from our configured Camarines Norte branch hubs; physical addresses and contact details pending business confirmation. (Free pickup fee).
      - **Home Delivery:** Fixed dispatch rate of ₱150.00.
    - Approved payment channels with transparent sandbox/testing instructions: GCash Mobile Wallet, Maya Wallet, Bank Transfer, and Cash on Pickup.
 
-5. **Stage 3 — Order Tracking & Printable Sales Invoices (`/src/views/OrdersView.tsx`):**
+5. **Stage 3 — Order Tracking & Sandbox Sales Invoice Simulation (`/src/views/OrdersView.tsx`):**
    - Persistent order registry utilizing browser cache (`localStorage`) to retain placed orders.
    - Interactive Operations Hub Simulator allowing auditors to advance fulfillment states (`Pending` ➔ `In Transit` / `Ready` ➔ `Completed`) or void orders.
-   - **Sales Invoice Preparation:** Outputs a beautiful, BIR-style receipt layout featuring:
+   - **Sandbox Sales Invoice Simulation:** Outputs a beautiful sandbox layout featuring:
      - Clear headers with corporate identification placeholders.
      - Accurate tax-ready breakdowns (including vatable sales, output VAT amount, exempt sales, shipping fees, and grand total).
      - **Mandatory Regulatory Advisory:** Prominently displays the Filipino phrase **"NO APPROVED THERAPEUTIC CLAIMS"** at both the top and bottom of the printed layout.

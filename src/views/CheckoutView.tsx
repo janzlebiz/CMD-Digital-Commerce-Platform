@@ -255,7 +255,7 @@ export const CheckoutView: React.FC<CheckoutViewProps> = ({
                   Branch Pickup
                 </span>
                 <p className="text-[11px] text-slate-400 mt-1">
-                  Pick up and pay directly at any of our 6 verified branches in Camarines Norte. (Free)
+                  Pick up and pay directly at our configured Camarines Norte branch hubs; physical addresses and contact details pending business confirmation. (Free)
                 </p>
               </button>
 
@@ -565,7 +565,7 @@ export const CheckoutView: React.FC<CheckoutViewProps> = ({
                   </div>
                   <div className="flex justify-between text-emerald-400/80">
                     <span>Output VAT (0%):</span>
-                    <span>Exempt (Non-VAT Entity)</span>
+                    <span>Non-VAT Registered — Non-VAT treatment</span>
                   </div>
                 </>
               )}
@@ -605,9 +605,14 @@ export const CheckoutView: React.FC<CheckoutViewProps> = ({
             </div>
 
             {/* Compliance warning */}
-            <p className="text-[10px] text-slate-500 leading-relaxed text-center">
-              By placing this order, you acknowledge that this is a simulated transaction utilizing sandbox parameters for technical verification.
-            </p>
+            <div className="space-y-1.5 text-center">
+              <p className="text-[10px] text-amber-500 font-semibold uppercase">
+                VAT vs. Non-VAT classification = BUSINESS CONFIRMATION REQUIRED
+              </p>
+              <p className="text-[10px] text-slate-500 leading-relaxed">
+                By placing this order, you acknowledge that this is a simulated transaction utilizing sandbox parameters for technical verification.
+              </p>
+            </div>
 
             <button
               type="submit"

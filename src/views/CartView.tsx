@@ -246,7 +246,7 @@ export const CartView: React.FC<CartViewProps> = ({
                   </div>
                   <div className="flex justify-between text-emerald-400/80">
                     <span>Value-Added Tax (0%):</span>
-                    <span>Exempt (Non-VAT Entity)</span>
+                    <span>Non-VAT Registered — Non-VAT treatment</span>
                   </div>
                 </>
               )}
@@ -301,7 +301,7 @@ export const CartView: React.FC<CartViewProps> = ({
               <div className="flex items-center justify-between">
                 <span className="text-xs text-slate-300 font-medium">VAT Registration Status</span>
                 <span className="text-[10px] font-mono text-amber-400 uppercase">
-                  {vatConfig.isVatRegistered ? 'VAT Registered' : 'Non-VAT Entity'}
+                  {vatConfig.isVatRegistered ? 'VAT Registered' : 'Non-VAT Registered — Non-VAT treatment'}
                 </span>
               </div>
               <p className="text-[10px] text-slate-400 leading-relaxed">
@@ -327,7 +327,7 @@ export const CartView: React.FC<CartViewProps> = ({
                       : 'bg-slate-950 border border-slate-800 text-slate-400 hover:text-slate-200'
                   }`}
                 >
-                  Non-VAT (Exempt)
+                  Non-VAT Registered — Non-VAT treatment
                 </button>
               </div>
             </div>
@@ -338,7 +338,7 @@ export const CartView: React.FC<CartViewProps> = ({
               <br />
               <span>vatRatePercent: <strong>{vatConfig.vatRatePercent}%</strong></span>
               <br />
-              <span>isConfiguredByBusiness: <strong>false (Pending Audit)</strong></span>
+              <span className="text-amber-300 font-semibold block mt-1">VAT vs. Non-VAT classification = BUSINESS CONFIRMATION REQUIRED</span>
             </div>
           </div>
         </div>

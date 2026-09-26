@@ -245,7 +245,7 @@ export const OrdersView: React.FC<OrdersViewProps> = ({
                   </div>
                 </div>
 
-                {/* Printable BIR-Style Sales Invoice Card */}
+                {/* Printable Sandbox Sales Invoice Card */}
                 <div className="bg-white text-slate-900 border border-slate-300 rounded-xl p-6 sm:p-8 space-y-6 print:border-none print:shadow-none print:rounded-none">
                   
                   {/* Top-most Regulatory Advisory (Printed clearly as per guidelines) */}
@@ -256,6 +256,11 @@ export const OrdersView: React.FC<OrdersViewProps> = ({
                     <span className="block text-[10px] sm:text-xs text-slate-700 tracking-wider font-bold mt-0.5 uppercase">
                       {STATUTORY_NOTICES.ENGLISH_DISCLAIMER}
                     </span>
+                  </div>
+
+                  {/* Prominent Sandbox Warning Banner */}
+                  <div className="bg-red-50 border-2 border-red-500 text-red-700 p-3 rounded text-center font-black text-xs sm:text-sm tracking-wide">
+                    DEMO / SANDBOX — NOT A REGISTERED BIR TAX INVOICE
                   </div>
 
                   {/* Document Header */}
@@ -278,7 +283,7 @@ export const OrdersView: React.FC<OrdersViewProps> = ({
 
                     <div className="text-left sm:text-right space-y-1 self-stretch sm:self-start border-t sm:border-t-0 sm:border-l border-slate-200 pt-3 sm:pt-0 sm:pl-4">
                       <span className="text-xs font-mono font-black text-slate-950 uppercase tracking-widest block bg-slate-100 px-2 py-1 rounded text-center">
-                        SALES INVOICE
+                        Sandbox Sales Invoice Simulation
                       </span>
                       <div className="text-xs font-mono text-slate-900 pt-1.5 space-y-0.5">
                         <p><strong>INVOICE NO:</strong> <span className="font-bold">{activeOrder.id}</span></p>

@@ -53,10 +53,13 @@ export const PrivacyView: React.FC<PrivacyViewProps> = ({ onNavigate }) => {
 
         <section className="space-y-3">
           <h2 className="text-lg font-serif font-bold text-white">
-            2. Personal Information Collection Status
+            2. Personal Information & Sandbox Data Status
           </h2>
           <p>
-            During the Phase 1 public information stage, the Platform does not transmit, store, or process any personal data. The inquiry form on the Contact page is a local demonstration interface only, and any details entered are processed strictly on the client side without server-side persistence. (Provenance: VERIFIED REGULATORY FACT).
+            During the Phase 1 public information stage, the Platform does not transmit, store, or process any personal data. The inquiry form on the Contact page is a local demonstration interface only, and any details entered are processed strictly on the client side without server-side persistence.
+          </p>
+          <p>
+            For the <strong>Phase 2 e-commerce features</strong>, all sandbox checkout, order, and customer data is stored <strong>locally in the user's browser (`localStorage`)</strong>. This sandbox data is processed entirely client-side, is not sent to a production server, and can be cleared or reset by the user at any time by clearing their browser data or utilizing the provided reset controls on the platform.
           </p>
 
           <div className="p-4 bg-slate-900 border border-slate-800 rounded space-y-2 mt-3">
@@ -64,7 +67,7 @@ export const PrivacyView: React.FC<PrivacyViewProps> = ({ onNavigate }) => {
               Proposed Future Consultation Baseline:
             </span>
             <p className="text-xs text-slate-300 leading-relaxed">
-              In later authorized phases where data persistence is implemented, any processing of health or wellness consultation information is designed to rely on Section 13(a) explicit consent.
+              In later authorized phases where backend data persistence is implemented, any processing of health or wellness consultation information is designed to rely on Section 13(a) explicit consent.
             </p>
           </div>
         </section>
