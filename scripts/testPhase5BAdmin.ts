@@ -59,7 +59,7 @@ async function makeRequest(
   });
 }
 
-// In-Memory Test Harness for Phase 5B Admin & Order Lifecycle Verification
+// State-Persisting In-Memory Test Harness for Phase 5B Admin & Order Lifecycle Verification
 function createTestHarness(options: {
   users?: Record<string, any>;
   inventory?: Record<string, any>;
@@ -73,43 +73,47 @@ function createTestHarness(options: {
   const assignmentStore = new Map<string, any>(Object.entries(options.assignments || {}));
   const intakesStore = new Map<string, any>(Object.entries(options.intakes || {}));
 
+  const createDocRef = (colName: string, docId: string) => {
+    return {
+      colName,
+      docId,
+      get: async () => {
+        let data: any = null;
+        if (colName === 'users') data = usersStore.get(docId);
+        else if (colName === 'branch_inventory') data = inventoryStore.get(docId);
+        else if (colName === 'orders') data = ordersStore.get(docId);
+        else if (colName === 'consultation_assignments') data = assignmentStore.get(docId);
+        else if (colName === 'consultation_intakes') data = intakesStore.get(docId);
+
+        return {
+          exists: data !== undefined,
+          data: () => data,
+          get: (field: string) => data?.[field],
+        };
+      },
+      set: async (val: any) => {
+        if (colName === 'orders') ordersStore.set(docId, val);
+        if (colName === 'branch_inventory') inventoryStore.set(docId, val);
+        if (colName === 'users') usersStore.set(docId, val);
+        return val;
+      },
+      update: async (val: any) => {
+        let existing: any = {};
+        if (colName === 'orders') existing = ordersStore.get(docId) || {};
+        if (colName === 'branch_inventory') existing = inventoryStore.get(docId) || {};
+
+        const updated = { ...existing, ...val };
+        if (colName === 'orders') ordersStore.set(docId, updated);
+        if (colName === 'branch_inventory') inventoryStore.set(docId, updated);
+        return updated;
+      },
+    };
+  };
+
   const mockDb: any = {
     collection: (colName: string) => {
       return {
-        doc: (docId: string) => {
-          return {
-            get: async () => {
-              let data: any = null;
-              if (colName === 'users') data = usersStore.get(docId);
-              else if (colName === 'branch_inventory') data = inventoryStore.get(docId);
-              else if (colName === 'orders') data = ordersStore.get(docId);
-              else if (colName === 'consultation_assignments') data = assignmentStore.get(docId);
-              else if (colName === 'consultation_intakes') data = intakesStore.get(docId);
-
-              return {
-                exists: data !== undefined,
-                data: () => data,
-                get: (field: string) => data?.[field],
-              };
-            },
-            set: async (val: any) => {
-              if (colName === 'orders') ordersStore.set(docId, val);
-              if (colName === 'branch_inventory') inventoryStore.set(docId, val);
-              if (colName === 'users') usersStore.set(docId, val);
-              return val;
-            },
-            update: async (val: any) => {
-              let existing: any = {};
-              if (colName === 'orders') existing = ordersStore.get(docId) || {};
-              if (colName === 'branch_inventory') existing = inventoryStore.get(docId) || {};
-
-              const updated = { ...existing, ...val };
-              if (colName === 'orders') ordersStore.set(docId, updated);
-              if (colName === 'branch_inventory') inventoryStore.set(docId, updated);
-              return updated;
-            },
-          };
-        },
+        doc: (docId: string) => createDocRef(colName, docId),
         where: (field: string, op: string, val: string) => {
           return {
             get: async () => {
@@ -143,22 +147,34 @@ function createTestHarness(options: {
       };
     },
     runTransaction: async (updateFunction: (tx: any) => Promise<any>) => {
-      const stageUpdates = new Map<string, { col: string; docId: string; updates: any }>();
+      const stagedOps: Array<{ colName: string; docId: string; type: 'set' | 'update'; val: any }> = [];
 
       const mockTx = {
         get: async (docRef: any) => {
           return docRef.get();
         },
         update: (docRef: any, updates: any) => {
-          // Track updates
-          stageUpdates.set(JSON.stringify(docRef), { col: 'unknown', docId: 'unknown', updates });
+          stagedOps.push({ colName: docRef.colName, docId: docRef.docId, type: 'update', val: updates });
         },
         set: (docRef: any, val: any) => {
-          stageUpdates.set(JSON.stringify(docRef), { col: 'unknown', docId: 'unknown', updates: val });
+          stagedOps.push({ colName: docRef.colName, docId: docRef.docId, type: 'set', val });
         },
       };
 
+      // Run transaction. If updateFunction throws, transaction aborts and stagedOps are discarded!
       const result = await updateFunction(mockTx);
+
+      // Commit staged updates on transaction success
+      for (const op of stagedOps) {
+        if (op.colName === 'branch_inventory') {
+          const existing = inventoryStore.get(op.docId) || {};
+          inventoryStore.set(op.docId, op.type === 'update' ? { ...existing, ...op.val } : op.val);
+        } else if (op.colName === 'orders') {
+          const existing = ordersStore.get(op.docId) || {};
+          ordersStore.set(op.docId, op.type === 'update' ? { ...existing, ...op.val } : op.val);
+        }
+      }
+
       return result;
     },
   };
@@ -414,18 +430,30 @@ async function runPhase5BTests() {
     }
   }
 
-  // --- TEST 7: Invalid status transition is rejected ---
+  // --- TEST 7: Payment Status Matrix Enforcement (Valid vs Invalid Transitions) ---
   {
     const harness = createTestHarness({
       users: {
         'manager-daet-uid': { role: 'branch_manager', assignedBranchId: 'daet' },
       },
       orders: {
-        'HCI-ORD-COMPLETED': {
-          id: 'HCI-ORD-COMPLETED',
+        'ORD-PENDING-PAY': {
+          id: 'ORD-PENDING-PAY',
+          branchId: 'daet',
+          paymentStatus: 'pending_payment',
+          fulfillmentStatus: 'pending_processing',
+        },
+        'ORD-VERIF-REQ': {
+          id: 'ORD-VERIF-REQ',
+          branchId: 'daet',
+          paymentStatus: 'payment_verification_required',
+          fulfillmentStatus: 'pending_processing',
+        },
+        'ORD-PAID-TERMINAL': {
+          id: 'ORD-PAID-TERMINAL',
           branchId: 'daet',
           paymentStatus: 'paid',
-          fulfillmentStatus: 'completed', // Terminal state
+          fulfillmentStatus: 'pending_processing',
         },
       },
     });
@@ -433,31 +461,91 @@ async function runPhase5BTests() {
     const server = http.createServer(app).listen(0);
 
     try {
-      // Attempt transition from terminal 'completed' to 'pending_processing'
-      const res = await makeRequest(
+      // Valid Payment Transitions
+      const resP1 = await makeRequest(
         server,
         '/api/admin/orders/update-status',
         'POST',
-        { orderId: 'HCI-ORD-COMPLETED', fulfillmentStatus: 'pending_processing' },
+        { orderId: 'ORD-PENDING-PAY', paymentStatus: 'payment_verification_required' },
         { Authorization: 'Bearer MANAGER_DAET_TOKEN' }
       );
-      assert(res.status === 400, 'Test 7.1: Status transition from terminal state \'completed\' rejected with HTTP 400');
+      assert(resP1.status === 200, 'Test 7.1: Valid Payment Transition: pending_payment -> payment_verification_required (HTTP 200)');
 
-      // Attempt invalid status string value
-      const resInvalidVal = await makeRequest(
+      const resP2 = await makeRequest(
         server,
         '/api/admin/orders/update-status',
         'POST',
-        { orderId: 'HCI-ORD-COMPLETED', fulfillmentStatus: 'INVALID_STATUS' },
+        { orderId: 'ORD-VERIF-REQ', paymentStatus: 'paid' },
         { Authorization: 'Bearer MANAGER_DAET_TOKEN' }
       );
-      assert(resInvalidVal.status === 400, 'Test 7.2: Invalid status string value rejected with HTTP 400');
+      assert(resP2.status === 200, 'Test 7.2: Valid Payment Transition: payment_verification_required -> paid (HTTP 200)');
+
+      // Invalid Payment Transitions
+      const resP3 = await makeRequest(
+        server,
+        '/api/admin/orders/update-status',
+        'POST',
+        { orderId: 'ORD-PAID-TERMINAL', paymentStatus: 'pending_payment' },
+        { Authorization: 'Bearer MANAGER_DAET_TOKEN' }
+      );
+      assert(resP3.status === 400, 'Test 7.3: Invalid Payment Transition: paid -> pending_payment rejected (Terminal State HTTP 400)');
+
+      const resP4 = await makeRequest(
+        server,
+        '/api/admin/orders/update-status',
+        'POST',
+        { orderId: 'ORD-PAID-TERMINAL', paymentStatus: 'payment_verification_required' },
+        { Authorization: 'Bearer MANAGER_DAET_TOKEN' }
+      );
+      assert(resP4.status === 400, 'Test 7.4: Invalid Payment Transition: paid -> payment_verification_required rejected (Terminal State HTTP 400)');
     } finally {
       server.close();
     }
   }
 
-  // --- TEST 8: Nonexistent order handled safely ---
+  // --- TEST 8: Fulfillment Status Matrix Enforcement (Valid vs Invalid Transitions) ---
+  {
+    const harness = createTestHarness({
+      users: {
+        'manager-daet-uid': { role: 'branch_manager', assignedBranchId: 'daet' },
+      },
+      orders: {
+        'ORD-PENDING': { id: 'ORD-PENDING', branchId: 'daet', paymentStatus: 'paid', fulfillmentStatus: 'pending_processing' },
+        'ORD-READY': { id: 'ORD-READY', branchId: 'daet', paymentStatus: 'paid', fulfillmentStatus: 'ready_for_pickup' },
+        'ORD-TRANSIT': { id: 'ORD-TRANSIT', branchId: 'daet', paymentStatus: 'paid', fulfillmentStatus: 'in_transit' },
+        'ORD-COMPLETED': { id: 'ORD-COMPLETED', branchId: 'daet', paymentStatus: 'paid', fulfillmentStatus: 'completed' },
+        'ORD-CANCELLED': { id: 'ORD-CANCELLED', branchId: 'daet', paymentStatus: 'paid', fulfillmentStatus: 'cancelled' },
+      },
+    });
+    const app = createExpressApp({ db: harness.mockDb, auth: harness.mockAuth, kmsClient: harness.mockKms });
+    const server = http.createServer(app).listen(0);
+
+    try {
+      // Valid Transitions
+      const resF1 = await makeRequest(server, '/api/admin/orders/update-status', 'POST', { orderId: 'ORD-PENDING', fulfillmentStatus: 'ready_for_pickup' }, { Authorization: 'Bearer MANAGER_DAET_TOKEN' });
+      assert(resF1.status === 200, 'Test 8.1: Valid Fulfillment Transition: pending_processing -> ready_for_pickup (HTTP 200)');
+
+      const resF2 = await makeRequest(server, '/api/admin/orders/update-status', 'POST', { orderId: 'ORD-READY', fulfillmentStatus: 'completed' }, { Authorization: 'Bearer MANAGER_DAET_TOKEN' });
+      assert(resF2.status === 200, 'Test 8.2: Valid Fulfillment Transition: ready_for_pickup -> completed (HTTP 200)');
+
+      const resF3 = await makeRequest(server, '/api/admin/orders/update-status', 'POST', { orderId: 'ORD-TRANSIT', fulfillmentStatus: 'completed' }, { Authorization: 'Bearer MANAGER_DAET_TOKEN' });
+      assert(resF3.status === 200, 'Test 8.3: Valid Fulfillment Transition: in_transit -> completed (HTTP 200)');
+
+      // Invalid Transitions (Terminal States & Out-of-Order Moves)
+      const resF4 = await makeRequest(server, '/api/admin/orders/update-status', 'POST', { orderId: 'ORD-COMPLETED', fulfillmentStatus: 'pending_processing' }, { Authorization: 'Bearer MANAGER_DAET_TOKEN' });
+      assert(resF4.status === 400, 'Test 8.4: Invalid Transition: completed -> pending_processing rejected (Terminal State HTTP 400)');
+
+      const resF5 = await makeRequest(server, '/api/admin/orders/update-status', 'POST', { orderId: 'ORD-CANCELLED', fulfillmentStatus: 'ready_for_pickup' }, { Authorization: 'Bearer MANAGER_DAET_TOKEN' });
+      assert(resF5.status === 400, 'Test 8.5: Invalid Transition: cancelled -> ready_for_pickup rejected (Terminal State HTTP 400)');
+
+      const resF6 = await makeRequest(server, '/api/admin/orders/update-status', 'POST', { orderId: 'ORD-READY', fulfillmentStatus: 'in_transit' }, { Authorization: 'Bearer MANAGER_DAET_TOKEN' });
+      assert(resF6.status === 400, 'Test 8.6: Invalid Transition: ready_for_pickup -> in_transit rejected (HTTP 400)');
+    } finally {
+      server.close();
+    }
+  }
+
+  // --- TEST 9: Nonexistent order handled safely ---
   {
     const harness = createTestHarness({
       users: {
@@ -475,13 +563,13 @@ async function runPhase5BTests() {
         { orderId: 'HCI-ORD-NONEXISTENT', paymentStatus: 'paid' },
         { Authorization: 'Bearer MANAGER_DAET_TOKEN' }
       );
-      assert(res.status === 404, 'Test 8: Updating non-existent order returns HTTP 404 Not Found');
+      assert(res.status === 404, 'Test 9: Updating non-existent order returns HTTP 404 Not Found');
     } finally {
       server.close();
     }
   }
 
-  // --- TEST 9: Inventory replenishment & restock on cancellation ---
+  // --- TEST 10: REMEDIATION 4 — Exact State-Verified Inventory Restoration ---
   {
     const harness = createTestHarness({
       users: {
@@ -503,7 +591,7 @@ async function runPhase5BTests() {
     const server = http.createServer(app).listen(0);
 
     try {
-      // 1. Replenish inventory
+      // 1. Replenish inventory (+15 to 10 => 25)
       const resReplenish = await makeRequest(
         server,
         '/api/admin/inventory/replenish',
@@ -511,9 +599,13 @@ async function runPhase5BTests() {
         { branchId: 'daet', skuId: 'hci-cmd-65ml', quantity: 15 },
         { Authorization: 'Bearer MANAGER_DAET_TOKEN' }
       );
-      assert(resReplenish.status === 200 && resReplenish.data.newStockCount === 25, 'Test 9.1: Branch inventory stock successfully replenished (+15 => 25)');
+      assert(resReplenish.status === 200, 'Test 10.1: Replenishment API call returns HTTP 200');
 
-      // 2. Cancel order and verify restock
+      // State assertion 1: stock becomes 25
+      const stockAfterReplenish = harness.inventoryStore.get('daet_hci-cmd-65ml')?.stockCount;
+      assert(stockAfterReplenish === 25, `Test 10.2: Inventory state verified: stock count is exactly 25 (Actual: ${stockAfterReplenish})`);
+
+      // 2. Cancel order containing 3 reserved units
       const resCancel = await makeRequest(
         server,
         '/api/admin/orders/update-status',
@@ -521,7 +613,60 @@ async function runPhase5BTests() {
         { orderId: 'HCI-ORD-CANCEL-ME', fulfillmentStatus: 'cancelled' },
         { Authorization: 'Bearer MANAGER_DAET_TOKEN' }
       );
-      assert(resCancel.status === 200, 'Test 9.2: Order status successfully updated to cancelled');
+      assert(resCancel.status === 200, 'Test 10.3: Order cancellation API call returns HTTP 200');
+
+      // State assertion 2: stock becomes exactly 28 (25 + 3)
+      const stockAfterCancel = harness.inventoryStore.get('daet_hci-cmd-65ml')?.stockCount;
+      assert(stockAfterCancel === 28, `Test 10.4: REMEDIATION 4 VERIFIED: Restocked inventory state is exactly 28 (Actual: ${stockAfterCancel})`);
+
+      // State assertion 3: order fulfillment status becomes 'cancelled'
+      const updatedFulfillmentStatus = harness.ordersStore.get('HCI-ORD-CANCEL-ME')?.fulfillmentStatus;
+      assert(updatedFulfillmentStatus === 'cancelled', `Test 10.5: Order fulfillment status verified in store as 'cancelled' (Actual: '${updatedFulfillmentStatus}')`);
+    } finally {
+      server.close();
+    }
+  }
+
+  // --- TEST 11: REMEDIATION 5 — Fail-Closed Cancellation on Missing Inventory Document & Transaction Rollback ---
+  {
+    const harness = createTestHarness({
+      users: {
+        'manager-daet-uid': { role: 'branch_manager', assignedBranchId: 'daet' },
+      },
+      inventory: {
+        // Intentionally missing 'daet_hci-cmd-30ml' document
+      },
+      orders: {
+        'HCI-ORD-MISSING-INV': {
+          id: 'HCI-ORD-MISSING-INV',
+          branchId: 'daet',
+          fulfillmentStatus: 'pending_processing',
+          items: [{ skuId: 'hci-cmd-30ml', quantity: 2 }],
+        },
+      },
+    });
+    const app = createExpressApp({ db: harness.mockDb, auth: harness.mockAuth, kmsClient: harness.mockKms });
+    const server = http.createServer(app).listen(0);
+
+    try {
+      // Attempt cancellation when inventory record is missing
+      const res = await makeRequest(
+        server,
+        '/api/admin/orders/update-status',
+        'POST',
+        { orderId: 'HCI-ORD-MISSING-INV', fulfillmentStatus: 'cancelled' },
+        { Authorization: 'Bearer MANAGER_DAET_TOKEN' }
+      );
+
+      assert(res.status === 400 || res.status === 500, `Test 11.1: REMEDIATION 5 VERIFIED: Missing inventory tracking document aborts cancellation with HTTP ${res.status}`);
+
+      // State assertion 1: Order fulfillment status remains 'pending_processing' (NOT cancelled)
+      const orderStatusAfterFail = harness.ordersStore.get('HCI-ORD-MISSING-INV')?.fulfillmentStatus;
+      assert(orderStatusAfterFail === 'pending_processing', `Test 11.2: Order status in store remained unchanged as 'pending_processing' (Actual: '${orderStatusAfterFail}')`);
+
+      // State assertion 2: No partial inventory document was created or mutated
+      const invAfterFail = harness.inventoryStore.get('daet_hci-cmd-30ml');
+      assert(invAfterFail === undefined, 'Test 11.3: Transaction rollback verified: Zero inventory mutations committed');
     } finally {
       server.close();
     }

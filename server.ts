@@ -599,7 +599,10 @@ export function createExpressApp(deps: ServerDependencies = {}): Express {
       const currentPaymentStatus = orderData.paymentStatus || 'pending_payment';
       const currentFulfillmentStatus = orderData.fulfillmentStatus || 'pending_processing';
 
-      // Valid payment states: pending_payment -> paid | payment_verification_required; payment_verification_required -> paid
+      // Payment Status Matrix Enforcement:
+      // pending_payment -> paid | payment_verification_required
+      // payment_verification_required -> paid
+      // paid -> terminal
       if (paymentStatus) {
         const validPaymentStatuses = ['pending_payment', 'paid', 'payment_verification_required'];
         if (!validPaymentStatuses.includes(paymentStatus)) {
@@ -608,15 +611,27 @@ export function createExpressApp(deps: ServerDependencies = {}): Express {
         }
 
         if (currentPaymentStatus === 'paid' && paymentStatus !== 'paid') {
-          res.status(400).json({ error: `Invalid Status Transition: Cannot transition payment status from terminal state 'paid' to '${paymentStatus}'.` });
+          res.status(400).json({ error: `Invalid Status Transition: Payment status 'paid' is terminal and cannot be changed to '${paymentStatus}'.` });
           return;
+        }
+
+        if (currentPaymentStatus !== paymentStatus) {
+          const isAllowedPaymentTransition =
+            (currentPaymentStatus === 'pending_payment' && (paymentStatus === 'paid' || paymentStatus === 'payment_verification_required')) ||
+            (currentPaymentStatus === 'payment_verification_required' && paymentStatus === 'paid');
+
+          if (!isAllowedPaymentTransition) {
+            res.status(400).json({ error: `Invalid Status Transition: Cannot transition payment status from '${currentPaymentStatus}' to '${paymentStatus}'.` });
+            return;
+          }
         }
       }
 
-      // Valid fulfillment states: pending_processing -> ready_for_pickup | in_transit | cancelled
+      // Fulfillment Status Matrix Enforcement:
+      // pending_processing -> ready_for_pickup | in_transit | cancelled
       // ready_for_pickup -> completed | cancelled
       // in_transit -> completed | cancelled
-      // completed or cancelled -> terminal
+      // completed | cancelled -> terminal
       if (fulfillmentStatus) {
         const validFulfillmentStatuses = ['pending_processing', 'ready_for_pickup', 'in_transit', 'completed', 'cancelled'];
         if (!validFulfillmentStatuses.includes(fulfillmentStatus)) {
@@ -625,36 +640,49 @@ export function createExpressApp(deps: ServerDependencies = {}): Express {
         }
 
         if (currentFulfillmentStatus === 'completed' || currentFulfillmentStatus === 'cancelled') {
-          res.status(400).json({ error: `Invalid Status Transition: Cannot transition fulfillment status from terminal state '${currentFulfillmentStatus}' to '${fulfillmentStatus}'.` });
-          return;
+          if (currentFulfillmentStatus !== fulfillmentStatus) {
+            res.status(400).json({ error: `Invalid Status Transition: Fulfillment status '${currentFulfillmentStatus}' is terminal and cannot be changed to '${fulfillmentStatus}'.` });
+            return;
+          }
         }
 
-        if (currentFulfillmentStatus === 'ready_for_pickup' && !['completed', 'cancelled', 'ready_for_pickup'].includes(fulfillmentStatus)) {
-          res.status(400).json({ error: `Invalid Status Transition: Cannot transition from 'ready_for_pickup' to '${fulfillmentStatus}'.` });
-          return;
-        }
+        if (currentFulfillmentStatus !== fulfillmentStatus) {
+          const isAllowedFulfillmentTransition =
+            (currentFulfillmentStatus === 'pending_processing' && ['ready_for_pickup', 'in_transit', 'cancelled'].includes(fulfillmentStatus)) ||
+            (currentFulfillmentStatus === 'ready_for_pickup' && ['completed', 'cancelled'].includes(fulfillmentStatus)) ||
+            (currentFulfillmentStatus === 'in_transit' && ['completed', 'cancelled'].includes(fulfillmentStatus));
 
-        if (currentFulfillmentStatus === 'in_transit' && !['completed', 'cancelled', 'in_transit'].includes(fulfillmentStatus)) {
-          res.status(400).json({ error: `Invalid Status Transition: Cannot transition from 'in_transit' to '${fulfillmentStatus}'.` });
-          return;
+          if (!isAllowedFulfillmentTransition) {
+            res.status(400).json({ error: `Invalid Status Transition: Cannot transition fulfillment status from '${currentFulfillmentStatus}' to '${fulfillmentStatus}'.` });
+            return;
+          }
         }
       }
 
       const isCancelling = fulfillmentStatus === 'cancelled' && currentFulfillmentStatus !== 'cancelled';
 
       await db.runTransaction(async (transaction) => {
-        // If order is being cancelled, transactionally restock reserved items back into branch inventory
-        if (isCancelling && Array.isArray(orderData.items)) {
+        // If order is being cancelled, transactionally restock reserved items back into branch inventory.
+        // FAIL-CLOSED MANDATE: Every reserved inventory tracking document MUST exist. Missing records abort cancellation.
+        if (isCancelling) {
+          if (!Array.isArray(orderData.items) || orderData.items.length === 0) {
+            throw new Error(`Invalid Order Data: Order '${orderId}' contains no items to restock upon cancellation.`);
+          }
+
           for (const item of orderData.items) {
             const invRef = db.collection('branch_inventory').doc(`${orderBranchId}_${item.skuId}`);
             const invSnap = await transaction.get(invRef);
-            if (invSnap.exists) {
-              const currentStock = invSnap.get('stockCount') || 0;
-              transaction.update(invRef, {
-                stockCount: currentStock + item.quantity,
-                lastReplenishedAt: FieldValue.serverTimestamp(),
-              });
+
+            if (!invSnap.exists) {
+              throw new Error(`Missing Inventory Record: Inventory tracking document does not exist for SKU '${item.skuId}' at branch '${orderBranchId}'. Order cancellation aborted.`);
             }
+
+            const currentStock = invSnap.get('stockCount');
+            const validStock = typeof currentStock === 'number' ? currentStock : 0;
+            transaction.update(invRef, {
+              stockCount: validStock + item.quantity,
+              lastReplenishedAt: FieldValue.serverTimestamp(),
+            });
           }
         }
 
@@ -675,7 +703,8 @@ export function createExpressApp(deps: ServerDependencies = {}): Express {
         fulfillmentStatus: fulfillmentStatus || currentFulfillmentStatus,
       });
     } catch (err: any) {
-      res.status(500).json({ error: err.message });
+      const isValidationError = err.message.includes('Missing Inventory Record') || err.message.includes('Invalid Order Data');
+      res.status(isValidationError ? 400 : 500).json({ error: err.message });
     }
   });
 

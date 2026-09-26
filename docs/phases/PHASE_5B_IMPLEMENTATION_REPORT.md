@@ -1,36 +1,38 @@
 # HCI CMD DIGITAL COMMERCE PLATFORM
-## PHASE 5B — ORDER LIFECYCLE & ADMIN AUTHORIZATION IMPLEMENTATION REPORT
+## PHASE 5B — ORDER LIFECYCLE & ADMIN AUTHORIZATION IMPLEMENTATION REPORT (REMEDIATED)
 
 **Document ID:** COMP-PHASE-5B-REPORT  
 **Project:** HCI CMD Digital Commerce Platform  
 **Target Territory:** Camarines Norte, Philippines  
 **Phase:** Phase 5B (Order Lifecycle & Admin Authorization)  
-**Status:** **PASS — CERTIFIED & VERIFIED**  
-**Audit Timestamp:** 2026-09-26T11:13:00-07:00  
+**Status:** **PASS — CERTIFIED & REMEDIATED**  
+**Audit Timestamp:** 2026-09-26T11:57:00-07:00  
 
 ---
 
 ### I. EXECUTIVE SUMMARY
 
-Phase 5B (Order Lifecycle & Admin Authorization) has been successfully implemented and verified. Protected administrative APIs (`/api/admin/orders`, `/api/admin/orders/update-status`, `/api/admin/inventory/replenish`) have been created in `server.ts` to enforce server-authoritative order status transitions, role-based authorization, branch isolation, and transactional inventory restocking on cancellation.
+Phase 5B (Order Lifecycle & Admin Authorization) has been fully remediated and verified under Phase 5 Remediation Gate 1. All confirmed source-level discrepancies—role definition unification across `firestore.rules`, fail-closed cancellation inventory restock enforcement, state-level test harness persistence, and full transition matrix checks—have been resolved.
 
-All operations derive caller identity exclusively from verified Firebase ID Tokens (`auth.verifyIdToken()`). Header and body spoofing (`x-user-id`, `userId`, `role`, `branchId`) are strictly rejected.
+All administrative operations (`/api/admin/orders`, `/api/admin/orders/update-status`, `/api/admin/inventory/replenish`) derive identity exclusively from verified Firebase ID Tokens (`auth.verifyIdToken()`). Spoofed parameters (`x-user-id`, `userId`, `role`, `branchId`) are strictly rejected.
 
 ---
 
 ### II. EXACT FILES MODIFIED & CREATED
 
 ```
-server.ts (MODIFIED — Added GET /api/admin/orders, POST /api/admin/orders/update-status, POST /api/admin/inventory/replenish)
+firestore.rules (MODIFIED — Reconciled isStaffOrManager() helper and update rule for branch_manager, regional_director, and super_admin)
+server.ts (MODIFIED — Enforced strict matrix transitions and fail-closed transaction cancellation restock)
 src/services/trustedServer.ts (MODIFIED — Added fetchAdminOrders, updateOrderStatus, and replenishInventory gateway methods)
 src/hooks/useEcommerce.ts (MODIFIED — Connected advanceOrderStatus and cancelOrder to TrustedServerController.updateOrderStatus)
-scripts/testPhase5BAdmin.ts (NEW — Phase 5B automated order lifecycle and admin security test suite)
-docs/phases/PHASE_5B_IMPLEMENTATION_REPORT.md (NEW — Phase 5B certification report)
+scripts/testPhase5BAdmin.ts (MODIFIED — State-persisting test harness with state-level inventory restoration and missing inventory fail-closed tests)
+docs/phases/PHASE_5B_IMPLEMENTATION_REPORT.md (UPDATED — Certified remediated report)
+docs/phases/PHASE_5_SOURCE_RECONCILIATION_AUDIT.md (UPDATED — Certified audit reconciliation)
 ```
 
 ---
 
-### III. APIS ADDED
+### III. APIS ADDED & REMEDIATED
 
 1. **`GET /api/admin/orders`**
    - **Auth Requirement:** Verified Firebase ID Token (`Bearer <token>`).
@@ -43,8 +45,8 @@ docs/phases/PHASE_5B_IMPLEMENTATION_REPORT.md (NEW — Phase 5B certification re
    - **Payload Parameters:** `{ orderId, paymentStatus?, fulfillmentStatus? }`.
    - **Allowed Roles:** `branch_manager`, `regional_director`, `super_admin`, `staff`, `admin`.
    - **Branch Isolation:** Validates `order.branchId === user.assignedBranchId` (unless `super_admin` or `regional_director`). Mismatched branch attempts return HTTP 403.
-   - **Transition Matrix Enforcement:** Validates current status against allowed transitions. Invalid transitions return HTTP 400.
-   - **Restock behavior:** Changing status to `cancelled` transactionally increments stock levels back into `branch_inventory` inside a Firestore `runTransaction`.
+   - **Transition Matrix Enforcement:** Strictly validates current status against allowed transitions. Invalid transitions return HTTP 400.
+   - **Fail-Closed Restock Behavior:** Changing status to `cancelled` transactionally increments stock levels back into `branch_inventory` inside a Firestore `runTransaction`. If any required inventory tracking document is missing, the transaction throws an error, the cancellation aborts, and the API returns HTTP 400.
 
 3. **`POST /api/admin/inventory/replenish`**
    - **Auth Requirement:** Verified Firebase ID Token (`Bearer <token>`).
@@ -62,7 +64,8 @@ docs/phases/PHASE_5B_IMPLEMENTATION_REPORT.md (NEW — Phase 5B certification re
 | `pending_payment` | `paid` | **YES** | Verified payment confirmation. |
 | `pending_payment` | `payment_verification_required` | **YES** | Flagged for manual bank/proof verification. |
 | `payment_verification_required` | `paid` | **YES** | Payment verified by staff. |
-| `paid` | *Any status change* | **NO** | Terminal payment state. |
+| `payment_verification_required` | `pending_payment` | **NO** | Cannot revert to pending payment (HTTP 400). |
+| `paid` | *Any status change* | **NO** | **Terminal Payment State.** Cannot transition out of `paid` (HTTP 400). |
 | `pending_processing` | `ready_for_pickup` | **YES** | Pickup order prepared at branch. |
 | `pending_processing` | `in_transit` | **YES** | Delivery order dispatched. |
 | `pending_processing` | `cancelled` | **YES** | Order cancelled prior to dispatch; stock restocked atomically. |
@@ -70,8 +73,8 @@ docs/phases/PHASE_5B_IMPLEMENTATION_REPORT.md (NEW — Phase 5B certification re
 | `ready_for_pickup` | `cancelled` | **YES** | Unclaimed/cancelled pickup order; stock restocked atomically. |
 | `in_transit` | `completed` | **YES** | Courier delivery fulfilled. |
 | `in_transit` | `cancelled` | **YES** | Failed delivery / cancelled; stock restocked atomically. |
-| `completed` | *Any status change* | **NO** | **Terminal State:** Completed orders cannot be modified. |
-| `cancelled` | *Any status change* | **NO** | **Terminal State:** Cancelled orders cannot be modified. |
+| `completed` | *Any status change* | **NO** | **Terminal Fulfillment State:** Completed orders cannot be modified (HTTP 400). |
+| `cancelled` | *Any status change* | **NO** | **Terminal Fulfillment State:** Cancelled orders cannot be modified (HTTP 400). |
 
 ---
 
@@ -91,15 +94,15 @@ docs/phases/PHASE_5B_IMPLEMENTATION_REPORT.md (NEW — Phase 5B certification re
 
 - **Token-Only Authentication:** All requests require valid Firebase ID tokens via `auth.verifyIdToken()`.
 - **Zero Identity Spoofing:** `x-user-id` and body parameters (`userId`, `role`, `branchId`) are strictly ignored for authentication or privilege determination.
-- **Fail-Closed Firestore & KMS Architecture:** Firestore database or KMS envelope encryption failures immediately halt execution with HTTP 500.
+- **Fail-Closed Architecture:** Missing inventory records during order creation or cancellation abort execution and throw explicit HTTP 400 errors.
 - **Atomic Inventory Safety:** Inventory deductions and cancellation restocks execute inside Firestore `runTransaction` blocks. No negative stock or local fallbacks.
-- **Firestore Security Rules:** `firestore.rules` remains 100% untouched and active.
+- **Role Alignment:** `firestore.rules` checks `branch_manager`, `regional_director`, and `super_admin`, matching application user records.
 
 ---
 
 ### VII. AUTOMATED TEST RESULTS
 
-#### 1. Phase 5B Order Lifecycle & Admin Suite (`npx tsx scripts/testPhase5BAdmin.ts`)
+#### 1. Phase 5B Order Lifecycle & Admin Security Suite (`npx tsx scripts/testPhase5BAdmin.ts`)
 ```bash
 ================================================================
    HCI CMD PHASE 5B — ORDER LIFECYCLE & ADMIN SECURITY SUITE   
@@ -117,14 +120,28 @@ docs/phases/PHASE_5B_IMPLEMENTATION_REPORT.md (NEW — Phase 5B certification re
 [PASS] Test 5.2: Daet Manager modifying Labo order returns HTTP 403 Branch Isolation Block
 [PASS] Test 6.1: Authorized Daet Manager querying Daet orders returns HTTP 200
 [PASS] Test 6.2: Super Admin updating Labo order across branches returns HTTP 200
-[PASS] Test 7.1: Status transition from terminal state 'completed' rejected with HTTP 400
-[PASS] Test 7.2: Invalid status string value rejected with HTTP 400
-[PASS] Test 8: Updating non-existent order returns HTTP 404 Not Found
-[PASS] Test 9.1: Branch inventory stock successfully replenished (+15 => 25)
-[PASS] Test 9.2: Order status successfully updated to cancelled
+[PASS] Test 7.1: Valid Payment Transition: pending_payment -> payment_verification_required (HTTP 200)
+[PASS] Test 7.2: Valid Payment Transition: payment_verification_required -> paid (HTTP 200)
+[PASS] Test 7.3: Invalid Payment Transition: paid -> pending_payment rejected (Terminal State HTTP 400)
+[PASS] Test 7.4: Invalid Payment Transition: paid -> payment_verification_required rejected (Terminal State HTTP 400)
+[PASS] Test 8.1: Valid Fulfillment Transition: pending_processing -> ready_for_pickup (HTTP 200)
+[PASS] Test 8.2: Valid Fulfillment Transition: ready_for_pickup -> completed (HTTP 200)
+[PASS] Test 8.3: Valid Fulfillment Transition: in_transit -> completed (HTTP 200)
+[PASS] Test 8.4: Invalid Transition: completed -> pending_processing rejected (Terminal State HTTP 400)
+[PASS] Test 8.5: Invalid Transition: cancelled -> ready_for_pickup rejected (Terminal State HTTP 400)
+[PASS] Test 8.6: Invalid Transition: ready_for_pickup -> in_transit rejected (HTTP 400)
+[PASS] Test 9: Updating non-existent order returns HTTP 404 Not Found
+[PASS] Test 10.1: Replenishment API call returns HTTP 200
+[PASS] Test 10.2: Inventory state verified: stock count is exactly 25 (Actual: 25)
+[PASS] Test 10.3: Order cancellation API call returns HTTP 200
+[PASS] Test 10.4: REMEDIATION 4 VERIFIED: Restocked inventory state is exactly 28 (Actual: 28)
+[PASS] Test 10.5: Order fulfillment status verified in store as 'cancelled' (Actual: 'cancelled')
+[PASS] Test 11.1: REMEDIATION 5 VERIFIED: Missing inventory tracking document aborts cancellation with HTTP 400
+[PASS] Test 11.2: Order status in store remained unchanged as 'pending_processing' (Actual: 'pending_processing')
+[PASS] Test 11.3: Transaction rollback verified: Zero inventory mutations committed
 
 ================================================================
-   PHASE 5B TEST SUITE COMPLETE: 17 PASSED, 0 FAILED     
+   PHASE 5B TEST SUITE COMPLETE: 31 PASSED, 0 FAILED     
 ================================================================
 ```
 
@@ -149,9 +166,9 @@ docs/phases/PHASE_5B_IMPLEMENTATION_REPORT.md (NEW — Phase 5B certification re
 ================================================================
 ```
 
-#### 5. Summary & Compilation:
+#### 5. Total Regression Results:
 - **Total Test Suites Executed:** 4
-- **Total Passed Assertions:** 55 / 55
+- **Total Passed Assertions:** 69 / 69
 - **Total Failed Assertions:** 0
 - **Applet Compilation:** `SUCCEEDED` (0 build errors)
 
@@ -172,4 +189,4 @@ docs/phases/PHASE_5B_IMPLEMENTATION_REPORT.md (NEW — Phase 5B certification re
 
 ---
 
-PHASE 5B — PASS
+PHASE 5 REMEDIATION — PASS

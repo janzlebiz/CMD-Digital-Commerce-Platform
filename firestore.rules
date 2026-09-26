@@ -25,7 +25,7 @@ service cloud.firestore {
     }
 
     function isStaffOrManager() {
-      return hasRole('staff') || hasRole('manager') || hasRole('admin');
+      return hasRole('branch_manager') || hasRole('regional_director') || hasRole('super_admin') || hasRole('staff') || hasRole('manager') || hasRole('admin');
     }
 
     // --- COLLECTION MATCHES ---
@@ -39,9 +39,9 @@ service cloud.firestore {
       allow create: if isSignedIn() && isOwner(userId) 
                     && request.resource.data.role == 'customer';
                     
-      // Only admins can change user roles
+      // Only super_admin or admin can change user roles; users can update own non-role profile fields
       allow update: if isSignedIn() && (
-        hasRole('admin') || 
+        hasRole('super_admin') || hasRole('admin') || 
         (isOwner(userId) && request.resource.data.role == resource.data.role)
       );
     }
