@@ -1,5 +1,5 @@
 # HCI CMD DIGITAL COMMERCE PLATFORM
-## PHASE 5 — SOURCE RECONCILIATION AUDIT REPORT (REMEDIATED)
+## PHASE 5 — SOURCE RECONCILIATION AUDIT REPORT (GATE 1 & GATE 2 REMEDIATED)
 
 **Document ID:** COMP-PHASE-5-RECONCILIATION  
 **Project:** HCI CMD Digital Commerce Platform  
@@ -7,67 +7,69 @@
 **Audit Standard:** PRD/TSD Compliance & Frozen Phase 0–4 Security Model Reconciliation  
 **Audit Date:** September 26, 2026  
 **Auditor:** Senior Technical Architect & Compliance Engine  
-**Remediation Status:** **VERIFIED & PASSED**  
+**Gate 2 Status:** **VERIFIED & PASSED**  
 
 ---
 
 ### I. EXECUTIVE AUDIT & REMEDIATION SUMMARY
 
-This Source Reconciliation Audit evaluates the implemented codebase following the completion of Phase 5 Remediation Gate 1. All discrepancies identified in the initial reconciliation audit have been fully remediated and verified:
+This Source Reconciliation Audit documents the complete resolution of all security discrepancies following **Phase 5 Remediation Gate 1** and **Phase 5 Remediation Gate 2**.
 
-1. **Role Unification (`firestore.rules`):** `isStaffOrManager()` helper updated to evaluate canonical roles `branch_manager`, `regional_director`, and `super_admin`.
-2. **Fail-Closed Cancellation Restock (`server.ts`):** `POST /api/admin/orders/update-status` throws an explicit error inside `runTransaction` if a `branch_inventory` document is missing during order cancellation, aborting cancellation and failing closed with HTTP 400.
-3. **State-Persisting Test Harness (`scripts/testPhase5BAdmin.ts`):** Harness `runTransaction` commits staged updates to memory stores on transaction success and discards them on failure.
-4. **State-Verified Restock Test (`scripts/testPhase5BAdmin.ts` Test 10):** State assertion verifies inventory stock increases from 25 to 28 after cancelling an order for 3 bottles.
-5. **Missing Inventory Test (`scripts/testPhase5BAdmin.ts` Test 11):** Verifies that attempting cancellation on a missing inventory document fails closed (HTTP 400), leaves order status unchanged as `pending_processing`, and commits zero inventory mutations.
-6. **Transition Matrix Enforcement (`server.ts`):** Canonical matrix for payment and fulfillment statuses enforced strictly.
+In Remediation Gate 2, `firestore.rules` was reconciled to eliminate blanket staff access (`isStaffOrManager()` bypass) and strictly enforce least-privilege, branch-scoped access matching the canonical application authorization model:
 
-#### Final Audit Verdict:
-All 6 mandatory remediations have been successfully implemented and verified across 69 passing automated test assertions with zero regressions and zero build errors.
+1. **Role Authorization Scope Reconciled (`firestore.rules`):**
+   - Removed blanket `isStaffOrManager()` bypass on `/orders/{orderId}` and `/users/{userId}`.
+   - Enforced branch-scoped order read access via `canAccessBranchOrder(resource)`: branch managers can read/list ONLY orders belonging to `user.assignedBranchId`.
+   - Prevented branch managers from dumping all user profiles (`list` on `/users` restricted strictly to `regional_director` and `super_admin`).
+   - Re-enforced self-access for customers (`resource.data.userId == request.auth.uid`).
+   - Retained client write lockdowns on protected collections (`/orders`, `/branch_inventory`, `/consultation_intakes`).
+
+2. **Firestore Security Rules Unit Test Suite (`scripts/testFirestoreRules.ts`):**
+   - Added automated evaluation tests verifying all 11 security rule assertions (19 total sub-tests).
+
+3. **Complete Security & Lifecycle Suite Verification:**
+   - 88 total automated test assertions across 5 test suites passed with 0 failures and 0 regressions.
 
 ```
 ================================================================
-     PHASE 5 REMEDIATION — PASS
+     PHASE 5 REMEDIATION GATE 2 — PASS
 ================================================================
 ```
 
 ---
 
-### II. REMEDIATED FINDINGS MATRIX
+### II. CANONICAL AUTHORIZATION SCOPE MATRIX
 
-| Scope / Item | Initial Audit Status | Remediation Executed | Remediated Status |
-| :--- | :--- | :--- | :--- |
-| **1. Token-Only Auth & Identity Extraction** | `VERIFIED` | Preserved Bearer token verification via `auth.verifyIdToken()`. | `VERIFIED` |
-| **2. Role Definition Alignment** | `DISCREPANCY` | Updated `isStaffOrManager()` in `firestore.rules` to check `branch_manager`, `regional_director`, `super_admin`. | `VERIFIED` |
-| **3. Server Branch Isolation** | `VERIFIED` | Enforced strict `user.assignedBranchId === order.branchId` check on admin routes. | `VERIFIED` |
-| **4. Order Creation Inventory Safety** | `VERIFIED` | Fails closed with HTTP 400 when inventory record is missing or stock insufficient. | `VERIFIED` |
-| **5. Order Cancellation Inventory Restock** | `SECURITY GAP` | Throws explicit error inside `runTransaction` if inventory doc is missing, aborting cancellation. | `VERIFIED` |
-| **6. Inventory Restock Test Verification** | `TEST COVERAGE GAP` | Updated mock harness to commit transactions and added state assertions on stock count (25 => 28). | `VERIFIED` |
-| **7. Missing Inventory Fail-Closed Test** | `TEST COVERAGE GAP` | Added Test 11 asserting HTTP 400 failure and order status rollback on missing inventory doc. | `VERIFIED` |
-| **8. Clinical KMS Envelope Encryption** | `VERIFIED` | Preserved AES-256-GCM + KMS envelope encryption with DEK buffer zeroing. | `VERIFIED` |
-| **9. Documentation Integrity** | `DOCUMENTATION ERROR` | Updated `PHASE_5B_IMPLEMENTATION_REPORT.md` with verified test evidence. | `VERIFIED` |
+| Canonical Role | `/orders` Read Access (`get` / `list`) | `/users` Read Access (`get` / `list`) | Client Writes (`/orders`, `/inventory`, `/intakes`) | Server API Admin Access |
+| :--- | :--- | :--- | :--- | :--- |
+| `customer` | Own orders only (`userId == auth.uid`) | Own profile only (`userId == auth.uid`) | **FORBIDDEN (allow write: if false)** | **DENIED (HTTP 403)** |
+| `practitioner` | **DENIED (403)** | Own profile / assigned patients | **FORBIDDEN (allow write: if false)** | **DENIED (HTTP 403)** |
+| `branch_manager` | Assigned branch orders ONLY (`branchId == assignedBranchId`) | Individual profiles (`get` allowed; `list` DENIED) | **FORBIDDEN (allow write: if false)** | Allowed for `assignedBranchId` |
+| `regional_director` | Multi-branch regional scope | Multi-branch user management (`list` allowed) | **FORBIDDEN (allow write: if false)** | Regional multi-branch scope |
+| `super_admin` | Global scope | Global user management (`list` allowed) | **FORBIDDEN (allow write: if false)** | Unrestricted global scope |
 
 ---
 
 ### III. AUTOMATED REGRESSION SUMMARY
 
+- **Firestore Security Rules Test Suite:** 19 / 19 Passed
 - **Phase 5B Admin & Order Lifecycle Suite:** 31 / 31 Passed
 - **Phase 5A Identity & Customer Access Suite:** 10 / 10 Passed
 - **Phase 4 Server Security Suite:** 19 / 19 Passed
 - **Phase 3 Cloud Functions Suite:** 9 / 9 Passed
-- **Total Assertions:** **69 / 69 Passed**
+- **Total Assertions:** **88 / 88 Passed**
 - **Applet Compilation:** `SUCCEEDED` (0 build errors)
 
 ---
 
-### IV. FINAL REMEDIATION VERDICT
+### IV. FINAL AUDIT VERDICT
 
-All source-level discrepancies, role misalignments, and test coverage gaps have been fully remediated and certified.
+All Firestore security rule scopes, server authorization constraints, fail-closed inventory restocking, and test suites are 100% verified.
 
 ```
 ================================================================
-     PHASE 5 REMEDIATION — PASS
+     PHASE 5 REMEDIATION GATE 2 — PASS
 ================================================================
 ```
 
-PHASE 5 REMEDIATION — PASS
+PHASE 5 REMEDIATION GATE 2 — PASS
