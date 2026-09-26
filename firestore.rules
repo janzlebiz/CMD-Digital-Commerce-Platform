@@ -62,19 +62,9 @@ service cloud.firestore {
     }
 
     // 4. Consultation Intakes rules
-    // Locked down: Clients can only READ clinical records. All WRITES must go through Cloud Functions.
+    // Locked down: Clients cannot read or write directly. Access goes exclusively through Cloud Functions.
     match /consultation_intakes/{intakeId} {
-      allow get: if isSignedIn() && (
-        resource.data.userId == request.auth.uid || 
-        hasRole('practitioner') || 
-        hasRole('admin')
-      );
-      allow list: if isSignedIn() && (
-        resource.data.userId == request.auth.uid || 
-        hasRole('practitioner') || 
-        hasRole('admin')
-      );
-      allow write: if false; // Absolute lock down of client writes
+      allow read, write: if false;
     }
   }
 }

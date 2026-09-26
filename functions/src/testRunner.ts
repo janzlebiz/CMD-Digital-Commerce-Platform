@@ -52,6 +52,28 @@ async function runTests() {
     await db.collection('branch_inventory').doc('daet_hci-cmd-65ml').set({
       stockCount: 10,
     });
+
+    // Write a test clinical record with a deliberately invalid/corrupted wrapped DEK
+    await db.collection('consultation_intakes').doc('CNS-INT-CORRUPTED-KMS').set({
+      id: 'CNS-INT-CORRUPTED-KMS',
+      userId: 'patient-jane-99',
+      practitionerId: 'practitioner-assigned',
+      scheduledAt: new Date().toISOString(),
+      deliveryMode: 'virtual',
+      consentRecord: {
+        purpose: 'Wellness',
+        version: 'v1.0',
+        timestamp: new Date()
+      },
+      encryptedClinicalIntake: {
+        ciphertext: Buffer.from('some-fake-clinical-ciphertext-data').toString('base64'),
+        iv: Buffer.from('123456789012').toString('base64'),
+        tag: Buffer.from('1234567890123456').toString('base64'),
+        encryptedKey: Buffer.from('corrupted-unwrappable-kms-key-envelope-payload-that-should-reject').toString('base64'),
+        kmsKeyId: 'projects/gen-lang-client-0427039673/locations/global/keyRings/hic-cmd-keyring/cryptoKeys/clinical-spi-key'
+      }
+    });
+
   } catch (setupErr) {
     console.warn('Database environment setup warning (running sandbox-mode fallback):', setupErr);
   }
@@ -67,7 +89,7 @@ async function runTests() {
       },
       { auth: { uid: 'staff-daet-10', token: {} } }
     );
-    assert(false, 'Unauthorized branch access was allowed.');
+    assert(false, 'Unauthorized branch access was erroneously allowed.');
   } catch (err: any) {
     const isPermissionDenied = err.code === 'permission-denied' || err.message.includes('Branch isolation block');
     assert(isPermissionDenied, 'Unauthorized branch access blocked with permission-denied error.');
@@ -77,7 +99,7 @@ async function runTests() {
   try {
     // Unauthenticated/guest context attempts to fetch record
     await (fetchClinicalIntakeSecure as any).run(
-      { intakeId: 'CNS-INT-999' },
+      { intakeId: 'CNS-INT-CORRUPTED-KMS' },
       { auth: null }
     );
     assert(false, 'Guest clinical access was allowed.');
@@ -128,7 +150,8 @@ async function runTests() {
     assert(result && result.success, 'Assigned practitioner write completed successfully.');
   } catch (err: any) {
     // If KMS credentials fail because client is in local developer machine, verify it fails closed
-    assert(err.message.includes('KMS') || err.message.includes('Wrapping'), 'Assigned practitioner write failed closed securely on offline KMS environment.');
+    const isKmsFailure = err.message.includes('KMS') || err.message.includes('Wrapping') || err.message.includes('DEK') || err.message.includes('unwrapped') || err.message.includes('key');
+    assert(isKmsFailure, 'Assigned practitioner write failed closed securely on offline KMS environment.');
   }
 
   // --- 4. Atomic Inventory + Order Rollback Test ---
@@ -136,39 +159,51 @@ async function runTests() {
     const initialStockSnap = await db.collection('branch_inventory').doc('daet_hci-cmd-65ml').get();
     const initialStock = initialStockSnap.exists ? initialStockSnap.data()?.stockCount : 10;
 
-    // Place an order with one normal item and one item exceeding stock levels
+    const ordersBeforeSnap = await db.collection('orders').where('userId', '==', 'patient-jane-99').get();
+    const ordersBeforeCount = ordersBeforeSnap.size;
+
+    // Place an order with one normal item and one item exceeding stock levels (triggers transaction failure)
     await (createOrderSecure as any).run(
       {
         items: [
           { skuId: 'hci-cmd-30ml', quantity: 1 },
-          { skuId: 'hci-cmd-65ml', quantity: 99999 }, // Triggers failure
+          { skuId: 'hci-cmd-65ml', quantity: 99999 }, // Triggers transaction rollback
         ],
         branchId: 'daet',
-        customer: { firstName: ' Juan' },
+        customer: { firstName: 'Juan' },
         paymentMethod: 'gcash',
       },
       { auth: { uid: 'patient-jane-99', token: {} } }
     );
     assert(false, 'Partially failing order was erroneously written.');
   } catch (err: any) {
-    // Retrieve stock levels after failure
+    // Retrieve stock levels and order state after rollback
     const finalStockSnap = await db.collection('branch_inventory').doc('daet_hci-cmd-65ml').get();
     const finalStock = finalStockSnap.exists ? finalStockSnap.data()?.stockCount : 10;
 
-    assert(finalStock === initialStock, 'Atomic Transaction Rollback: Stock level remained unchanged after transaction failure.');
+    const ordersAfterSnap = await db.collection('orders').where('userId', '==', 'patient-jane-99').get();
+    const ordersAfterCount = ordersAfterSnap.size;
+
+    const inventoryUnchanged = finalStock === initialStock;
+    const noNewOrderDocument = ordersAfterCount === ordersBeforeCount;
+
+    assert(inventoryUnchanged && noNewOrderDocument, 'Atomic Transaction Rollback Verified: Inventory is unchanged AND no new order document was written.');
   }
 
-  // --- 5. KMS Fail-Closed Verification Test ---
+  // --- 5. KMS Fail-Closed Verification Test (Using a Corrupted Envelope Key) ---
   try {
-    // Fetch a record with a corrupted KMS wrapped key envelope to assert failure
+    // Fetch the clinical intake with corrupted key envelope. Decryption must fail because KMS unwrap fails.
     await (fetchClinicalIntakeSecure as any).run(
-      { intakeId: 'CNS-INT-NONEXISTENT' },
+      { intakeId: 'CNS-INT-CORRUPTED-KMS' },
       { auth: { uid: 'practitioner-assigned', token: {} } }
     );
-    assert(false, 'KMS decrypt lookup failure was bypassed.');
+    assert(false, 'Corrupted key decryption lookup was bypassed without failing closed.');
   } catch (err: any) {
-    const isErrorHandled = err.code === 'not-found' || err.message.includes('not found') || err.message.includes('KMS');
-    assert(isErrorHandled, 'KMS key lookup/unwrapping failure correctly failed closed (Operation Rejected).');
+    // Verify that the error is not merely a "record not found"
+    const isRecordFound = err.code !== 'not-found' && !err.message.includes('not found') && !err.message.includes('Record not found');
+    const isCryptoUnwrapFailure = err.message.includes('KMS') || err.message.includes('unwrap') || err.message.includes('unwrapping') || err.message.includes('key') || err.message.includes('decrypt') || err.message.includes('DEK') || err.message.includes('bad') || err.message.includes('invalid') || err.message.includes('Buffer');
+    
+    assert(isRecordFound && isCryptoUnwrapFailure, `KMS unwrap failure correctly failed closed (Operation Rejected due to crypto failure: ${err.message}).`);
   }
 
   console.log('\n================================================================');

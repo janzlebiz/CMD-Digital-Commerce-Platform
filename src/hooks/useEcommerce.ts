@@ -159,7 +159,8 @@ export const useEcommerce = () => {
     localStorage.removeItem('hci_cmd_cart');
   };
 
-  // Real-time server-authoritative totals preview
+  // --- NON-AUTHORITATIVE CLIENT-SIDE UI PREVIEW ONLY ---
+  // Authoritative calculations, pricing, and taxes occur strictly on the secure GCF backend.
   const calculateTotals = (cartItems: CartItem[], fulfillmentMethod: FulfillmentMethod) => {
     let subtotal = 0;
     const itemsWithPricing = cartItems.map((item) => {
@@ -182,6 +183,7 @@ export const useEcommerce = () => {
     const grandTotal = subtotal + shippingFee;
 
     return {
+      isUiPreviewOnly: true, // Clearly flag as client preview state
       items: itemsWithPricing,
       shippingFee,
       subtotal,
