@@ -3,18 +3,32 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import { getFunctions, httpsCallable } from 'firebase/functions';
 import { db, auth } from '../firebase';
 import { doc, getDoc } from 'firebase/firestore';
 
 /**
- * CLIENT-SIDE CLOUD FUNCTIONS SDK GATEWAY
- * Acts as the bridge connecting the React frontend to the real Firebase Cloud Functions backend.
- * Plaintext keys and calculations are computed exclusively on the server.
- * There are NO client-side fallbacks; if the backend fails, the operation fails closed.
+ * CLIENT-SIDE AUTHORITATIVE BACKEND GATEWAY
+ * Acts as the bridge connecting the React frontend to the secure server API.
+ * All sensitive calculations, pricing, inventory reservations, and cryptographic
+ * envelope decryption are computed exclusively on the server.
  */
 export class TrustedServerController {
-  private static functions = getFunctions(undefined, 'us-central1');
+  private static async getAuthHeaders(): Promise<Record<string, string>> {
+    const headers: Record<string, string> = {
+      'Content-Type': 'application/json',
+    };
+    try {
+      const currentUser = auth.currentUser;
+      if (currentUser) {
+        const idToken = await currentUser.getIdToken();
+        headers['Authorization'] = `Bearer ${idToken}`;
+        headers['x-user-id'] = currentUser.uid;
+      }
+    } catch {
+      // Dev mode fallback
+    }
+    return headers;
+  }
 
   /**
    * 1. Invokes the server-authoritative calculations API
@@ -23,9 +37,19 @@ export class TrustedServerController {
     items: Array<{ skuId: string; quantity: number }>,
     isVatRegistered: boolean
   ): Promise<any> {
-    const calculateOrderCallable = httpsCallable(this.functions, 'calculateOrder');
-    const response = await calculateOrderCallable({ items, isVatRegistered });
-    return response.data;
+    const headers = await this.getAuthHeaders();
+    const res = await fetch('/api/calculate-order', {
+      method: 'POST',
+      headers,
+      body: JSON.stringify({ items, isVatRegistered }),
+    });
+
+    if (!res.ok) {
+      const errData = await res.json().catch(() => ({ error: 'Calculation failed' }));
+      throw new Error(errData.error || `HTTP error ${res.status}`);
+    }
+
+    return res.json();
   }
 
   /**
@@ -38,9 +62,19 @@ export class TrustedServerController {
     paymentMethod: string;
     isVatRegistered: boolean;
   }): Promise<any> {
-    const createOrderCallable = httpsCallable(this.functions, 'createOrderSecure');
-    const response = await createOrderCallable(payload);
-    return response.data;
+    const headers = await this.getAuthHeaders();
+    const res = await fetch('/api/create-order', {
+      method: 'POST',
+      headers,
+      body: JSON.stringify(payload),
+    });
+
+    if (!res.ok) {
+      const errData = await res.json().catch(() => ({ error: 'Order creation failed' }));
+      throw new Error(errData.error || `HTTP error ${res.status}`);
+    }
+
+    return res.json();
   }
 
   /**
@@ -64,18 +98,28 @@ export class TrustedServerController {
       };
     }
   ): Promise<any> {
-    const saveCallable = httpsCallable(this.functions, 'saveClinicalIntakeSecure');
-    const response = await saveCallable({
-      userId: payload.userId,
-      clinicalIntake: payload.clinicalIntake,
-      consentRecord: {
-        purpose: payload.consent.purpose,
-        version: payload.consent.version,
-      },
-      scheduledAt: payload.scheduledAt,
-      deliveryMode: payload.deliveryMode,
+    const headers = await this.getAuthHeaders();
+    const res = await fetch('/api/clinical-intake/save', {
+      method: 'POST',
+      headers,
+      body: JSON.stringify({
+        userId: payload.userId,
+        clinicalIntake: payload.clinicalIntake,
+        consentRecord: {
+          purpose: payload.consent.purpose,
+          version: payload.consent.version,
+        },
+        scheduledAt: payload.scheduledAt,
+        deliveryMode: payload.deliveryMode,
+      }),
     });
-    return response.data;
+
+    if (!res.ok) {
+      const errData = await res.json().catch(() => ({ error: 'Intake submission failed' }));
+      throw new Error(errData.error || `HTTP error ${res.status}`);
+    }
+
+    return res.json();
   }
 
   /**
@@ -86,9 +130,19 @@ export class TrustedServerController {
     intakeId: string,
     practitionerUid: string
   ): Promise<any> {
-    const fetchCallable = httpsCallable(this.functions, 'fetchClinicalIntakeSecure');
-    const response = await fetchCallable({ intakeId });
-    return response.data;
+    const headers = await this.getAuthHeaders();
+    const res = await fetch('/api/clinical-intake/fetch', {
+      method: 'POST',
+      headers,
+      body: JSON.stringify({ intakeId, userId }),
+    });
+
+    if (!res.ok) {
+      const errData = await res.json().catch(() => ({ error: 'Intake fetch failed' }));
+      throw new Error(errData.error || `HTTP error ${res.status}`);
+    }
+
+    return res.json();
   }
 
   /**
