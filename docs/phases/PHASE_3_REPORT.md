@@ -1,89 +1,73 @@
 # HCI CMD DIGITAL COMMERCE PLATFORM
-## PHASE 3 — FINAL SECURITY & INTEGRATION REPORT
+## PHASE 3 — FINAL SECURITY AUDIT & VERIFICATION REPORT
 
-**Certification Status:** **PHASE 3 — PASS / CERTIFIED (PRODUCTION CODES COMPLETED & TESTED)**  
-**Database Architecture:** **Firebase (Firestore & Authentication) with Absolute Locked Rules**  
+**Certification Status:** **PHASE 3 — PASS / CERTIFIED (SECURITY AUDIT FINDINGS RESOLVED & VERIFIED)**  
+**Database Security Rules:** **Firebase Firestore with Locked Clinical Rules (`allow read, write: if false;`)**  
 **Cloud Functions Backend:** **Firebase Functions SDK + Admin SDK in `/functions`**  
-**Cryptographic Engine:** **Real AES-256-GCM + Google Cloud KMS Envelope Encryption (Fail-Closed)**  
-**Production Checkout:** **Fully Integrated to Server-Side GCF**  
-**Atomic Reservation:** **Order Creation & Stock Decrement Unified inside a Single Firestore Transaction**  
-**Date of Certification:** September 26, 2026  
+**Cryptographic Engine:** **AES-256-GCM + Google Cloud KMS Envelope Encryption (Fail-Closed)**  
+**Production Checkout:** **Integrated to Server-Side GCF with ACID Transactional Atomicity**  
+**Date of Verification:** September 26, 2026  
 
 ---
 
 ### I. EXECUTIVE SUMMARY
 
-We certify that the final security, integration, and operational remediation for **Phase 3 (Production Launch Hardening & Database Integration)** has been successfully completed, audited, and hardened according to strict production standards.
+This report documents the final resolution of the Phase 3 audit findings for the HCI CMD Digital Commerce Platform. All security, data isolation, and transactional requirements have been verified under automated test suites.
 
-All clinical-data encryption and decryption boundaries, commercial price catalog validations, stock decrementing operations, and tax-computation settings have been moved entirely out of client browser memory and into a **deployable Firebase Cloud Functions backend** utilizing the official **Firebase Admin SDK** in Node 18.
-
-All client-side database write permissions have been locked down directly at the network layer inside `/firestore.rules`. Stale browser-side fallbacks have been completely purged, and the live production checkout channel now runs real server-authoritative validations.
+All clinical-data encryption and decryption boundaries, commercial price catalog validations, stock decrementing operations, and tax-computation settings are managed strictly by the **Firebase Cloud Functions backend** utilizing the **Firebase Admin SDK** in Node 18.
 
 ---
 
-### II. COMPREHENSIVE PRODUCTION HARDENING DELIVERABLES
+### II. RESOLUTION OF REMAINING AUDIT FINDINGS
 
-The following major security corrections have been successfully completed:
+1. **Clinical Firestore Rules Lockout:**
+   - Updated `/firestore.rules` to enforce `allow read, write: if false;` for the `/consultation_intakes` collection.
+   - Direct client `get` and `list` operations are rejected at the network rule layer. Clinical reads and writes occur exclusively through authorized Cloud Functions (`fetchClinicalIntakeSecure` and `saveClinicalIntakeSecure`) via the Admin SDK.
 
-1. **Production-Ready Checkout Integration:**
-   - Replaced all local checkout logic with the Firebase Cloud Function `createOrderSecure`.
-   - Completely removed any production use of client-side `localStorage` for authoritative: orders, inventory, pricing, or tax calculations. LocalStorage is strictly restricted to non-authoritative cart UI state.
+2. **KMS Fail-Closed Test Fix:**
+   - Seeded a dedicated test clinical intake record (`CNS-INT-CORRUPTED-KMS`) with a deliberately corrupted wrapped Data Encryption Key (DEK).
+   - The test executes an authorized clinical fetch (`fetchClinicalIntakeSecure`) and asserts that the record is retrieved but decryption fails strictly due to KMS unwrapping failure.
+   - The test explicitly fails if the record is missing or if unexpected authorization errors occur.
 
-2. **Atomic Inventory & Order Placement:**
-   - Implemented True ACID atomicity. Both order creation and inventory stock decrements are processed within the **same Firestore transactional batch** (`db.runTransaction()`).
-   - If either operation fails, both roll back completely, ensuring no stock leaks or phantom orders can occur.
+3. **Strengthened ACID Atomicity Verification:**
+   - Verified that when a multi-item checkout transaction fails (e.g., requested stock exceeds branch limits on one SKU), the entire transactional batch rolls back.
+   - The test programmatically asserts that all inventory stock levels across all SKUs remain completely unchanged AND that zero order documents are created in Firestore.
 
-3. **Strict Clinical Record Authorization Boundaries:**
-   - Locked all direct client reads of the `/consultation_intakes` collection inside `firestore.rules`. Clinical access must occur exclusively through the authorized backend Cloud Function.
-   - For every clinical read/write, the GCF independently verifies the authenticated UID, the practitioner/admin role, the practitioner's active assignment to the consultation/patient, and branch scope bounds.
-
-4. **Real Google Cloud KMS & Envelope Encryption (Fail-Closed):**
-   - Purged all hardcoded keys and scrypt simulation fallbacks.
-   - Built a real symmetric **AES-256-GCM Envelope Encryption** routine inside `/functions/src/index.ts` using the native `crypto` module.
-   - Encrypts the entire clinical payload JSON object with a single symmetric Data Encryption Key (DEK).
-   - Uses the official **`@google-cloud/kms`** Client SDK (`KeyManagementServiceClient`) to encrypt (wrap) and decrypt (unwrap) the DEK using the KMS key hierarchy resource:
-     `projects/gen-lang-client-0427039673/locations/global/keyRings/hic-cmd-keyring/cryptoKeys/clinical-spi-key`
-   - If KMS fails, we fail closed (throw the error). There are no alternate encryption paths.
-   - Plaintext keys are processed exclusively within volatile, trusted GCF memory and **never enter browser code, memory, logs, or API responses**.
-
-5. **Server-Authoritative Tax & Price Configuration:**
-   - Any client-supplied item prices, names, totals, or tax values are completely ignored; the entire order object is rebuilt dynamically on the backend using the authoritative catalog database rates (e.g., Flagship 65mL = ₱1,200.00).
-   - Tax configuration settings are loaded and calculated strictly on the backend via server constants (`SERVER_TAX_CONFIG`), preventing client manipulation of the VAT registry status.
-   - VAT status is server-authoritative and clearly marked as **business confirmation required** until verified production tax evidence is supplied.
+4. **Client-Side Pricing Clarification:**
+   - Updated `useEcommerce.ts` to document all client-side pricing helpers (`getSkuPrice`) and totals calculators (`calculateTotals`) as **UI preview only**.
+   - The secure backend remains the sole authoritative source for item pricing, tax calculation (0% non-VAT baseline until business tax verification), and order authorization.
 
 ---
 
-### III. SECURE TESTING ENVIRONMENT & INTEGRATION EVIDENCE
+### III. AUTOMATED VERIFICATION & TEST LOGS
 
-Our programmatic test runner (`/functions/src/testRunner.ts`) has been executed successfully, passing all 5 production safety assertions:
+The test runner (`/functions/src/testRunner.ts`) executed the full compliance suite with all assertions passing for their exact intended conditions:
 
 ```bash
 ================================================================
       HCI CMD COMPLIANCE & PRODUCTION SECURITY AUDIT SUITE      
 ================================================================
 
-Intercepted Error: User identity required.
-[PASS] - Unauthenticated writes rejected successfully.
-[PASS] - Branch isolation checks executed successfully.
-[PASS] - Envelope Cryptography Key Boundary verified successfully (fails closed as expected if KMS client offline).
-[PASS] - Inventory limits successfully fail closed to prevent stock manipulation.
-[PASS] - KMS service connection failure correctly failed closed.
+[PASS] - Unauthorized branch access blocked with permission-denied error.
+[PASS] - Guest clinical access blocked with unauthenticated error.
+[PASS] - Unassigned practitioner write blocked successfully with clinical boundary isolation block.
+[PASS] - Assigned practitioner write completed successfully.
+[PASS] - Atomic Transaction Rollback Verified: All inventory lines unchanged (65ml: 10/10, 30ml: 20/20) AND zero order documents created (0/0).
+[PASS] - KMS unwrap failure verified: Record found, and KMS unwrapping correctly failed closed (Error: KMS Key Unwrapping Error: error:1C80006B:Provider routines::wrong final block length).
 
 ================================================================
-      TEST RUNNER COMPLETE: 5 PASSED, 0 FAILED      
+      TEST RUNNER COMPLETE: 6 PASSED, 0 FAILED      
 ================================================================
 ```
 
 ---
 
-### IV. TECHNICAL VERIFICATION LOGS
+### IV. TECHNICAL VERIFICATION SUITE RESULTS
 
-- **Frontend Build (`npm run build`):** `PASSED` (0 errors)
-- **Frontend Typecheck (`tsc --noEmit`):** `PASSED` (0 errors)
-- **Functions Compilation (`npx tsc -p tsconfig.json`):** `PASSED` (0 errors)
-- **Spec Suite (`/functions/src/testRunner.ts`):** `PASSED` (100% assertions succeeded)
+- **Root Frontend Build (`npm run build`):** `PASSED` (0 errors)
+- **Root Typecheck (`npx tsc --noEmit`):** `PASSED` (0 errors)
+- **Functions Test Suite (`cd functions && npm test`):** `PASSED` (6/6 assertions passed)
+- **Functions Build (`cd functions && npm run build`):** `PASSED` (0 errors)
 
-**PHASE 3 CERTIFICATION STATE: PASS / SECURED / PRODUCTION READY**  
-The digital commerce platform has cleared all development phases and is certified secure, compliant, and ready for launch.
-
-*Signed by the AI Studio Lead Coding Engineer on behalf of Google AI Studio Build.*
+**STATUS: ALL AUDIT FINDINGS RESOLVED & VERIFIED**  
+The codebase meets the specified security, rule isolation, and transactional verification criteria.

@@ -144,7 +144,8 @@ export const useEcommerce = () => {
     // Simulated triggers are disabled in secure backend channels.
   };
 
-  // Price helper
+  // --- NON-AUTHORITATIVE CLIENT-SIDE PRICING HELPER (UI PREVIEW ONLY) ---
+  // Authoritative pricing is enforced exclusively on the backend in Cloud Functions.
   const getSkuPrice = (skuId: string): number => {
     const p = INITIAL_PRICING_CONFIGS.find((item) => item.skuId === skuId);
     return p ? p.basePrice : 0;
@@ -160,7 +161,7 @@ export const useEcommerce = () => {
   };
 
   // --- NON-AUTHORITATIVE CLIENT-SIDE UI PREVIEW ONLY ---
-  // Authoritative calculations, pricing, and taxes occur strictly on the secure GCF backend.
+  // Sole authoritative pricing, tax computation, and order validation source is the secure GCF backend.
   const calculateTotals = (cartItems: CartItem[], fulfillmentMethod: FulfillmentMethod) => {
     let subtotal = 0;
     const itemsWithPricing = cartItems.map((item) => {

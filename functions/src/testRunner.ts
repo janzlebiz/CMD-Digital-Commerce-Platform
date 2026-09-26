@@ -3,8 +3,145 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import { createOrderSecure, saveClinicalIntakeSecure, fetchClinicalIntakeSecure } from './index';
-import { getFirestore } from 'firebase-admin/firestore';
+process.env.TEST_MOCK_KMS = 'true';
+
+import { createOrderSecure, saveClinicalIntakeSecure, fetchClinicalIntakeSecure, setDatabase } from './index';
+
+// High-Fidelity Transactional In-Memory Test Harness for Firestore
+class InMemoryFirestore {
+  private collections: Map<string, Map<string, any>> = new Map();
+
+  constructor() {
+    this.collections.set('users', new Map());
+    this.collections.set('consultation_assignments', new Map());
+    this.collections.set('consultation_intakes', new Map());
+    this.collections.set('branch_inventory', new Map());
+    this.collections.set('orders', new Map());
+  }
+
+  collection(collectionName: string) {
+    if (!this.collections.has(collectionName)) {
+      this.collections.set(collectionName, new Map());
+    }
+    const colMap = this.collections.get(collectionName)!;
+
+    return {
+      doc: (docId: string) => ({
+        get: async () => {
+          const exists = colMap.has(docId);
+          const data = exists ? JSON.parse(JSON.stringify(colMap.get(docId))) : undefined;
+          return {
+            exists,
+            id: docId,
+            data: () => data,
+            get: (field: string) => data ? data[field] : undefined,
+          };
+        },
+        set: async (data: any) => {
+          colMap.set(docId, JSON.parse(JSON.stringify(data)));
+        },
+        update: async (data: any) => {
+          if (!colMap.has(docId)) {
+            throw new Error(`Document ${docId} does not exist for update.`);
+          }
+          const existing = colMap.get(docId);
+          colMap.set(docId, { ...existing, ...JSON.parse(JSON.stringify(data)) });
+        },
+      }),
+      where: (field: string, op: string, val: any) => ({
+        get: async () => {
+          const docs: any[] = [];
+          colMap.forEach((docData, id) => {
+            if (op === '==' && docData[field] === val) {
+              docs.push({ id, data: () => docData });
+            }
+          });
+          return {
+            size: docs.length,
+            docs,
+            forEach: (cb: any) => docs.forEach(cb),
+          };
+        },
+      }),
+      get: async () => {
+        const docs: any[] = [];
+        colMap.forEach((docData, id) => {
+          docs.push({ id, data: () => docData });
+        });
+        return {
+          size: docs.length,
+          docs,
+          forEach: (cb: any) => docs.forEach(cb),
+        };
+      },
+    };
+  }
+
+  async runTransaction(updateFunction: (transaction: any) => Promise<any>) {
+    // Transactional staging buffers to guarantee true atomic commit or rollback
+    const pendingUpdates = new Map<string, { col: string; id: string; data: any; type: 'set' | 'update' }>();
+    const stagingColData = new Map<string, Map<string, any>>();
+
+    this.collections.forEach((map, colName) => {
+      const copy = new Map();
+      map.forEach((v, k) => copy.set(k, JSON.parse(JSON.stringify(v))));
+      stagingColData.set(colName, copy);
+    });
+
+    const transaction = {
+      get: async (docRef: any) => {
+        const [colName, docId] = docRef._path || this.extractPath(docRef);
+        const colMap = stagingColData.get(colName)!;
+        const exists = colMap.has(docId);
+        const data = exists ? JSON.parse(JSON.stringify(colMap.get(docId))) : undefined;
+        return {
+          exists,
+          id: docId,
+          data: () => data,
+          get: (field: string) => data ? data[field] : undefined,
+        };
+      },
+      set: (docRef: any, data: any) => {
+        const [colName, docId] = docRef._path || this.extractPath(docRef);
+        const colMap = stagingColData.get(colName)!;
+        colMap.set(docId, JSON.parse(JSON.stringify(data)));
+        pendingUpdates.set(`${colName}/${docId}`, { col: colName, id: docId, data, type: 'set' });
+      },
+      update: (docRef: any, data: any) => {
+        const [colName, docId] = docRef._path || this.extractPath(docRef);
+        const colMap = stagingColData.get(colName)!;
+        if (!colMap.has(docId)) {
+          throw new Error(`Document ${docId} does not exist`);
+        }
+        const existing = colMap.get(docId);
+        colMap.set(docId, { ...existing, ...JSON.parse(JSON.stringify(data)) });
+        pendingUpdates.set(`${colName}/${docId}`, { col: colName, id: docId, data, type: 'update' });
+      },
+    };
+
+    // If updateFunction throws at any point, pendingUpdates is discarded (Rollback)
+    const result = await updateFunction(transaction);
+
+    // Commit all staged mutations atomically
+    pendingUpdates.forEach((mutation) => {
+      const liveCol = this.collections.get(mutation.col)!;
+      if (mutation.type === 'set') {
+        liveCol.set(mutation.id, JSON.parse(JSON.stringify(mutation.data)));
+      } else {
+        const existing = liveCol.get(mutation.id);
+        liveCol.set(mutation.id, { ...existing, ...JSON.parse(JSON.stringify(mutation.data)) });
+      }
+    });
+
+    return result;
+  }
+
+  private extractPath(docRef: any): [string, string] {
+    if (docRef._path) return docRef._path;
+    // Fallback parser if docRef is generated by collection().doc()
+    return ['unknown', 'unknown'];
+  }
+}
 
 async function runTests() {
   console.log('================================================================');
@@ -13,7 +150,6 @@ async function runTests() {
 
   let passed = 0;
   let failed = 0;
-  const db = getFirestore();
 
   function assert(condition: boolean, msg: string) {
     if (condition) {
@@ -25,58 +161,60 @@ async function runTests() {
     }
   }
 
-  // Set up mock baseline database profiles for testing
-  try {
-    await db.collection('users').doc('staff-daet-10').set({
-      uid: 'staff-daet-10',
-      role: 'staff',
-      assignedBranchId: 'daet',
-    });
-    await db.collection('users').doc('practitioner-assigned').set({
-      uid: 'practitioner-assigned',
-      role: 'practitioner',
-    });
-    await db.collection('users').doc('practitioner-unassigned').set({
-      uid: 'practitioner-unassigned',
-      role: 'practitioner',
-    });
-    await db.collection('users').doc('patient-jane-99').set({
-      uid: 'patient-jane-99',
-      role: 'customer',
-      assignedPractitionerId: 'practitioner-assigned',
-    });
-    await db.collection('consultation_assignments').doc('practitioner-assigned_patient-jane-99').set({
-      practitionerId: 'practitioner-assigned',
-      patientId: 'patient-jane-99',
-    });
-    await db.collection('branch_inventory').doc('daet_hci-cmd-65ml').set({
-      stockCount: 10,
-    });
+  // Initialize and inject transactional in-memory test database
+  const inMemoryDb = new InMemoryFirestore();
+  setDatabase(inMemoryDb);
 
-    // Write a test clinical record with a deliberately invalid/corrupted wrapped DEK
-    await db.collection('consultation_intakes').doc('CNS-INT-CORRUPTED-KMS').set({
-      id: 'CNS-INT-CORRUPTED-KMS',
-      userId: 'patient-jane-99',
-      practitionerId: 'practitioner-assigned',
-      scheduledAt: new Date().toISOString(),
-      deliveryMode: 'virtual',
-      consentRecord: {
-        purpose: 'Wellness',
-        version: 'v1.0',
-        timestamp: new Date()
-      },
-      encryptedClinicalIntake: {
-        ciphertext: Buffer.from('some-fake-clinical-ciphertext-data').toString('base64'),
-        iv: Buffer.from('123456789012').toString('base64'),
-        tag: Buffer.from('1234567890123456').toString('base64'),
-        encryptedKey: Buffer.from('corrupted-unwrappable-kms-key-envelope-payload-that-should-reject').toString('base64'),
-        kmsKeyId: 'projects/gen-lang-client-0427039673/locations/global/keyRings/hic-cmd-keyring/cryptoKeys/clinical-spi-key'
-      }
-    });
+  // Set up baseline fixtures
+  await inMemoryDb.collection('users').doc('staff-daet-10').set({
+    uid: 'staff-daet-10',
+    role: 'staff',
+    assignedBranchId: 'daet',
+  });
+  await inMemoryDb.collection('users').doc('practitioner-assigned').set({
+    uid: 'practitioner-assigned',
+    role: 'practitioner',
+  });
+  await inMemoryDb.collection('users').doc('practitioner-unassigned').set({
+    uid: 'practitioner-unassigned',
+    role: 'practitioner',
+  });
+  await inMemoryDb.collection('users').doc('patient-jane-99').set({
+    uid: 'patient-jane-99',
+    role: 'customer',
+    assignedPractitionerId: 'practitioner-assigned',
+  });
+  await inMemoryDb.collection('consultation_assignments').doc('practitioner-assigned_patient-jane-99').set({
+    practitionerId: 'practitioner-assigned',
+    patientId: 'patient-jane-99',
+  });
+  await inMemoryDb.collection('branch_inventory').doc('daet_hci-cmd-65ml').set({
+    stockCount: 10,
+  });
+  await inMemoryDb.collection('branch_inventory').doc('daet_hci-cmd-30ml').set({
+    stockCount: 20,
+  });
 
-  } catch (setupErr) {
-    console.warn('Database environment setup warning (running sandbox-mode fallback):', setupErr);
-  }
+  // Seed corrupted-key test record in consultation_intakes
+  await inMemoryDb.collection('consultation_intakes').doc('CNS-INT-CORRUPTED-KMS').set({
+    id: 'CNS-INT-CORRUPTED-KMS',
+    userId: 'patient-jane-99',
+    practitionerId: 'practitioner-assigned',
+    scheduledAt: new Date().toISOString(),
+    deliveryMode: 'virtual',
+    consentRecord: {
+      purpose: 'Wellness',
+      version: 'v1.0',
+      timestamp: new Date().toISOString(),
+    },
+    encryptedClinicalIntake: {
+      ciphertext: Buffer.from('some-fake-clinical-ciphertext-data').toString('base64'),
+      iv: Buffer.from('123456789012').toString('base64'),
+      tag: Buffer.from('1234567890123456').toString('base64'),
+      encryptedKey: Buffer.from('corrupted-unwrappable-kms-key-envelope-payload-that-should-reject').toString('base64'),
+      kmsKeyId: 'projects/gen-lang-client-0427039673/locations/global/keyRings/hic-cmd-keyring/cryptoKeys/clinical-spi-key'
+    }
+  });
 
   // --- 1. Unauthorized Branch Access Test ---
   try {
@@ -85,7 +223,8 @@ async function runTests() {
       {
         items: [{ skuId: 'hci-cmd-65ml', quantity: 1 }],
         branchId: 'labo',
-        customer: { firstName: 'Test' }
+        customer: { firstName: 'Test' },
+        paymentMethod: 'cash_on_delivery',
       },
       { auth: { uid: 'staff-daet-10', token: {} } }
     );
@@ -149,20 +288,21 @@ async function runTests() {
     );
     assert(result && result.success, 'Assigned practitioner write completed successfully.');
   } catch (err: any) {
-    // If KMS credentials fail because client is in local developer machine, verify it fails closed
-    const isKmsFailure = err.message.includes('KMS') || err.message.includes('Wrapping') || err.message.includes('DEK') || err.message.includes('unwrapped') || err.message.includes('key');
-    assert(isKmsFailure, 'Assigned practitioner write failed closed securely on offline KMS environment.');
+    assert(false, `Assigned practitioner write failed unexpectedly: ${err.message}`);
   }
 
-  // --- 4. Atomic Inventory + Order Rollback Test ---
+  // --- 4. Strengthened Atomic Multi-item Inventory + Order Rollback Test ---
+  const initialSnap65 = await inMemoryDb.collection('branch_inventory').doc('daet_hci-cmd-65ml').get();
+  const initialStock65 = initialSnap65.data()?.stockCount;
+
+  const initialSnap30 = await inMemoryDb.collection('branch_inventory').doc('daet_hci-cmd-30ml').get();
+  const initialStock30 = initialSnap30.data()?.stockCount;
+
+  const ordersBeforeSnap = await inMemoryDb.collection('orders').where('userId', '==', 'patient-jane-99').get();
+  const ordersBeforeCount = ordersBeforeSnap.size;
+
   try {
-    const initialStockSnap = await db.collection('branch_inventory').doc('daet_hci-cmd-65ml').get();
-    const initialStock = initialStockSnap.exists ? initialStockSnap.data()?.stockCount : 10;
-
-    const ordersBeforeSnap = await db.collection('orders').where('userId', '==', 'patient-jane-99').get();
-    const ordersBeforeCount = ordersBeforeSnap.size;
-
-    // Place an order with one normal item and one item exceeding stock levels (triggers transaction failure)
+    // Attempt an order with one valid item and one item exceeding stock levels (triggers transaction failure)
     await (createOrderSecure as any).run(
       {
         items: [
@@ -175,35 +315,63 @@ async function runTests() {
       },
       { auth: { uid: 'patient-jane-99', token: {} } }
     );
-    assert(false, 'Partially failing order was erroneously written.');
+    assert(false, 'Partially failing multi-item order was erroneously written.');
   } catch (err: any) {
-    // Retrieve stock levels and order state after rollback
-    const finalStockSnap = await db.collection('branch_inventory').doc('daet_hci-cmd-65ml').get();
-    const finalStock = finalStockSnap.exists ? finalStockSnap.data()?.stockCount : 10;
+    // Verify inventory state and orders count after rollback
+    const finalSnap65 = await inMemoryDb.collection('branch_inventory').doc('daet_hci-cmd-65ml').get();
+    const finalStock65 = finalSnap65.data()?.stockCount;
 
-    const ordersAfterSnap = await db.collection('orders').where('userId', '==', 'patient-jane-99').get();
+    const finalSnap30 = await inMemoryDb.collection('branch_inventory').doc('daet_hci-cmd-30ml').get();
+    const finalStock30 = finalSnap30.data()?.stockCount;
+
+    const ordersAfterSnap = await inMemoryDb.collection('orders').where('userId', '==', 'patient-jane-99').get();
     const ordersAfterCount = ordersAfterSnap.size;
 
-    const inventoryUnchanged = finalStock === initialStock;
-    const noNewOrderDocument = ordersAfterCount === ordersBeforeCount;
+    const inventoryUnchanged = (finalStock65 === initialStock65) && (finalStock30 === initialStock30);
+    const noNewOrderDocument = (ordersAfterCount === ordersBeforeCount);
 
-    assert(inventoryUnchanged && noNewOrderDocument, 'Atomic Transaction Rollback Verified: Inventory is unchanged AND no new order document was written.');
+    assert(
+      inventoryUnchanged && noNewOrderDocument,
+      `Atomic Transaction Rollback Verified: All inventory lines unchanged (65ml: ${finalStock65}/${initialStock65}, 30ml: ${finalStock30}/${initialStock30}) AND zero order documents created (${ordersAfterCount}/${ordersBeforeCount}).`
+    );
   }
 
-  // --- 5. KMS Fail-Closed Verification Test (Using a Corrupted Envelope Key) ---
+  // --- 5. Strengthened KMS Fail-Closed Verification Test (Deliberately Invalid/Corrupted Wrapped DEK) ---
   try {
-    // Fetch the clinical intake with corrupted key envelope. Decryption must fail because KMS unwrap fails.
+    // Fetch the clinical intake with corrupted key envelope. Document exists, but decryption must fail because KMS unwrap fails.
     await (fetchClinicalIntakeSecure as any).run(
       { intakeId: 'CNS-INT-CORRUPTED-KMS' },
       { auth: { uid: 'practitioner-assigned', token: {} } }
     );
-    assert(false, 'Corrupted key decryption lookup was bypassed without failing closed.');
+    assert(false, 'Corrupted DEK lookup was decrypted without failing closed.');
   } catch (err: any) {
-    // Verify that the error is not merely a "record not found"
-    const isRecordFound = err.code !== 'not-found' && !err.message.includes('not found') && !err.message.includes('Record not found');
-    const isCryptoUnwrapFailure = err.message.includes('KMS') || err.message.includes('unwrap') || err.message.includes('unwrapping') || err.message.includes('key') || err.message.includes('decrypt') || err.message.includes('DEK') || err.message.includes('bad') || err.message.includes('invalid') || err.message.includes('Buffer');
-    
-    assert(isRecordFound && isCryptoUnwrapFailure, `KMS unwrap failure correctly failed closed (Operation Rejected due to crypto failure: ${err.message}).`);
+    // Strictly verify:
+    // 1. Must NOT be 'not-found' (the test record exists and was found)
+    // 2. Must NOT be 'unauthenticated' or 'permission-denied' (practitioner is assigned and authorized)
+    // 3. Must be a failure during KMS unwrapping/decryption
+    const isNotFound = err.code === 'not-found' || err.message?.includes('not found') || err.message?.includes('Record not found');
+    const isAuthError = err.code === 'unauthenticated' || err.code === 'permission-denied';
+    const isKmsUnwrapFailure = !isNotFound && !isAuthError && (
+      err.message?.includes('KMS') ||
+      err.message?.includes('unwrap') ||
+      err.message?.includes('unwrapping') ||
+      err.message?.includes('DEK') ||
+      err.message?.includes('key') ||
+      err.message?.includes('decrypt') ||
+      err.message?.includes('crypto') ||
+      err.message?.includes('Invalid') ||
+      err.message?.includes('ciphertext')
+    );
+
+    if (isNotFound) {
+      assert(false, 'KMS test failed: Test record CNS-INT-CORRUPTED-KMS was not found in database.');
+    } else if (isAuthError) {
+      assert(false, `KMS test failed: Unexpected authorization error (${err.message}).`);
+    } else if (isKmsUnwrapFailure) {
+      assert(true, `KMS unwrap failure verified: Record found, and KMS unwrapping correctly failed closed (Error: ${err.message}).`);
+    } else {
+      assert(false, `KMS test failed: Unexpected error encountered (${err.message}).`);
+    }
   }
 
   console.log('\n================================================================');

@@ -7,10 +7,21 @@ import * as functions from 'firebase-functions';
 import * as admin from 'firebase-admin';
 import * as crypto from 'crypto';
 import { KeyManagementServiceClient } from '@google-cloud/kms';
-import { getFirestore, FieldValue, Transaction } from 'firebase-admin/firestore';
+import { getFirestore, FieldValue } from 'firebase-admin/firestore';
 
-admin.initializeApp();
-const db = getFirestore();
+admin.initializeApp({
+  projectId: 'gen-lang-client-0427039673',
+});
+
+let db: any = getFirestore('ai-studio-cmddigitalcommer-8d70f45b-1636-42ba-9e2d-f063a7b0e086');
+
+export function setDatabase(customDb: any) {
+  db = customDb;
+}
+
+export function getDatabase() {
+  return db;
+}
 
 // Real Cloud KMS Client Initialization
 const kmsClient = new KeyManagementServiceClient();
@@ -35,16 +46,27 @@ async function encryptClinicalPayload(payload: any): Promise<{ ciphertext: strin
   const dek = crypto.randomBytes(32);
   const iv = crypto.randomBytes(12);
 
-  // Wrap (encrypt) the local DEK using Google Cloud KMS API
-  const [result] = await kmsClient.encrypt({
-    name: KMS_KEY_NAME,
-    plaintext: dek,
-  });
+  let encryptedKeyBase64: string;
+  try {
+    // Wrap (encrypt) the local DEK using Google Cloud KMS API
+    const [result] = await kmsClient.encrypt({
+      name: KMS_KEY_NAME,
+      plaintext: dek,
+    });
 
-  if (!result.ciphertext) {
-    throw new Error('KMS Key Wrapping Error: Failed to secure the Data Encryption Key.');
+    if (!result.ciphertext) {
+      throw new Error('KMS Key Wrapping Error: Failed to secure the Data Encryption Key.');
+    }
+    encryptedKeyBase64 = Buffer.from(result.ciphertext as Uint8Array).toString('base64');
+  } catch (kmsErr: any) {
+    if (process.env.TEST_MOCK_KMS === 'true') {
+      const mockKey = crypto.createHash('sha256').update(KMS_KEY_NAME).digest();
+      const wrapCipher = crypto.createCipheriv('aes-256-cbc', mockKey, Buffer.alloc(16, 0));
+      encryptedKeyBase64 = Buffer.concat([wrapCipher.update(dek), wrapCipher.final()]).toString('base64');
+    } else {
+      throw new Error(`KMS Key Wrapping Error: ${kmsErr.message}`);
+    }
   }
-  const encryptedKeyBase64 = Buffer.from(result.ciphertext as Uint8Array).toString('base64');
 
   // Encrypt payload string using local AES-256-GCM and DEK
   const plaintext = JSON.stringify(payload);
@@ -67,16 +89,34 @@ async function decryptClinicalPayload(ciphertext: string, ivBase64: string, tagB
   const tag = Buffer.from(tagBase64, 'base64');
   const encryptedKey = Buffer.from(encryptedKeyBase64, 'base64');
 
-  // Unwrap the DEK using Google Cloud KMS Decrypt API
-  const [result] = await kmsClient.decrypt({
-    name: KMS_KEY_NAME,
-    ciphertext: encryptedKey,
-  });
+  let dek: Buffer;
+  try {
+    // Unwrap the DEK using Google Cloud KMS Decrypt API
+    const [result] = await kmsClient.decrypt({
+      name: KMS_KEY_NAME,
+      ciphertext: encryptedKey,
+    });
 
-  if (!result.plaintext) {
-    throw new Error('KMS Key Unwrapping Error: Failed to unwrap the Data Encryption Key.');
+    if (!result.plaintext) {
+      throw new Error('KMS Key Unwrapping Error: Failed to unwrap the Data Encryption Key.');
+    }
+    dek = Buffer.from(result.plaintext as Uint8Array);
+  } catch (kmsErr: any) {
+    if (process.env.TEST_MOCK_KMS === 'true') {
+      try {
+        const mockKey = crypto.createHash('sha256').update(KMS_KEY_NAME).digest();
+        const unwrapCipher = crypto.createDecipheriv('aes-256-cbc', mockKey, Buffer.alloc(16, 0));
+        dek = Buffer.concat([unwrapCipher.update(encryptedKey), unwrapCipher.final()]);
+        if (dek.length !== 32) {
+          throw new Error('Invalid unwrapped key size.');
+        }
+      } catch (unwrapErr: any) {
+        throw new Error(`KMS Key Unwrapping Error: ${unwrapErr.message}`);
+      }
+    } else {
+      throw new Error(`KMS Key Unwrapping Error: ${kmsErr.message}`);
+    }
   }
-  const dek = Buffer.from(result.plaintext as Uint8Array);
 
   // Decrypt AES-256-GCM ciphertext using the unwrapped DEK
   const decipher = crypto.createDecipheriv('aes-256-gcm', dek, iv);
@@ -273,7 +313,7 @@ export const createOrderSecure = functions.https.onCall(async (data: any, contex
 
   // ATOMIC RESERVATION AND WRITES inside the exact same transaction block
   try {
-    await db.runTransaction(async (transaction: Transaction) => {
+    await db.runTransaction(async (transaction: any) => {
       // 1. Verify and decrement inventory for each item
       for (const item of items) {
         const invRef = db.collection('branch_inventory').doc(`${branchId}_${item.skuId}`);

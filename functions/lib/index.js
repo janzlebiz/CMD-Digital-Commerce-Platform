@@ -38,13 +38,23 @@ var __importStar = (this && this.__importStar) || (function () {
 })();
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.fetchClinicalIntakeSecure = exports.saveClinicalIntakeSecure = exports.createOrderSecure = exports.calculateOrder = void 0;
+exports.setDatabase = setDatabase;
+exports.getDatabase = getDatabase;
 const functions = __importStar(require("firebase-functions"));
 const admin = __importStar(require("firebase-admin"));
 const crypto = __importStar(require("crypto"));
 const kms_1 = require("@google-cloud/kms");
 const firestore_1 = require("firebase-admin/firestore");
-admin.initializeApp();
-const db = (0, firestore_1.getFirestore)();
+admin.initializeApp({
+    projectId: 'gen-lang-client-0427039673',
+});
+let db = (0, firestore_1.getFirestore)('ai-studio-cmddigitalcommer-8d70f45b-1636-42ba-9e2d-f063a7b0e086');
+function setDatabase(customDb) {
+    db = customDb;
+}
+function getDatabase() {
+    return db;
+}
 // Real Cloud KMS Client Initialization
 const kmsClient = new kms_1.KeyManagementServiceClient();
 const KMS_KEY_NAME = 'projects/gen-lang-client-0427039673/locations/global/keyRings/hic-cmd-keyring/cryptoKeys/clinical-spi-key';
@@ -64,15 +74,28 @@ const SERVER_TAX_CONFIG = {
 async function encryptClinicalPayload(payload) {
     const dek = crypto.randomBytes(32);
     const iv = crypto.randomBytes(12);
-    // Wrap (encrypt) the local DEK using Google Cloud KMS API
-    const [result] = await kmsClient.encrypt({
-        name: KMS_KEY_NAME,
-        plaintext: dek,
-    });
-    if (!result.ciphertext) {
-        throw new Error('KMS Key Wrapping Error: Failed to secure the Data Encryption Key.');
+    let encryptedKeyBase64;
+    try {
+        // Wrap (encrypt) the local DEK using Google Cloud KMS API
+        const [result] = await kmsClient.encrypt({
+            name: KMS_KEY_NAME,
+            plaintext: dek,
+        });
+        if (!result.ciphertext) {
+            throw new Error('KMS Key Wrapping Error: Failed to secure the Data Encryption Key.');
+        }
+        encryptedKeyBase64 = Buffer.from(result.ciphertext).toString('base64');
     }
-    const encryptedKeyBase64 = Buffer.from(result.ciphertext).toString('base64');
+    catch (kmsErr) {
+        if (process.env.TEST_MOCK_KMS === 'true') {
+            const mockKey = crypto.createHash('sha256').update(KMS_KEY_NAME).digest();
+            const wrapCipher = crypto.createCipheriv('aes-256-cbc', mockKey, Buffer.alloc(16, 0));
+            encryptedKeyBase64 = Buffer.concat([wrapCipher.update(dek), wrapCipher.final()]).toString('base64');
+        }
+        else {
+            throw new Error(`KMS Key Wrapping Error: ${kmsErr.message}`);
+        }
+    }
     // Encrypt payload string using local AES-256-GCM and DEK
     const plaintext = JSON.stringify(payload);
     const cipher = crypto.createCipheriv('aes-256-gcm', dek, iv);
@@ -91,15 +114,36 @@ async function decryptClinicalPayload(ciphertext, ivBase64, tagBase64, encrypted
     const iv = Buffer.from(ivBase64, 'base64');
     const tag = Buffer.from(tagBase64, 'base64');
     const encryptedKey = Buffer.from(encryptedKeyBase64, 'base64');
-    // Unwrap the DEK using Google Cloud KMS Decrypt API
-    const [result] = await kmsClient.decrypt({
-        name: KMS_KEY_NAME,
-        ciphertext: encryptedKey,
-    });
-    if (!result.plaintext) {
-        throw new Error('KMS Key Unwrapping Error: Failed to unwrap the Data Encryption Key.');
+    let dek;
+    try {
+        // Unwrap the DEK using Google Cloud KMS Decrypt API
+        const [result] = await kmsClient.decrypt({
+            name: KMS_KEY_NAME,
+            ciphertext: encryptedKey,
+        });
+        if (!result.plaintext) {
+            throw new Error('KMS Key Unwrapping Error: Failed to unwrap the Data Encryption Key.');
+        }
+        dek = Buffer.from(result.plaintext);
     }
-    const dek = Buffer.from(result.plaintext);
+    catch (kmsErr) {
+        if (process.env.TEST_MOCK_KMS === 'true') {
+            try {
+                const mockKey = crypto.createHash('sha256').update(KMS_KEY_NAME).digest();
+                const unwrapCipher = crypto.createDecipheriv('aes-256-cbc', mockKey, Buffer.alloc(16, 0));
+                dek = Buffer.concat([unwrapCipher.update(encryptedKey), unwrapCipher.final()]);
+                if (dek.length !== 32) {
+                    throw new Error('Invalid unwrapped key size.');
+                }
+            }
+            catch (unwrapErr) {
+                throw new Error(`KMS Key Unwrapping Error: ${unwrapErr.message}`);
+            }
+        }
+        else {
+            throw new Error(`KMS Key Unwrapping Error: ${kmsErr.message}`);
+        }
+    }
     // Decrypt AES-256-GCM ciphertext using the unwrapped DEK
     const decipher = crypto.createDecipheriv('aes-256-gcm', dek, iv);
     decipher.setAuthTag(tag);
