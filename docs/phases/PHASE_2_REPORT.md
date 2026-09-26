@@ -28,7 +28,7 @@ All features run locally on the client-side utilizing React, TypeScript, and loc
 3. **Stage 1 — Shopping Cart (`/src/views/CartView.tsx`, `/src/hooks/useEcommerce.ts`):**
    - Client-side cart manager allowing users to add/remove products, adjust quantities, and inspect real-time unit subtotals.
    - Enforces inventory availability checks preventing users from adding items beyond available simulated stock.
-   - Integrated **Interactive Compliance Auditor Panel** allowing testers to toggle VAT-Registered (12% inclusive) vs. Non-VAT Entity (Exempt) status to watch prices recalculate in real-time.
+   - Integrated **Interactive Compliance Auditor Panel** allowing testers to toggle VAT-Registered (12% inclusive) vs. **Non-VAT Registered — Non-VAT treatment** status to watch prices recalculate in real-time.
 
 4. **Stage 2 — Secure Checkout (`/src/views/CheckoutView.tsx`):**
    - Comprehensive customer checkout forms collecting contact info (First/Last name, Email, Phone).
@@ -36,14 +36,14 @@ All features run locally on the client-side utilizing React, TypeScript, and loc
    - Dual-protocol logistics selector:
      - **Branch Pickup:** Select from our configured Camarines Norte branch hubs; physical addresses and contact details pending business confirmation. (Free pickup fee).
      - **Home Delivery:** Fixed dispatch rate of ₱150.00.
-   - Approved payment channels with transparent sandbox/testing instructions: GCash Mobile Wallet, Maya Wallet, Bank Transfer, and Cash on Pickup.
+   - **Sandbox payment methods** with transparent sandbox/testing instructions: GCash Mobile Wallet, Maya Wallet, Bank Transfer, and Cash on Pickup.
 
 5. **Stage 3 — Order Tracking & Sandbox Sales Invoice Simulation (`/src/views/OrdersView.tsx`):**
    - Persistent order registry utilizing browser cache (`localStorage`) to retain placed orders.
    - Interactive Operations Hub Simulator allowing auditors to advance fulfillment states (`Pending` ➔ `In Transit` / `Ready` ➔ `Completed`) or void orders.
    - **Sandbox Sales Invoice Simulation:** Outputs a beautiful sandbox layout featuring:
      - Clear headers with corporate identification placeholders.
-     - Sandbox-recalculated tax-ready breakdowns (including vatable sales, output VAT amount, exempt sales, shipping fees, and grand total).
+     - **Sandbox-recalculated transaction and tax demonstration breakdowns** (including vatable sales, output VAT amount, exempt sales, shipping fees, and grand total).
      - **Mandatory Regulatory Advisory:** Prominently displays the Filipino phrase **"NO APPROVED THERAPEUTIC CLAIMS"** at both the top and bottom of the printed layout.
      - Responsive print stylesheets formatting perfectly for desktop paper and PDF outputs.
 
