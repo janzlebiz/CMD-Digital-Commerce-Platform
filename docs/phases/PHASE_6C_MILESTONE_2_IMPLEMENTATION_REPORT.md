@@ -6,11 +6,12 @@
 **Verification Date:** 2026-09-27  
 **Fulfillment Status:** Complete (Milestone 2 Only — Municipality/Replenishment separate engine, marketing automation, SMS/WhatsApp, and Phase 6D strictly NOT started)  
 **Test Metrics:**  
-- **Phase 6C Milestone 2 Suite:** **58 PASSED**, **0 FAILED**  
+- **Phase 6C Milestone 2 Suite:** **59 PASSED**, **0 FAILED**  
 - **Phase 6C Milestone 1 Suite:** **96 PASSED**, **0 FAILED**  
 - **Phase 6A Regression Suite:** **53 PASSED**, **0 FAILED**  
 - **Phase 6B Regression Suite:** **36 PASSED**, **0 FAILED**  
-- **Cumulative Active Test Suite:** **243 / 243 TOTAL TESTS PASSING (100%)**
+- **Cumulative Active Test Suite:** **244 / 244 TOTAL TESTS PASSING (100%)**  
+*(Note: The CRM tests use an in-memory/mock Firestore harness and are not independent production Firestore verification).*
 
 ---
 
@@ -41,7 +42,7 @@ The CRM engine dynamically aggregates commercial customer profiles from transact
    - Added `Customer Segments (CRM)` tab to Staff Operations Console.
    - Integrated cohort summaries grid, member drill-down table, and prominent Health Data Privacy Firewall statutory notice banner.
 4. **`/scripts/testPhase6CCrmCohorts.ts`** *(Created)*:
-   - Automated 58-assertion test suite covering authentication, cohort aggregation, branch isolation, zero-leakage clinical data firewall, and ADR-009 audit trails.
+   - Automated 59-assertion test suite covering authentication, cohort aggregation, branch isolation, zero-leakage clinical data firewall, and ADR-009 audit trails.
 5. **`/docs/phases/PHASE_6C_MILESTONE_2_IMPLEMENTATION_REPORT.md`** *(Created)*:
    - This implementation and verification report.
 
@@ -108,11 +109,13 @@ In compliance with Republic Act No. 10173 and the medical act boundaries of Repu
 
 | Test Suite | Total Assertions | Passed | Failed |
 | :--- | :---: | :---: | :---: |
-| **Phase 6C Milestone 2 (`scripts/testPhase6CCrmCohorts.ts`)** | **58** | **58** | **0** |
+| **Phase 6C Milestone 2 (`scripts/testPhase6CCrmCohorts.ts`)** | **59** | **59** | **0** |
 | **Phase 6C Milestone 1 (`scripts/testPhase6CSupportTickets.ts`)** | **96** | **96** | **0** |
 | **Phase 6A Regression (`scripts/testPhase6AConsultations.ts`)** | **53** | **53** | **0** |
 | **Phase 6B Regression (`scripts/testPhase6BWorkshops.ts`)** | **36** | **36** | **0** |
-| **Total Cumulative Platform Test Suite** | **243** | **243** | **0** |
+| **Total Cumulative Platform Test Suite** | **244** | **244** | **0** |
+
+*(Note: The CRM tests use an in-memory/mock Firestore harness and are not independent production Firestore verification).*
 
 ---
 
