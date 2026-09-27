@@ -59,7 +59,12 @@ export function createExpressApp(deps: ServerDependencies = {}): Express {
 
   // Assign a unique Correlation ID middleware for end-to-end request tracing
   app.use((req, res, next) => {
-    (req as any).correlationId = crypto.randomUUID ? crypto.randomUUID() : `TRACE-${Date.now()}-${crypto.randomBytes(4).toString('hex')}`;
+    const incomingTrace = req.headers['x-correlation-id'] || req.headers['x-request-id'];
+    const correlationId = (typeof incomingTrace === 'string' && incomingTrace.trim())
+      ? incomingTrace.trim()
+      : (crypto.randomUUID ? crypto.randomUUID() : `TRACE-${Date.now()}-${crypto.randomBytes(4).toString('hex')}`);
+    (req as any).correlationId = correlationId;
+    res.setHeader('x-correlation-id', correlationId);
     next();
   });
 
@@ -67,7 +72,7 @@ export function createExpressApp(deps: ServerDependencies = {}): Express {
   const auth = deps.auth || getAuth();
   const kmsClient = deps.kmsClient || new KeyManagementServiceClient();
 
-  // --- SERVER-AUTHORITATIVE STRUCTURED AUDIT LOGGER (FAIL CLOSED & SAFE-SCRUBBING) ---
+  // --- SERVER-AUTHORITATIVE STRUCTURED AUDIT LOGGER (BEST-EFFORT STORAGE & SAFE SCRUBBING) ---
   async function logAuditEvent(
     actorUid: string | null,
     actorRole: string | null,
