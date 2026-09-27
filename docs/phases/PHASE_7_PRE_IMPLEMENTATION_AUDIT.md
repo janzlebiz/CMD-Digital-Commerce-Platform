@@ -211,7 +211,7 @@ To ensure that the 333 passing regression assertions remain completely stable, P
 2. **Phase 6B (Workshops & Dynamic QR Passes):** Symposia schedules, check-in signatures, and participant registration remain 100% independent of stock counts.
 3. **Phase 6C Milestones 1–3 (Redress, CRM, and Expenses):** 
    * CRM cohort aggregation query remains operational.
-   * Expense recording APIs are preserved; however, a read-only integration is established such that logging raw material procurement automatically populates corresponding `product_batches` cost bases, enriching financial accrual reporting without breaking existing test schemas.
+   * Expense recording APIs are preserved; the proposed design plans a future read-only integration such that logging raw material procurement would populate corresponding `product_batches` cost bases without breaking existing test schemas.
 
 ---
 

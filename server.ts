@@ -272,19 +272,29 @@ export interface RawCrmSourceData {
 }
 
 export function getAuthoritativeRegistrationBranch(reg: any): string | undefined {
+  if (!reg || typeof reg !== 'object') return undefined;
+
+  const foundBranches = new Set<string>();
+
   if (typeof reg.branchId === 'string' && reg.branchId.trim().length > 0) {
-    return reg.branchId.trim().toLowerCase();
+    foundBranches.add(reg.branchId.trim().toLowerCase());
   }
   if (typeof reg.workshopBranch === 'string' && reg.workshopBranch.trim().length > 0) {
-    return reg.workshopBranch.trim().toLowerCase();
+    foundBranches.add(reg.workshopBranch.trim().toLowerCase());
   }
   if (typeof reg.workshopId === 'string' && reg.workshopId.trim().length > 0) {
     const known = SEED_WORKSHOPS.find((w) => w.id === reg.workshopId.trim());
     if (known && typeof known.branchId === 'string' && known.branchId.trim().length > 0) {
-      return known.branchId.trim().toLowerCase();
+      foundBranches.add(known.branchId.trim().toLowerCase());
     }
   }
-  return undefined;
+
+  // If conflicting branch metadata exists, treat as ambiguous and fail closed
+  if (foundBranches.size !== 1) {
+    return undefined;
+  }
+
+  return Array.from(foundBranches)[0];
 }
 
 export function aggregateCustomerCrmProfiles(

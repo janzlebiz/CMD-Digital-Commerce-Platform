@@ -384,6 +384,8 @@ async function runPhase6CMilestone2Tests() {
       workshopRegistrations: {
         // Unknown / ambiguous workshop registration with missing branch (must be excluded fail-closed)
         'REG-UNKNOWN': { id: 'REG-UNKNOWN', userId: 'user-unknown-attendee', workshopId: 'wk-unknown-ambiguous', status: 'attended' },
+        // Conflicting branch metadata registration: workshopId maps to Daet, but branchId says 'labo' (must be excluded fail-closed)
+        'REG-CONFLICT': { id: 'REG-CONFLICT', userId: 'user-conflicting-attendee', workshopId: 'wk-01-daet', branchId: 'labo', status: 'attended' },
         // Mismatched workshop registration in Labo
         'REG-LABO': { id: 'REG-LABO', userId: 'user-labo-attendee', workshopId: 'wk-02-labo', branchId: 'labo', status: 'attended' },
         // Valid Daet workshop registration
@@ -404,8 +406,8 @@ async function runPhase6CMilestone2Tests() {
         { Authorization: 'Bearer STAFF_DAET_MANAGER_TOKEN' }
       );
       assert(daetManagerRes.status === 200, '3.1 Daet manager queries wholesale cohort with HTTP 200');
-      assert(daetManagerRes.data.members.length === 1, '3.2 Daet manager sees exactly 1 member (unknown/mismatched workshop branches excluded fail-closed)');
-      assert(daetManagerRes.data.members[0].userId === 'user-daet-1', '3.3 Daet manager only sees Daet customer and not unknown/mismatched branch attendees');
+      assert(daetManagerRes.data.members.length === 1, '3.2 Daet manager sees exactly 1 member (unknown/conflicting/mismatched workshop branches excluded fail-closed)');
+      assert(daetManagerRes.data.members[0].userId === 'user-daet-1', '3.3 Daet manager only sees Daet customer and not unknown/conflicting/mismatched branch attendees');
       assert(daetManagerRes.data.branchScope === 'daet', '3.4 Response reflects Daet branch scope');
 
       // 3.2 Labo Branch Manager queries wholesale cohort: sees ONLY Labo customer
@@ -417,8 +419,8 @@ async function runPhase6CMilestone2Tests() {
         { Authorization: 'Bearer STAFF_LABO_MANAGER_TOKEN' }
       );
       assert(laboManagerRes.status === 200, '3.5 Labo manager queries wholesale cohort with HTTP 200');
-      assert(laboManagerRes.data.members.length === 1, '3.6 Labo manager sees exactly 1 member (unknown/mismatched workshop branches excluded fail-closed)');
-      assert(laboManagerRes.data.members[0].userId === 'user-labo-2', '3.7 Labo manager only sees Labo customer and not unknown/mismatched branch attendees');
+      assert(laboManagerRes.data.members.length === 1, '3.6 Labo manager sees exactly 1 member (unknown/conflicting/mismatched workshop branches excluded fail-closed)');
+      assert(laboManagerRes.data.members[0].userId === 'user-labo-2', '3.7 Labo manager only sees Labo customer and not unknown/conflicting/mismatched branch attendees');
       assert(laboManagerRes.data.branchScope === 'labo', '3.8 Response reflects Labo branch scope');
 
       // 3.3 Regional Director queries wholesale cohort: sees BOTH branches
