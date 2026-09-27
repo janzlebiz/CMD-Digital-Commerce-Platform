@@ -10,10 +10,14 @@ import { ShieldCheck, Package, RefreshCw, AlertCircle, FileText, UserCheck } fro
 
 export const AdminDashboardView: React.FC<{ onNavigate: (view: PageView) => void }> = ({ onNavigate }) => {
   const { user, profile } = useAuth();
-  const [activeTab, setActiveTab] = useState<'orders' | 'inventory' | 'audit'>('orders');
+  const [activeTab, setActiveTab] = useState<'orders' | 'inventory' | 'audit' | 'crm'>('orders');
 
   const [orders, setOrders] = useState<any[]>([]);
   const [auditLogs, setAuditLogs] = useState<any[]>([]);
+  const [crmCohorts, setCrmCohorts] = useState<any[]>([]);
+  const [selectedCohort, setSelectedCohort] = useState<string | null>(null);
+  const [cohortMembers, setCohortMembers] = useState<any[]>([]);
+  const [cohortDetailLoading, setCohortDetailLoading] = useState<boolean>(false);
   const [loading, setLoading] = useState<boolean>(false);
 
   const isStaff =
@@ -59,10 +63,54 @@ export const AdminDashboardView: React.FC<{ onNavigate: (view: PageView) => void
     }
   };
 
+  const fetchCrmCohorts = async () => {
+    if (!user) return;
+    setLoading(true);
+    try {
+      const token = await user.getIdToken();
+      const res = await fetch('/api/crm/cohorts', {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      if (res.ok) {
+        const data = await res.json();
+        setCrmCohorts(data.cohorts || []);
+      }
+    } catch (err: any) {
+      console.error('Failed to fetch CRM cohorts:', err);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const fetchCohortMembers = async (cohortKey: string) => {
+    if (!user) return;
+    setCohortDetailLoading(true);
+    setSelectedCohort(cohortKey);
+    try {
+      const token = await user.getIdToken();
+      const res = await fetch(`/api/crm/cohorts/${cohortKey}`, {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      if (res.ok) {
+        const data = await res.json();
+        setCohortMembers(data.members || []);
+      }
+    } catch (err: any) {
+      console.error('Failed to fetch cohort members:', err);
+    } finally {
+      setCohortDetailLoading(false);
+    }
+  };
+
   useEffect(() => {
     if (isStaff) {
       if (activeTab === 'orders') fetchAdminOrders();
       if (activeTab === 'audit') fetchAuditLogs();
+      if (activeTab === 'crm') {
+        fetchCrmCohorts();
+        setSelectedCohort(null);
+        setCohortMembers([]);
+      }
     }
   }, [activeTab, isStaff]);
 
@@ -120,6 +168,14 @@ export const AdminDashboardView: React.FC<{ onNavigate: (view: PageView) => void
             }`}
           >
             Security Audit Logs
+          </button>
+          <button
+            onClick={() => setActiveTab('crm')}
+            className={`px-4 py-2 rounded-lg text-xs font-bold transition ${
+              activeTab === 'crm' ? 'bg-amber-500 text-slate-950 shadow' : 'text-slate-400 hover:text-white'
+            }`}
+          >
+            Customer Segments (CRM)
           </button>
         </div>
       </div>
@@ -241,6 +297,143 @@ export const AdminDashboardView: React.FC<{ onNavigate: (view: PageView) => void
                   ))}
                 </tbody>
               </table>
+            </div>
+          )}
+        </div>
+      )}
+
+      {activeTab === 'crm' && (
+        <div className="space-y-6">
+          {/* Health Data Privacy Firewall Notice */}
+          <div className="bg-slate-900 border border-amber-500/30 rounded-2xl p-4 sm:p-5 flex items-start gap-3">
+            <div className="p-2 bg-amber-500/10 rounded-xl text-amber-400 shrink-0">
+              <ShieldCheck className="w-5 h-5" />
+            </div>
+            <div className="space-y-1">
+              <h4 className="text-xs font-bold text-amber-300 uppercase tracking-wider">
+                Health Data Privacy Firewall (RA 10173 & Naturopathic Scope Boundary)
+              </h4>
+              <p className="text-xs text-slate-300 leading-relaxed">
+                This CRM console aggregates commercial fulfillment records, mineral purchase velocity, and public wellness seminar attendance only.
+                Under statutory data protection protocols, confidential clinical consultations, dietary intakes, and health conditions are strictly firewalled from commercial view.
+              </p>
+            </div>
+          </div>
+
+          {/* CRM Cohorts Overview Cards */}
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+            {crmCohorts.map((cohort) => {
+              const isSelected = selectedCohort === cohort.key;
+              return (
+                <div
+                  key={cohort.key}
+                  onClick={() => fetchCohortMembers(cohort.key)}
+                  className={`p-5 rounded-xl border transition cursor-pointer space-y-3 ${
+                    isSelected
+                      ? 'bg-amber-950/40 border-amber-500 shadow-lg'
+                      : 'bg-slate-900 border-slate-800 hover:border-slate-700'
+                  }`}
+                >
+                  <div className="flex items-center justify-between">
+                    <span className="text-xs font-bold text-white">{cohort.label}</span>
+                    <span className="px-2.5 py-0.5 rounded-full text-xs font-extrabold bg-amber-500/20 text-amber-300 border border-amber-500/30">
+                      {cohort.memberCount} Accounts
+                    </span>
+                  </div>
+                  <p className="text-xs text-slate-400 leading-relaxed">{cohort.description}</p>
+                  <div className="text-[11px] text-amber-400/90 font-semibold flex items-center gap-1 pt-1">
+                    {isSelected ? 'Viewing cohort members ↓' : 'Click to inspect cohort →'}
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+
+          {/* Selected Cohort Member Breakdown */}
+          {selectedCohort && (
+            <div className="bg-slate-900 rounded-2xl border border-slate-800 p-6 space-y-4">
+              <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-2">
+                <div>
+                  <h3 className="text-base font-bold text-white capitalize">
+                    {selectedCohort.replace(/_/g, ' ')} — Member Directory
+                  </h3>
+                  <p className="text-xs text-slate-400">
+                    Showing {cohortMembers.length} accounts matching this commercial cohort.
+                  </p>
+                </div>
+                <button
+                  onClick={() => fetchCohortMembers(selectedCohort)}
+                  className="px-3 py-1.5 bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs font-semibold rounded-lg flex items-center gap-1.5 transition"
+                >
+                  <RefreshCw className={`w-3.5 h-3.5 ${cohortDetailLoading ? 'animate-spin' : ''}`} />
+                  Refresh Cohort
+                </button>
+              </div>
+
+              {cohortDetailLoading ? (
+                <div className="p-8 text-center text-xs text-slate-400">Loading cohort members...</div>
+              ) : cohortMembers.length === 0 ? (
+                <div className="p-8 text-center text-xs text-slate-500">
+                  No accounts currently qualify for this cohort in your branch jurisdiction.
+                </div>
+              ) : (
+                <div className="overflow-x-auto">
+                  <table className="w-full text-left text-xs">
+                    <thead className="bg-slate-950 text-slate-400 border-b border-slate-800">
+                      <tr>
+                        <th className="p-3">Customer</th>
+                        <th className="p-3">Branch</th>
+                        <th className="p-3">Orders</th>
+                        <th className="p-3">Cumulative Spend</th>
+                        <th className="p-3">Last Order</th>
+                        <th className="p-3">Seminars Attended</th>
+                        <th className="p-3">Active Cohorts</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-slate-800 text-slate-300">
+                      {cohortMembers.map((m) => (
+                        <tr key={m.userId} className="hover:bg-slate-950/50">
+                          <td className="p-3">
+                            <div className="font-semibold text-white">{m.customerName}</div>
+                            <div className="text-[11px] text-slate-400">{m.customerEmail}</div>
+                            {m.customerPhone && (
+                              <div className="text-[10px] text-slate-500 font-mono">{m.customerPhone}</div>
+                            )}
+                          </td>
+                          <td className="p-3 font-mono text-amber-300 uppercase">{m.branchId}</td>
+                          <td className="p-3 font-semibold">{m.totalOrders}</td>
+                          <td className="p-3 font-mono text-emerald-400">₱{m.totalSpent.toLocaleString()}</td>
+                          <td className="p-3">
+                            {m.lastOrderDate ? (
+                              <div>
+                                <div>{new Date(m.lastOrderDate).toLocaleDateString()}</div>
+                                <div className="text-[10px] text-slate-400 font-mono">
+                                  {m.daysSinceLastOrder} days ago
+                                </div>
+                              </div>
+                            ) : (
+                              <span className="text-slate-500">—</span>
+                            )}
+                          </td>
+                          <td className="p-3 font-semibold">{m.workshopAttendanceCount}</td>
+                          <td className="p-3">
+                            <div className="flex flex-wrap gap-1">
+                              {m.cohorts.map((c: string) => (
+                                <span
+                                  key={c}
+                                  className="px-2 py-0.5 rounded text-[10px] font-mono bg-slate-800 text-amber-300 border border-slate-700"
+                                >
+                                  {c}
+                                </span>
+                              ))}
+                            </div>
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              )}
             </div>
           )}
         </div>

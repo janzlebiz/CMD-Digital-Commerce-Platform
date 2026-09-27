@@ -236,6 +236,182 @@ export function evaluateSlaEscalation(ticket: any): boolean {
   return false;
 }
 
+// Phase 6C Milestone 2: Authoritative CRM Cohort Definitions
+export const CRM_COHORTS: Record<string, { key: string; label: string; description: string }> = {
+  wholesale_stockist: {
+    key: 'wholesale_stockist',
+    label: 'Wholesale / Stockist',
+    description: 'High-volume commercial accounts and distribution partners with cumulative spend >= ₱5,000 or bulk order volume.',
+  },
+  repeat_retail: {
+    key: 'repeat_retail',
+    label: 'Repeat Retail',
+    description: 'Committed direct consumers who have completed 2 or more retail mineral orders.',
+  },
+  wellness_seminar_attendees: {
+    key: 'wellness_seminar_attendees',
+    label: 'Wellness Seminar Attendees',
+    description: 'Participants verified as having attended one or more provincial hydration symposia or wellness seminars.',
+  },
+  replenishment_due: {
+    key: 'replenishment_due',
+    label: 'Replenishment Due',
+    description: 'Accounts approaching end of 30-day bottle cycle (last order placed between 21 and 45 days ago).',
+  },
+  lapsed_accounts: {
+    key: 'lapsed_accounts',
+    label: 'Lapsed Accounts',
+    description: 'Previous purchasers with no order activity for more than 45 days.',
+  },
+};
+
+export interface RawCrmSourceData {
+  users: any[];
+  orders: any[];
+  registrations: any[];
+}
+
+export function aggregateCustomerCrmProfiles(
+  data: RawCrmSourceData,
+  branchFilter?: string | null,
+  nowMs: number = Date.now()
+): any[] {
+  const ordersByUser = new Map<string, any[]>();
+  for (const ord of data.orders) {
+    if (!ord.userId) continue;
+    if (branchFilter && ord.branchId !== branchFilter) continue;
+    const list = ordersByUser.get(ord.userId) || [];
+    list.push(ord);
+    ordersByUser.set(ord.userId, list);
+  }
+
+  const attendanceByUser = new Map<string, number>();
+  for (const reg of data.registrations) {
+    if (!reg.userId) continue;
+    if (reg.status === 'attended') {
+      attendanceByUser.set(reg.userId, (attendanceByUser.get(reg.userId) || 0) + 1);
+    }
+  }
+
+  const userMap = new Map<string, any>();
+  for (const u of data.users) {
+    if (u.uid) userMap.set(u.uid, u);
+  }
+
+  const candidateUserIds = new Set<string>();
+  for (const uid of ordersByUser.keys()) {
+    candidateUserIds.add(uid);
+  }
+
+  if (branchFilter) {
+    for (const [uid, u] of userMap.entries()) {
+      if (u.assignedBranchId === branchFilter && u.role === 'customer') {
+        candidateUserIds.add(uid);
+      }
+    }
+  } else {
+    for (const [uid, u] of userMap.entries()) {
+      if (u.role === 'customer') {
+        candidateUserIds.add(uid);
+      }
+    }
+  }
+
+  const results: any[] = [];
+
+  for (const userId of candidateUserIds) {
+    const user = userMap.get(userId);
+    const userOrders = ordersByUser.get(userId) || [];
+    const workshopCount = attendanceByUser.get(userId) || 0;
+
+    let totalSpent = 0;
+    let maxOrderSpend = 0;
+    let totalUnits = 0;
+    let latestOrderMs = 0;
+    let primaryBranch = branchFilter || user?.assignedBranchId || 'daet';
+
+    for (const ord of userOrders) {
+      if (ord.fulfillmentStatus === 'cancelled') continue;
+      const spend = Number(ord.grandTotal) || 0;
+      totalSpent += spend;
+      if (spend > maxOrderSpend) maxOrderSpend = spend;
+      if (ord.branchId) primaryBranch = ord.branchId;
+
+      if (Array.isArray(ord.items)) {
+        for (const it of ord.items) {
+          totalUnits += Number(it.quantity) || 1;
+        }
+      }
+
+      const ordTime = Date.parse(ord.createdAt);
+      if (!isNaN(ordTime) && ordTime > latestOrderMs) {
+        latestOrderMs = ordTime;
+      }
+    }
+
+    const totalOrders = userOrders.filter((o) => o.fulfillmentStatus !== 'cancelled').length;
+    const lastOrderDate = latestOrderMs > 0 ? new Date(latestOrderMs).toISOString() : undefined;
+    const daysSinceLastOrder =
+      latestOrderMs > 0 ? Math.floor((nowMs - latestOrderMs) / (24 * 60 * 60 * 1000)) : undefined;
+
+    const cohorts: string[] = [];
+
+    // 1. Wholesale / Stockist: cumulative spend >= 5000 or single order >= 5000 or units >= 5
+    if (totalSpent >= 5000 || maxOrderSpend >= 5000 || totalUnits >= 5) {
+      cohorts.push('wholesale_stockist');
+    }
+
+    // 2. Repeat Retail: >= 2 confirmed orders
+    if (totalOrders >= 2) {
+      cohorts.push('repeat_retail');
+    }
+
+    // 3. Wellness Seminar Attendees: attended >= 1 workshop
+    if (workshopCount >= 1) {
+      cohorts.push('wellness_seminar_attendees');
+    }
+
+    // 4. Replenishment Due: ordered previously, 21 <= daysSinceLastOrder <= 45
+    if (daysSinceLastOrder !== undefined && daysSinceLastOrder >= 21 && daysSinceLastOrder <= 45) {
+      cohorts.push('replenishment_due');
+    }
+
+    // 5. Lapsed Accounts: ordered previously, daysSinceLastOrder > 45
+    if (daysSinceLastOrder !== undefined && daysSinceLastOrder > 45) {
+      cohorts.push('lapsed_accounts');
+    }
+
+    const latestOrder = userOrders[userOrders.length - 1];
+    let customerName = 'Valued Customer';
+    if (user?.firstName || user?.lastName) {
+      customerName = `${user.firstName || ''} ${user.lastName || ''}`.trim();
+    } else if (latestOrder?.customer?.firstName || latestOrder?.customer?.lastName) {
+      customerName = `${latestOrder.customer.firstName || ''} ${latestOrder.customer.lastName || ''}`.trim();
+    } else if (user?.email) {
+      customerName = user.email.split('@')[0];
+    }
+
+    const customerEmail = user?.email || latestOrder?.customer?.email || 'unregistered@hcicmd.ph';
+    const customerPhone = user?.phone || latestOrder?.customer?.phone || undefined;
+
+    results.push({
+      userId,
+      customerName,
+      customerEmail,
+      customerPhone,
+      branchId: primaryBranch,
+      totalOrders,
+      totalSpent,
+      lastOrderDate,
+      daysSinceLastOrder,
+      workshopAttendanceCount: workshopCount,
+      cohorts,
+    });
+  }
+
+  return results;
+}
+
 export function getDailyConsultationSlots(dateStr: string, practitionerId: string) {
   const slotDefinitions = [
     { start: '09:00', end: '09:45' },
@@ -1667,6 +1843,140 @@ export function createExpressApp(deps: ServerDependencies = {}): Express {
       } else {
         res.status(500).json({ error: err.message });
       }
+    }
+  });
+
+  // --- PHASE 6C MILESTONE 2: CRM & Account Segmentation Endpoints ---
+
+  // 1. Overview of all approved CRM cohorts with member counts
+  app.get('/api/crm/cohorts', async (req: Request, res: Response): Promise<void> => {
+    const user = await requireAuth(req, res);
+    if (!user) return;
+
+    if (user.role !== 'branch_manager' && user.role !== 'regional_director' && user.role !== 'super_admin') {
+      res.status(403).json({ error: 'Access Denied: Staff CRM operations require branch_manager, regional_director, or super_admin role.' });
+      return;
+    }
+
+    try {
+      const branchFilter = user.role === 'branch_manager' ? (user.assignedBranchId || 'daet') : null;
+
+      // Authoritative commercial data sources (HEALTH DATA PRIVACY FIREWALL: zero consultation_intakes access)
+      const [usersSnap, ordersSnap, regsSnap] = await Promise.all([
+        db.collection('users').get(),
+        db.collection('orders').get(),
+        db.collection('workshop_registrations').get(),
+      ]);
+
+      const users: any[] = [];
+      const orders: any[] = [];
+      const registrations: any[] = [];
+
+      if (usersSnap && !usersSnap.empty) usersSnap.forEach((d: any) => users.push(d.data()));
+      if (ordersSnap && !ordersSnap.empty) ordersSnap.forEach((d: any) => orders.push(d.data()));
+      if (regsSnap && !regsSnap.empty) regsSnap.forEach((d: any) => registrations.push(d.data()));
+
+      const members = aggregateCustomerCrmProfiles(
+        { users, orders, registrations },
+        branchFilter
+      );
+
+      const summaries = Object.values(CRM_COHORTS).map((c) => ({
+        key: c.key,
+        label: c.label,
+        description: c.description,
+        memberCount: members.filter((m) => m.cohorts.includes(c.key as any)).length,
+      }));
+
+      await logAuditEvent(
+        user.uid,
+        user.role,
+        branchFilter,
+        'crm_cohorts_queried',
+        'crm_analytics',
+        'overview',
+        true,
+        { totalTracked: members.length },
+        req
+      );
+
+      res.json({
+        cohorts: summaries,
+        totalCustomersTracked: members.length,
+        branchScope: branchFilter || 'all_regional_branches',
+      });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  // 2. Specific cohort member breakdown
+  app.get('/api/crm/cohorts/:cohortKey', async (req: Request, res: Response): Promise<void> => {
+    const user = await requireAuth(req, res);
+    if (!user) return;
+
+    if (user.role !== 'branch_manager' && user.role !== 'regional_director' && user.role !== 'super_admin') {
+      res.status(403).json({ error: 'Access Denied: Staff CRM operations require branch_manager, regional_director, or super_admin role.' });
+      return;
+    }
+
+    const cohortKey = String(req.params.cohortKey || '');
+    const cohortDef = CRM_COHORTS[cohortKey];
+
+    if (!cohortDef) {
+      res.status(400).json({
+        error: `Invalid cohort key: '${cohortKey}'. Must be one of: ${Object.keys(CRM_COHORTS).join(', ')}`,
+      });
+      return;
+    }
+
+    try {
+      const branchFilter = user.role === 'branch_manager' ? (user.assignedBranchId || 'daet') : null;
+
+      // Authoritative commercial data sources (HEALTH DATA PRIVACY FIREWALL: zero consultation_intakes access)
+      const [usersSnap, ordersSnap, regsSnap] = await Promise.all([
+        db.collection('users').get(),
+        db.collection('orders').get(),
+        db.collection('workshop_registrations').get(),
+      ]);
+
+      const users: any[] = [];
+      const orders: any[] = [];
+      const registrations: any[] = [];
+
+      if (usersSnap && !usersSnap.empty) usersSnap.forEach((d: any) => users.push(d.data()));
+      if (ordersSnap && !ordersSnap.empty) ordersSnap.forEach((d: any) => orders.push(d.data()));
+      if (regsSnap && !regsSnap.empty) regsSnap.forEach((d: any) => registrations.push(d.data()));
+
+      const members = aggregateCustomerCrmProfiles(
+        { users, orders, registrations },
+        branchFilter
+      );
+
+      const cohortMembers = members.filter((m) => m.cohorts.includes(cohortKey));
+
+      await logAuditEvent(
+        user.uid,
+        user.role,
+        branchFilter,
+        'crm_cohort_detail_queried',
+        'crm_analytics',
+        cohortKey,
+        true,
+        { count: cohortMembers.length },
+        req
+      );
+
+      res.json({
+        cohortKey: cohortDef.key,
+        label: cohortDef.label,
+        description: cohortDef.description,
+        count: cohortMembers.length,
+        members: cohortMembers,
+        branchScope: branchFilter || 'all_regional_branches',
+      });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
     }
   });
 

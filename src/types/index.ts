@@ -303,3 +303,33 @@ export interface SupportTicket {
   updatedAt: string;
 }
 
+// Phase 6C Milestone 2 CRM Cohort Types
+export type CrmCohortKey =
+  | 'wholesale_stockist'
+  | 'repeat_retail'
+  | 'wellness_seminar_attendees'
+  | 'replenishment_due'
+  | 'lapsed_accounts';
+
+export interface CrmCohortMember {
+  userId: string;
+  customerName: string;
+  customerEmail: string;
+  customerPhone?: string;
+  branchId: string;
+  totalOrders: number;
+  totalSpent: number;
+  lastOrderDate?: string;
+  daysSinceLastOrder?: number;
+  workshopAttendanceCount: number;
+  cohorts: CrmCohortKey[];
+}
+
+export interface CrmCohortSummary {
+  key: CrmCohortKey;
+  label: string;
+  description: string;
+  memberCount: number;
+}
+
+
