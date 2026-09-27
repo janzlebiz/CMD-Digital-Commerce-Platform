@@ -118,6 +118,6 @@ The implementation preserves all baseline security controls established across P
 6. **`/firebase-blueprint.json`**: Added `workshop` and `workshop_registration` schemas and paths.
 7. **`/firestore.rules`**: Added access control rules for workshops and workshop registrations.
 8. **`/package.json`**: Added `lint` script.
-9. **`/scripts/testPhase6BWorkshops.ts`** *(Created)*: 25-assertion automated test suite for Phase 6B.
+9. **`/scripts/testPhase6BWorkshops.ts`** *(Created)*: 36-assertion automated test suite for Phase 6B.
 10. **`/scripts/testPhase6AConsultations.ts`**: TypeScript iterator typing update.
 11. **`/docs/phases/PHASE_6B_IMPLEMENTATION_REPORT.md`** *(Created)*: Implementation and verification report.
