@@ -58,22 +58,29 @@ export const AdminDashboardView: React.FC<{ onNavigate: (view: PageView) => void
     profile?.role === 'regional_director' ||
     profile?.role === 'super_admin';
 
+  const formatLocalIsoDate = (d: Date): string => {
+    const year = d.getFullYear();
+    const month = String(d.getMonth() + 1).padStart(2, '0');
+    const day = String(d.getDate()).padStart(2, '0');
+    return `${year}-${month}-${day}`;
+  };
+
   const getDateQueryParams = () => {
     let startDate = '';
     let endDate = '';
     const now = new Date();
 
     if (dateRangePreset === 'today') {
-      const todayStr = now.toISOString().slice(0, 10);
+      const todayStr = formatLocalIsoDate(now);
       startDate = todayStr;
       endDate = todayStr;
     } else if (dateRangePreset === '7d') {
       const past = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000);
-      startDate = past.toISOString().slice(0, 10);
-      endDate = now.toISOString().slice(0, 10);
+      startDate = formatLocalIsoDate(past);
+      endDate = formatLocalIsoDate(now);
     } else if (dateRangePreset === 'mtd') {
       startDate = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-01`;
-      endDate = now.toISOString().slice(0, 10);
+      endDate = formatLocalIsoDate(now);
     } else if (dateRangePreset === 'custom') {
       startDate = customStartDate;
       endDate = customEndDate;

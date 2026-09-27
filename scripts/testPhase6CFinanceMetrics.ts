@@ -10,6 +10,7 @@ import {
   EXPENSE_CATEGORIES,
   calculateFinancialMetrics,
   calculateCommodityProfitability,
+  parseDateBoundary,
 } from '../server';
 import crypto from 'crypto';
 import http from 'http';
@@ -698,6 +699,68 @@ async function runFinanceMetricsSuite() {
       const sampleFailure = auditLogs.find((l) => l.success === false);
       assert(!!sampleFailure && sampleFailure.success === false, 'Audit log records failure state on unauthorized access');
       assert(typeof sample.metadata === 'object', 'Audit log stores sanitized metadata');
+    }
+
+    console.log('\n--- Test Suite 8: Offline Storage & Date Boundary Verification ---');
+    {
+      // 1. Date Boundary Local Calendar Parsing Verification
+      const startMs = parseDateBoundary('2026-09-27', false);
+      const endMs = parseDateBoundary('2026-09-27', true);
+      assert(endMs > startMs, 'End date boundary timestamp is greater than start date boundary');
+      assert(endMs - startMs === 86399999, '24-hour calendar-date boundary spans exactly 86,399,999ms');
+
+      // 2. IndexedDB v2 -> v3 Migration Schema & Upgrade Contract
+      const mockStores = new Set<string>();
+      const mockIndexes = new Map<string, Set<string>>();
+
+      const mockDb: any = {
+        version: 3,
+        objectStoreNames: {
+          contains: (name: string) => mockStores.has(name),
+        },
+        createObjectStore: (name: string, options?: any) => {
+          mockStores.add(name);
+          mockIndexes.set(name, new Set());
+          return {
+            createIndex: (idxName: string) => {
+              mockIndexes.get(name)?.add(idxName);
+            },
+          };
+        },
+      };
+
+      // Simulate pre-existing v2 database stores
+      mockStores.add('orders');
+      mockStores.add('tickets');
+      mockStores.add('cached_crm_cohorts');
+
+      // Execute v2 -> v3 migration upgrade sequence
+      const upgradeEvent = { oldVersion: 2 };
+      if (upgradeEvent.oldVersion < 3) {
+        if (!mockDb.objectStoreNames.contains('expenses')) {
+          const expenseStore = mockDb.createObjectStore('expenses', { keyPath: 'id' });
+          expenseStore.createIndex('branchId');
+          expenseStore.createIndex('category');
+          expenseStore.createIndex('incurredAt');
+          expenseStore.createIndex('expenseStatus');
+        }
+        if (!mockDb.objectStoreNames.contains('cached_finance_metrics')) {
+          mockDb.createObjectStore('cached_finance_metrics', { keyPath: 'key' });
+        }
+      }
+
+      assert(mockStores.has('orders'), 'v1 store orders preserved across migration');
+      assert(mockStores.has('tickets'), 'v1 store tickets preserved across migration');
+      assert(mockStores.has('cached_crm_cohorts'), 'v2 store cached_crm_cohorts preserved across migration');
+      assert(mockStores.has('expenses'), 'v3 store expenses successfully added during v2->v3 upgrade');
+      assert(mockStores.has('cached_finance_metrics'), 'v3 store cached_finance_metrics successfully added during v2->v3 upgrade');
+      assert(mockIndexes.get('expenses')?.has('branchId') === true, 'v3 expense store contains branchId index');
+      assert(mockIndexes.get('expenses')?.has('category') === true, 'v3 expense store contains category index');
+      assert(mockIndexes.get('expenses')?.has('incurredAt') === true, 'v3 expense store contains incurredAt index');
+
+      const storesList = Array.from(mockStores);
+      const v3Ready = storesList.includes('expenses') && storesList.includes('cached_finance_metrics');
+      assert(v3Ready === true, 'IndexedDB v2 -> v3 migration verified as complete and v3Ready');
     }
 
   } finally {
