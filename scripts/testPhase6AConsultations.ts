@@ -59,6 +59,15 @@ async function makeRequest(
   });
 }
 
+const VALID_CONSENT_RECORD = {
+  purpose: 'Holistic Wellness Assessment',
+  version: 'v1.0',
+  timestamp: new Date().toISOString(),
+  legalBasis: 'RA_10173_SECTION_13_A_EXPLICIT_CONSENT',
+  acknowledgedText: 'Explicit consent under RA 10173 Section 13(a) is hereby granted with at least fifty characters of statutory body text to pass structural length checks.',
+  withdrawalState: { isWithdrawn: false }
+};
+
 // In-Memory Test Harness for Phase 6A Consultations
 function createTestHarness(options: {
   users?: Record<string, any>;
@@ -72,22 +81,93 @@ function createTestHarness(options: {
   const appointmentsStore = new Map<string, any>(Object.entries(options.appointments || {}));
   const intakesStore = new Map<string, any>(Object.entries(options.intakes || {}));
   const auditLogsStore = new Map<string, any>(Object.entries(options.auditLogs || {}));
+  const bookedSlotsStore = new Map<string, any>();
+  const docVersions = new Map<string, number>();
 
   const mockDb: any = {
-    collection: (colName: string) => {
-      const getStore = () => {
-        if (colName === 'users') return usersStore;
-        if (colName === 'consultation_assignments') return assignmentsStore;
-        if (colName === 'consultation_appointments') return appointmentsStore;
-        if (colName === 'consultation_intakes') return intakesStore;
-        if (colName === 'audit_logs') return auditLogsStore;
-        return new Map<string, any>();
+    _getStoreForCollection: (colName: string) => {
+      if (colName === 'users') return usersStore;
+      if (colName === 'consultation_assignments') return assignmentsStore;
+      if (colName === 'consultation_appointments') return appointmentsStore;
+      if (colName === 'consultation_intakes') return intakesStore;
+      if (colName === 'audit_logs') return auditLogsStore;
+      if (colName === 'booked_slots') return bookedSlotsStore;
+      return new Map<string, any>();
+    },
+    runTransaction: async (updateFunction: (transaction: any) => Promise<any>) => {
+      const readVersions = new Map<string, number>();
+      const writtenDocs = new Map<string, any>();
+      const deletedDocs = new Set<string>();
+
+      const transaction = {
+        get: async (refOrQuery: any) => {
+          if (!refOrQuery) return null;
+          
+          if (typeof refOrQuery.get === 'function' && refOrQuery._docId) {
+            const path = `${refOrQuery._colName}/${refOrQuery._docId}`;
+            const currentVer = docVersions.get(path) || 1;
+            readVersions.set(path, currentVer);
+            return await refOrQuery.get();
+          }
+
+          if (typeof refOrQuery.get === 'function') {
+            const colName = refOrQuery._colName;
+            const store = mockDb._getStoreForCollection(colName);
+            for (const docId of store.keys()) {
+              const path = `${colName}/${docId}`;
+              const currentVer = docVersions.get(path) || 1;
+              readVersions.set(path, currentVer);
+            }
+            return await refOrQuery.get();
+          }
+          return null;
+        },
+        set: (docRef: any, data: any) => {
+          writtenDocs.set(`${docRef._colName}/${docRef._docId}`, data);
+        },
+        update: (docRef: any, data: any) => {
+          const path = `${docRef._colName}/${docRef._docId}`;
+          const existing = docRef._getStore().get(docRef._docId) || {};
+          writtenDocs.set(path, { ...existing, ...data });
+        },
+        delete: (docRef: any) => {
+          deletedDocs.add(`${docRef._colName}/${docRef._docId}`);
+        }
       };
 
-      const store = getStore();
+      const result = await updateFunction(transaction);
+
+      for (const [path, expectedVer] of readVersions.entries()) {
+        const actualVer = docVersions.get(path) || 1;
+        if (actualVer !== expectedVer) {
+          throw new Error('FAILED_PRECONDITION: Transaction conflict detected.');
+        }
+      }
+
+      for (const [path, data] of writtenDocs.entries()) {
+        const [colName, docId] = path.split('/');
+        mockDb.collection(colName).doc(docId).set(data);
+        docVersions.set(path, (docVersions.get(path) || 1) + 1);
+      }
+      for (const path of deletedDocs) {
+        const [colName, docId] = path.split('/');
+        const store = mockDb._getStoreForCollection(colName);
+        store.delete(docId);
+        docVersions.set(path, (docVersions.get(path) || 1) + 1);
+      }
+
+      return result;
+    },
+    collection: (colName: string) => {
+      const store = mockDb._getStoreForCollection(colName);
 
       return {
+        _colName: colName,
+        _getStore: () => store,
         doc: (docId: string) => ({
+          _colName: colName,
+          _docId: docId,
+          _getStore: () => store,
           get: async () => {
             const data = store.get(docId);
             return {
@@ -105,11 +185,16 @@ function createTestHarness(options: {
             const existing = store.get(docId) || {};
             store.set(docId, { ...existing, ...updates });
           },
+          delete: async () => {
+            store.delete(docId);
+          }
         }),
         where: (field: string, op: string, value: any) => {
           let filters: Array<{ field: string; op: string; val: any }> = [{ field, op, val: value }];
 
           const queryObj = {
+            _colName: colName,
+            _getStore: () => store,
             where: (f2: string, op2: string, val2: any) => {
               filters.push({ field: f2, op: op2, val: val2 });
               return queryObj;
@@ -139,10 +224,13 @@ function createTestHarness(options: {
           return queryObj;
         },
         get: async () => {
-          const matches = Array.from(store.entries()).map(([id, record]) => ({
-            id,
-            data: () => JSON.parse(JSON.stringify(record)),
-          }));
+          const matches = Array.from(store.entries()).map((entry: any) => {
+            const [id, record] = entry;
+            return {
+              id,
+              data: () => JSON.parse(JSON.stringify(record)),
+            };
+          });
           return {
             empty: matches.length === 0,
             forEach: (cb: (doc: any) => void) => matches.forEach(cb),
@@ -188,7 +276,7 @@ function createTestHarness(options: {
     },
   };
 
-  return { mockDb, mockAuth, mockKms, appointmentsStore, assignmentsStore, intakesStore, auditLogsStore };
+  return { mockDb, mockAuth, mockKms, appointmentsStore, assignmentsStore, intakesStore, auditLogsStore, bookedSlotsStore, docVersions };
 }
 
 async function runPhase6ATests() {
@@ -299,11 +387,7 @@ async function runPhase6ATests() {
           deliveryMode: 'virtual',
           customerName: 'Alice Dela Cruz',
           customerPhone: '+639171234567',
-          consentRecord: {
-            purpose: 'Holistic Wellness Assessment',
-            version: 'v1.0',
-            acknowledgedText: 'Explicit consent under RA 10173 Section 13(a)',
-          },
+          consentRecord: VALID_CONSENT_RECORD,
         },
         { Authorization: 'Bearer PATIENT_ALICE_TOKEN' }
       );
@@ -326,7 +410,7 @@ async function runPhase6ATests() {
           practitionerId: 'practitioner-daet-01',
           scheduledDate: testDate,
           scheduledTime: testTime,
-          consentRecord: { purpose: 'Wellness', version: 'v1.0' },
+          consentRecord: VALID_CONSENT_RECORD,
         },
         { Authorization: 'Bearer PATIENT_BOB_TOKEN' }
       );
@@ -410,10 +494,7 @@ async function runPhase6ATests() {
             waterConsumption: '2.5 Liters filtered deep-well water with 10 drops HCI CMD.',
             declaredConditions: 'Cellular hydration deficit and general fatigue.',
           },
-          consentRecord: {
-            purpose: 'Mineral Nutrition Plan',
-            version: 'v1.0',
-          },
+          consentRecord: VALID_CONSENT_RECORD,
         },
         { Authorization: 'Bearer PRACTITIONER_ELENA_TOKEN' }
       );
@@ -481,6 +562,175 @@ async function runPhase6ATests() {
       const resSlotsAfterCancel = await makeRequest(server, `/api/consultations/slots?practitionerId=practitioner-daet-01&date=${testDate}`, 'GET');
       const slot0900After = resSlotsAfterCancel.data.slots.find((s: any) => s.startTime === '09:00');
       assert(slot0900After.isBooked === false, '5.3 Slot becomes available again (isBooked: false) after cancellation');
+    } finally {
+      server.close();
+    }
+  }
+
+  // --- SECTION 6: Security Regression Tests ---
+  {
+    console.log('\n--- Running Section 6: Security Regression Tests ---');
+    const harness = createTestHarness({
+      users: {
+        'patient-alice-uid': { role: 'customer', email: 'alice@example.com' },
+        'patient-bob-uid': { role: 'customer', email: 'bob@example.com' },
+        'practitioner-daet-01': { role: 'practitioner', email: 'elena@example.com' },
+        'practitioner-labo-02': { role: 'practitioner', email: 'gabriel@example.com' },
+        'super-admin-uid': { role: 'super_admin', email: 'admin@example.com' },
+      },
+      assignments: {
+        // Active assignment between Elena and Alice
+        'practitioner-daet-01_patient-alice-uid': {
+          practitionerId: 'practitioner-daet-01',
+          patientId: 'patient-alice-uid',
+          assignedAt: new Date().toISOString(),
+          active: true,
+        },
+        // Inactive assignment between Gabriel and Alice
+        'practitioner-labo-02_patient-alice-uid': {
+          practitionerId: 'practitioner-labo-02',
+          patientId: 'patient-alice-uid',
+          assignedAt: new Date().toISOString(),
+          active: false,
+        }
+      }
+    });
+    const app = createExpressApp({ db: harness.mockDb, auth: harness.mockAuth, kmsClient: harness.mockKms });
+    const server = http.createServer(app).listen(0);
+
+    const testDate = '2026-11-15';
+    const testTime = '10:00';
+
+    try {
+      // 6.1 Consent Validation - Incomplete consent Record rejected
+      const invalidConsentRes1 = await makeRequest(
+        server,
+        '/api/consultations/book',
+        'POST',
+        {
+          serviceCode: 'CNS-VIRTUAL',
+          practitionerId: 'practitioner-daet-01',
+          scheduledDate: testDate,
+          scheduledTime: testTime,
+          consentRecord: {
+            purpose: 'Wellness',
+          }
+        },
+        { Authorization: 'Bearer PATIENT_ALICE_TOKEN' }
+      );
+      assert(invalidConsentRes1.status === 400, '6.1.1 Incomplete consent record rejected with HTTP 400');
+
+      const invalidConsentRes2 = await makeRequest(
+        server,
+        '/api/consultations/book',
+        'POST',
+        {
+          serviceCode: 'CNS-VIRTUAL',
+          practitionerId: 'practitioner-daet-01',
+          scheduledDate: testDate,
+          scheduledTime: testTime,
+          consentRecord: {
+            ...VALID_CONSENT_RECORD,
+            legalBasis: 'INVALID_BASIS'
+          }
+        },
+        { Authorization: 'Bearer PATIENT_ALICE_TOKEN' }
+      );
+      assert(invalidConsentRes2.status === 400, '6.1.2 Consent record with invalid legalBasis rejected with HTTP 400');
+
+      // 6.2 Atomic Slot Booking - Concurrency OCC transaction test
+      const bookPayload = {
+        serviceCode: 'CNS-VIRTUAL',
+        practitionerId: 'practitioner-daet-01',
+        scheduledDate: testDate,
+        scheduledTime: testTime,
+        consentRecord: VALID_CONSENT_RECORD,
+      };
+
+      // Fire two requests concurrently
+      const [resA, resB] = await Promise.all([
+        makeRequest(server, '/api/consultations/book', 'POST', bookPayload, { Authorization: 'Bearer PATIENT_ALICE_TOKEN' }),
+        makeRequest(server, '/api/consultations/book', 'POST', bookPayload, { Authorization: 'Bearer PATIENT_BOB_TOKEN' })
+      ]);
+
+      // Exactly one must succeed (201) and one must fail (409) due to atomic slot lock!
+      const statusCodes = [resA.status, resB.status];
+      assert(
+        statusCodes.includes(201) && statusCodes.includes(409),
+        '6.2 Transaction-safe atomic slot booking guarantees exactly one successful concurrent booking and rejects the other with HTTP 409'
+      );
+
+      const successfulApptId = resA.status === 201 ? resA.data.appointmentId : resB.data.appointmentId;
+
+      // 6.3 Appointment cancellation authorization
+      const winnerToken = resA.status === 201 ? 'PATIENT_ALICE_TOKEN' : 'PATIENT_BOB_TOKEN';
+      const loserToken = resA.status === 201 ? 'PATIENT_BOB_TOKEN' : 'PATIENT_ALICE_TOKEN';
+
+      const unauthCancelRes = await makeRequest(
+        server,
+        '/api/consultations/cancel',
+        'POST',
+        { appointmentId: successfulApptId, reason: 'Unauthorized cancellation attempt' },
+        { Authorization: `Bearer ${loserToken}` }
+      );
+      assert(unauthCancelRes.status === 403, '6.3.1 Customer cannot cancel someone else\'s appointment (HTTP 403)');
+
+      const gabrielCancelRes = await makeRequest(
+        server,
+        '/api/consultations/cancel',
+        'POST',
+        { appointmentId: successfulApptId, reason: 'Gabriel cancels Alice appt' },
+        { Authorization: 'Bearer PRACTITIONER_GABRIEL_TOKEN' }
+      );
+      assert(gabrielCancelRes.status === 403, '6.3.2 Unassigned practitioner cannot cancel appointment (HTTP 403)');
+
+      const elenaCancelRes = await makeRequest(
+        server,
+        '/api/consultations/cancel',
+        'POST',
+        { appointmentId: successfulApptId, reason: 'Elena cancels appt' },
+        { Authorization: 'Bearer PRACTITIONER_ELENA_TOKEN' }
+      );
+      assert(elenaCancelRes.status === 200, '6.3.3 Assigned practitioner can cancel appointment successfully (HTTP 200)');
+
+      // 6.4 Clinical intake isolation
+      const intakeId = 'CNS-INT-TESTSEC';
+      harness.intakesStore.set(intakeId, {
+        id: intakeId,
+        userId: 'patient-alice-uid',
+        encryptedClinicalIntake: {
+          ciphertext: 'MOCK_CIPHERTEXT',
+          iv: 'MOCK_IV',
+          tag: 'MOCK_TAG',
+          encryptedKey: 'MOCK_KEY',
+          kmsKeyId: 'projects/test/locations/global/keyRings/test/cryptoKeys/test',
+        }
+      });
+
+      const inactiveAssignmentFetchRes = await makeRequest(
+        server,
+        `/api/clinical/intake/${intakeId}`,
+        'GET',
+        undefined,
+        { Authorization: 'Bearer PRACTITIONER_GABRIEL_TOKEN' }
+      );
+      assert(
+        inactiveAssignmentFetchRes.status === 403,
+        '6.4.1 Practitioner with inactive (active === false) assignment is blocked from clinical intake (HTTP 403)'
+      );
+
+      const adminFetchRes = await makeRequest(
+        server,
+        `/api/clinical/intake/${intakeId}`,
+        'GET',
+        undefined,
+        { Authorization: 'Bearer SUPER_ADMIN_TOKEN' }
+      );
+      assert(
+        adminFetchRes.status === 403,
+        '6.4.2 Super-admin is blocked from clinical intake by default under explicit policy denial (HTTP 403)'
+      );
+
     } finally {
       server.close();
     }

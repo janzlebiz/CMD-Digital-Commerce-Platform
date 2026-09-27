@@ -282,11 +282,11 @@ export function createExpressApp(deps: ServerDependencies = {}): Express {
   async function verifyPractitionerAssignment(practitionerUid: string, patientUid: string): Promise<boolean> {
     try {
       const assignmentSnap = await db.collection('consultation_assignments').doc(`${practitionerUid}_${patientUid}`).get();
-      if (assignmentSnap.exists) return true;
-
-      const patientSnap = await db.collection('users').doc(patientUid).get();
-      if (patientSnap.exists && patientSnap.data()?.assignedPractitionerId === practitionerUid) {
-        return true;
+      if (assignmentSnap.exists) {
+        const data = assignmentSnap.data();
+        if (data && data.active === true) {
+          return true;
+        }
       }
     } catch (err: any) {
       throw new Error(`Assignment verification failed: ${err.message}`);
@@ -490,21 +490,19 @@ export function createExpressApp(deps: ServerDependencies = {}): Express {
 
     const isPatientSelf = user.uid === targetPatient;
     const isPractitioner = user.role === 'practitioner';
-    const isSuperAdmin = user.role === 'super_admin';
 
-    if (!isPatientSelf && !isPractitioner && !isSuperAdmin) {
-      const errorMsg = `Clinical Access Denied: User role '${user.role}' is not authorized.`;
-      res.status(403).json({ error: errorMsg });
-      return;
-    }
-
-    if (isPractitioner && !isPatientSelf) {
+    if (isPatientSelf) {
+      // Patient can save their own clinical intake
+    } else if (isPractitioner) {
       const isAssigned = await verifyPractitionerAssignment(user.uid, targetPatient);
       if (!isAssigned) {
-        const errorMsg = `Clinical Boundary Block: Practitioner '${user.uid}' is not assigned to patient '${targetPatient}'.`;
+        const errorMsg = `Clinical Boundary Block: Practitioner '${user.uid}' does not have an active assignment to patient '${targetPatient}'.`;
         res.status(403).json({ error: errorMsg });
         return;
       }
+    } else {
+      res.status(403).json({ error: 'Clinical Access Denied: Unapproved administrative role or missing explicit policy authorization.' });
+      return;
     }
 
     try {
@@ -550,17 +548,20 @@ export function createExpressApp(deps: ServerDependencies = {}): Express {
       }
 
       const record = intakeSnap.data();
-      if (user.role === 'customer' && user.uid !== record.userId) {
-        res.status(403).json({ error: 'Clinical Access Denied: You cannot view other patients\' records.' });
-        return;
-      }
+      const isPatientSelf = user.uid === record.userId;
+      const isPractitioner = user.role === 'practitioner';
 
-      if (user.role === 'practitioner' && user.uid !== record.userId) {
+      if (isPatientSelf) {
+        // Patient can view their own record
+      } else if (isPractitioner) {
         const isAssigned = await verifyPractitionerAssignment(user.uid, record.userId);
         if (!isAssigned) {
-          res.status(403).json({ error: `Clinical Boundary Block: Practitioner is not assigned to patient.` });
+          res.status(403).json({ error: 'Clinical Boundary Block: Practitioner does not have an active assignment to this patient.' });
           return;
         }
+      } else {
+        res.status(403).json({ error: 'Clinical Access Denied: Unapproved administrative role or missing explicit policy authorization.' });
+        return;
       }
 
       const decryptedPayload = await decryptClinicalPayload(
@@ -645,8 +646,36 @@ export function createExpressApp(deps: ServerDependencies = {}): Express {
       res.status(400).json({ error: `Invalid practitionerId: ${practitionerId}` });
       return;
     }
-    if (!consentRecord || !consentRecord.purpose) {
+
+    // Complete, explicit server-side consent validation (RA 10173 Section 13(a))
+    if (!consentRecord || typeof consentRecord !== 'object') {
       res.status(400).json({ error: 'Explicit statutory informed consent is required.' });
+      return;
+    }
+    const { purpose, version, timestamp, legalBasis, acknowledgedText, withdrawalState } = consentRecord;
+    
+    if (typeof purpose !== 'string' || !purpose.trim()) {
+      res.status(400).json({ error: 'Invalid consent: purpose is required.' });
+      return;
+    }
+    if (typeof version !== 'string' || !version.trim()) {
+      res.status(400).json({ error: 'Invalid consent: version is required.' });
+      return;
+    }
+    if (typeof timestamp !== 'string' || isNaN(Date.parse(timestamp))) {
+      res.status(400).json({ error: 'Invalid consent: valid timestamp is required.' });
+      return;
+    }
+    if (legalBasis !== 'RA_10173_SECTION_13_A_EXPLICIT_CONSENT') {
+      res.status(400).json({ error: 'Invalid consent: legalBasis must be RA_10173_SECTION_13_A_EXPLICIT_CONSENT.' });
+      return;
+    }
+    if (typeof acknowledgedText !== 'string' || acknowledgedText.length < 50) {
+      res.status(400).json({ error: 'Invalid consent: acknowledgedText is incomplete or invalid.' });
+      return;
+    }
+    if (!withdrawalState || typeof withdrawalState !== 'object' || withdrawalState.isWithdrawn !== false) {
+      res.status(400).json({ error: 'Invalid consent: withdrawalState must be active and not withdrawn.' });
       return;
     }
 
@@ -674,40 +703,57 @@ export function createExpressApp(deps: ServerDependencies = {}): Express {
       updatedAt: new Date().toISOString(),
     };
 
-    try {
-      const existingSnap = await db.collection('consultation_appointments')
-        .where('practitionerId', '==', practitionerId)
-        .where('scheduledDate', '==', scheduledDate)
-        .where('scheduledTime', '==', scheduledTime)
-        .get();
+    const slotLockId = `${practitionerId}_${scheduledDate}_${scheduledTime}`;
+    const slotLockRef = db.collection('booked_slots').doc(slotLockId);
 
-      let hasActiveBooking = false;
-      if (!existingSnap.empty) {
+    try {
+      await db.runTransaction(async (transaction: any) => {
+        const slotLockSnap = await transaction.get(slotLockRef);
+        if (slotLockSnap.exists && slotLockSnap.data()?.isBooked) {
+          throw new Error('SLOT_ALREADY_BOOKED');
+        }
+
+        const query = db.collection('consultation_appointments')
+          .where('practitionerId', '==', practitionerId)
+          .where('scheduledDate', '==', scheduledDate)
+          .where('scheduledTime', '==', scheduledTime);
+        const existingSnap = await transaction.get(query);
+        let hasActiveBooking = false;
         existingSnap.forEach((docSnap: any) => {
-          const data = docSnap.data();
-          if (data.status !== 'cancelled') {
+          if (docSnap.data().status !== 'cancelled') {
             hasActiveBooking = true;
           }
         });
-      }
 
-      if (hasActiveBooking) {
+        if (hasActiveBooking) {
+          throw new Error('SLOT_ALREADY_BOOKED');
+        }
+
+        transaction.set(slotLockRef, {
+          isBooked: true,
+          appointmentId,
+          practitionerId,
+          scheduledDate,
+          scheduledTime,
+        });
+
+        transaction.set(db.collection('consultation_assignments').doc(`${practitionerId}_${user.uid}`), {
+          practitionerId,
+          patientId: user.uid,
+          assignedAt: new Date().toISOString(),
+          active: true,
+        });
+
+        transaction.set(db.collection('consultation_appointments').doc(appointmentId), appointmentRecord);
+      });
+
+      await logAuditEvent(user.uid, user.role, appointmentRecord.branchId, 'consultation_appointment_booked', 'consultation_appointments', appointmentId, true, {}, req);
+      res.status(201).json({ success: true, appointmentId, appointment: appointmentRecord });
+    } catch (err: any) {
+      if (err.message === 'SLOT_ALREADY_BOOKED') {
         res.status(409).json({ error: `Selected slot ${scheduledDate} at ${scheduledTime} is already booked.` });
         return;
       }
-
-      await db.collection('consultation_assignments').doc(`${practitionerId}_${user.uid}`).set({
-        practitionerId,
-        patientId: user.uid,
-        assignedAt: new Date().toISOString(),
-        active: true,
-      });
-
-      await db.collection('consultation_appointments').doc(appointmentId).set(appointmentRecord);
-      await logAuditEvent(user.uid, user.role, appointmentRecord.branchId, 'consultation_appointment_booked', 'consultation_appointments', appointmentId, true, {}, req);
-
-      res.status(201).json({ success: true, appointmentId, appointment: appointmentRecord });
-    } catch (err: any) {
       res.status(500).json({ error: err.message });
     }
   });
@@ -755,10 +801,34 @@ export function createExpressApp(deps: ServerDependencies = {}): Express {
 
     const { appointmentId, reason } = req.body;
     try {
-      await db.collection('consultation_appointments').doc(appointmentId).update({
-        status: 'cancelled',
-        cancellationReason: reason || 'Cancelled by user',
+      const apptDoc = await db.collection('consultation_appointments').doc(appointmentId).get();
+      if (!apptDoc.exists) {
+        res.status(404).json({ error: `Appointment not found: ${appointmentId}` });
+        return;
+      }
+      const appt = apptDoc.data();
+      
+      const isOwner = appt.userId === user.uid;
+      const isAssignedPractitioner = appt.practitionerId === user.uid;
+      const isSuperAdmin = user.role === 'super_admin';
+
+      if (!isOwner && !isAssignedPractitioner && !isSuperAdmin) {
+        res.status(403).json({ error: 'Unauthorized: You are not authorized to cancel this appointment.' });
+        return;
+      }
+
+      const slotLockId = `${appt.practitionerId}_${appt.scheduledDate}_${appt.scheduledTime}`;
+
+      await db.runTransaction(async (transaction: any) => {
+        transaction.update(db.collection('consultation_appointments').doc(appointmentId), {
+          status: 'cancelled',
+          cancellationReason: reason || 'Cancelled by user',
+          updatedAt: new Date().toISOString(),
+        });
+        transaction.delete(db.collection('booked_slots').doc(slotLockId));
       });
+
+      await logAuditEvent(user.uid, user.role, appt.branchId, 'consultation_appointment_cancelled', 'consultation_appointments', appointmentId, true, { reason }, req);
       res.json({ success: true, message: 'Cancelled successfully.' });
     } catch (err: any) {
       res.status(500).json({ error: err.message });
