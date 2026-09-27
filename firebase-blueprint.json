@@ -10,7 +10,7 @@
         "firstName": { "type": "string", "maxLength": 64 },
         "lastName": { "type": "string", "maxLength": 64 },
         "phone": { "type": "string", "pattern": "^\\+639\\d{9}$" },
-        "role": { "type": "string", "enum": ["customer", "staff", "practitioner", "manager", "admin"] },
+        "role": { "type": "string", "enum": ["customer", "practitioner", "branch_manager", "regional_director", "super_admin"] },
         "assignedBranchId": { "type": "string" },
         "createdAt": { "type": "string", "format": "date-time" },
         "updatedAt": { "type": "string", "format": "date-time" }

@@ -37,10 +37,10 @@ Mobile experience is the **primary execution surface** of the platform.
   - Cached event tickets with offline QR code display.
   - Static branch directory (Daet, Labo, Paracale, Panganiban, Capalonga, Sta. Elena) with offline telephone dialer links.
   - Pre-cached basic hydration guidelines and directions for use.
-- **Strictly Server-Authoritative (Offline Disabled):**
-  - Checkout and payment processing (must fail gracefully if offline).
-  - Health intake submissions (cannot queue health records in unencrypted client storage).
-  - Inventory count adjustments.
+- **Strictly Server-Authoritative & Network-Only (ADR-009 Enforced):**
+  - All `/api/consultations/*` endpoints and health intake submissions are **Strictly Network-Only** (zero unencrypted clinical data may be cached or queued in Service Worker caches / IndexedDB).
+  - All `/api/orders/checkout` and payment verification operations are **Strictly Network-Only** (must execute against live server-authoritative inventory).
+  - Inventory count adjustments and staff administrative actions are **Strictly Network-Only**.
 
 ---
 

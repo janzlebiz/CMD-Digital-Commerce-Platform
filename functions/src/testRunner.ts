@@ -165,9 +165,9 @@ async function runTests() {
   setDatabase(inMemoryDb);
 
   // Set up baseline fixtures
-  await inMemoryDb.collection('users').doc('staff-daet-10').set({
-    uid: 'staff-daet-10',
-    role: 'staff',
+  await inMemoryDb.collection('users').doc('manager-daet-10').set({
+    uid: 'manager-daet-10',
+    role: 'branch_manager',
     assignedBranchId: 'daet',
   });
   await inMemoryDb.collection('users').doc('practitioner-assigned').set({
@@ -256,7 +256,7 @@ async function runTests() {
 
   // --- 2. Unauthorized Branch Access Test ---
   try {
-    // A staff user assigned to 'daet' attempts to place an order at 'labo'
+    // A branch manager user assigned to 'daet' attempts to place an order at 'labo'
     await (createOrderSecure as any).run(
       {
         items: [{ skuId: 'hci-cmd-65ml', quantity: 1 }],
@@ -264,7 +264,7 @@ async function runTests() {
         customer: { firstName: 'Test' },
         paymentMethod: 'cash_on_delivery',
       },
-      { auth: { uid: 'staff-daet-10', token: {} } }
+      { auth: { uid: 'manager-daet-10', token: {} } }
     );
     assert(false, 'Unauthorized branch access was erroneously allowed.');
   } catch (err: any) {

@@ -24,9 +24,7 @@ export const Navbar: React.FC<NavbarProps> = ({ currentView, onNavigate, cartCou
   const isStaff =
     profile?.role === 'branch_manager' ||
     profile?.role === 'regional_director' ||
-    profile?.role === 'super_admin' ||
-    (profile?.role as string) === 'staff' ||
-    (profile?.role as string) === 'admin';
+    profile?.role === 'super_admin';
 
   const navLinks: { view: PageView; label: string }[] = [
     { view: 'home', label: 'Home' },

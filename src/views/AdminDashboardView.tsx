@@ -54,9 +54,7 @@ export const AdminDashboardView: React.FC<AdminDashboardViewProps> = ({ onNaviga
   const isStaff =
     role === 'branch_manager' ||
     role === 'regional_director' ||
-    role === 'super_admin' ||
-    (role as string) === 'staff' ||
-    (role as string) === 'admin';
+    role === 'super_admin';
   const isPrivilegedAuditViewer = role === 'super_admin' || role === 'regional_director';
 
   // Initialize branch filter according to role isolation

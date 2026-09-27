@@ -21,6 +21,7 @@
 | **ADR-006** | Progressive Web App (PWA) with Offline QR Ticket Shell | **ACCEPTED** | 2026-09-25 | High mobile usage (>85%) and intermittent rural cellular connectivity. |
 | **ADR-007** | Zero Application Code Implementation in Phase 0 | **ACCEPTED** | 2026-09-25 | Strict Phase 0 Audit & Discovery boundary discipline. |
 | **ADR-008** | Sales Invoice Standardization Under Ease of Paying Taxes (EOPT) Act | **ACCEPTED** | 2026-09-25 | RA 11976 & RA 11967 statutory invoice substantiation for goods and services. |
+| **ADR-009** | Strict Network-Only Boundary for SPI, Checkout Mutations, & Payment Verification | **ACCEPTED** | 2026-09-27 | Data Privacy Act (RA 10173) & transactional financial security in PWA Service Worker. |
 
 ---
 
@@ -65,3 +66,8 @@
 - **Context:** Republic Act No. 11976 (Ease of Paying Taxes Act) abolished the requirement for Official Receipts as primary VAT substantiation for services, establishing the Sales Invoice as the sole primary document.
 - **Decision:** The platform automated billing engine will generate standardized serialized electronic **Sales Invoices** for both product sales and wellness consultation fees.
 - **Consequences:** Aligns accounting and billing with current 2024–2026 Philippine tax statutes.
+
+### ADR-009: Strict Network-Only Boundary for Sensitive Personal Information (SPI), Checkout Mutations, and Payment Verification
+- **Context:** The Phase 6 Progressive Web App (PWA) architecture introduces service worker caching strategies to support offline viewing of static assets, branch directories, product catalogs, and cryptographic event tickets. However, caching unencrypted health intake forms, active cart checkout transactions, or payment verification payloads in client storage (Cache Storage / IndexedDB) poses severe privacy risks under the Data Privacy Act (RA 10173) and financial consistency hazards.
+- **Decision:** All endpoints and data flows handling Sensitive Personal Information (`/api/consultations/*`, consultation intake forms, health question responses), transactional order creation/mutation (`/api/orders/checkout`, `/api/orders/*`), and payment verification/status updates (`/api/admin/orders/update-status`, payment webhook/proof uploads) MUST be strictly configured as **Network-Only (Zero Client-Side Service Worker Caching)**. Under no circumstances may plaintext clinical data or uncommitted checkout payloads be persisted in service worker caches or client-side storage.
+- **Consequences:** Guarantees zero leakage of unencrypted clinical records on local client devices; preserves strict hardware-backed Cloud KMS envelope encryption and server-authoritative transactional isolation.

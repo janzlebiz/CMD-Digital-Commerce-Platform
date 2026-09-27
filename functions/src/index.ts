@@ -286,7 +286,7 @@ export const createOrderSecure = functions.https.onCall(async (data: any, contex
   }
 
   // Real independent backend authentication and branch scope check
-  const authCheck = await authorizeUser(context.auth.uid, ['customer', 'staff', 'practitioner', 'manager', 'admin']);
+  const authCheck = await authorizeUser(context.auth.uid, ['customer', 'practitioner', 'branch_manager', 'regional_director', 'super_admin']);
   if (!authCheck.authorized) {
     throw new functions.https.HttpsError('permission-denied', 'Access blocked: account verification failed.');
   }
@@ -385,10 +385,10 @@ export const saveClinicalIntakeSecure = functions.https.onCall(async (data: any,
 
   const { userId, clinicalIntake, consentRecord, scheduledAt, deliveryMode } = data;
 
-  // Enforce Practitioner or Admin role check
-  const authCheck = await authorizeUser(context.auth.uid, ['practitioner', 'admin']);
+  // Enforce Practitioner or Super Admin role check
+  const authCheck = await authorizeUser(context.auth.uid, ['practitioner', 'super_admin']);
   if (!authCheck.authorized) {
-    throw new functions.https.HttpsError('permission-denied', 'Unauthorized clinical entry: Practitioner or Admin credentials required.');
+    throw new functions.https.HttpsError('permission-denied', 'Unauthorized clinical entry: Practitioner or Super Admin credentials required.');
   }
 
   // Enforce practitioner assignment relationship verification
@@ -456,7 +456,7 @@ export const fetchClinicalIntakeSecure = functions.https.onCall(async (data: any
   }
 
   // Enforce role authorization and assignment validation
-  const authCheck = await authorizeUser(context.auth.uid, ['practitioner', 'admin', 'customer'], undefined, record.userId);
+  const authCheck = await authorizeUser(context.auth.uid, ['practitioner', 'super_admin', 'customer'], undefined, record.userId);
   if (!authCheck.authorized) {
     throw new functions.https.HttpsError('permission-denied', 'Clinical Records isolation limit cleared: Access Blocked.');
   }
