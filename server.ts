@@ -686,6 +686,281 @@ export function calculateCommodityProfitability(
   };
 }
 
+// --- PHASE 7 MILESTONE 1: Multi-Branch Inventory & Stock Reconciliation ---
+
+export const ACTIVE_CONSUMER_SKUS = ['hci-cmd-65ml', 'hci-cmd-30ml'] as const;
+export type ActiveConsumerSku = typeof ACTIVE_CONSUMER_SKUS[number];
+
+export const VALID_INVENTORY_ADJUSTMENT_TYPES = [
+  'count_reconciliation',
+  'damage_writeoff',
+  'sample_withdrawal',
+  'shrinkage_loss',
+  'qc_quarantine',
+] as const;
+
+export type InventoryAdjustmentType = typeof VALID_INVENTORY_ADJUSTMENT_TYPES[number];
+
+export interface BranchBatchInventoryRecord {
+  id: string; // branchId_batchId
+  branchId: string;
+  batchId: string;
+  skuId: string;
+  availableQuantity: number;
+  reservedQuantity: number;
+  damagedQuantity: number;
+  expiryDate: string;
+  updatedAt: string;
+}
+
+export interface InventoryItemRecord {
+  id: string; // branchId_skuId
+  branchId: string;
+  skuId: string;
+  activeStock: number;
+  reservedStock: number;
+  transitStock: number;
+  safetyStock: number;
+  reorderPoint: number;
+  lastAdjustmentAt?: string;
+  updatedAt: string;
+}
+
+export interface ProductBatchRecord {
+  id: string;
+  batchNumber: string;
+  skuId: string;
+  manufactureDate: string;
+  expiryDate: string;
+  laboratoryCertificateUrl?: string;
+  qualityControlStatus: 'pending' | 'passed' | 'failed';
+  totalManufacturedQuantity: number;
+  procurementCostBasis?: number;
+  createdAt: string;
+}
+
+export interface InventoryAdjustmentRecord {
+  id: string;
+  branchId: string;
+  skuId: string;
+  batchId: string;
+  adjustmentType: InventoryAdjustmentType;
+  quantityDelta: number;
+  reason: string;
+  performedByUid: string;
+  performedByName?: string;
+  timestamp: string;
+}
+
+export const SEED_PRODUCT_BATCHES: ProductBatchRecord[] = [
+  {
+    id: 'batch-2026-09a',
+    batchNumber: 'CMD-2026-09A',
+    skuId: 'hci-cmd-65ml',
+    manufactureDate: '2026-03-01',
+    expiryDate: '2028-09-30',
+    laboratoryCertificateUrl: 'https://certs.hcicmd.ph/fda-qc-2026-09a.pdf',
+    qualityControlStatus: 'passed',
+    totalManufacturedQuantity: 1000,
+    procurementCostBasis: 450000,
+    createdAt: '2026-03-01T08:00:00.000Z',
+  },
+  {
+    id: 'batch-2026-09b',
+    batchNumber: 'CMD-2026-09B',
+    skuId: 'hci-cmd-65ml',
+    manufactureDate: '2026-04-01',
+    expiryDate: '2028-10-31',
+    laboratoryCertificateUrl: 'https://certs.hcicmd.ph/fda-qc-2026-09b.pdf',
+    qualityControlStatus: 'passed',
+    totalManufacturedQuantity: 1000,
+    procurementCostBasis: 450000,
+    createdAt: '2026-04-01T08:00:00.000Z',
+  },
+  {
+    id: 'batch-2026-30a',
+    batchNumber: 'CMD-30-2026-01',
+    skuId: 'hci-cmd-30ml',
+    manufactureDate: '2026-03-15',
+    expiryDate: '2028-09-15',
+    laboratoryCertificateUrl: 'https://certs.hcicmd.ph/fda-qc-30-2026-01.pdf',
+    qualityControlStatus: 'passed',
+    totalManufacturedQuantity: 1200,
+    procurementCostBasis: 300000,
+    createdAt: '2026-03-15T08:00:00.000Z',
+  },
+];
+
+export const SEED_BRANCH_BATCH_INVENTORY: BranchBatchInventoryRecord[] = [
+  {
+    id: 'daet_batch-2026-09a',
+    branchId: 'daet',
+    batchId: 'batch-2026-09a',
+    skuId: 'hci-cmd-65ml',
+    availableQuantity: 120,
+    reservedQuantity: 10,
+    damagedQuantity: 0,
+    expiryDate: '2028-09-30',
+    updatedAt: '2026-09-27T00:00:00.000Z',
+  },
+  {
+    id: 'daet_batch-2026-09b',
+    branchId: 'daet',
+    batchId: 'batch-2026-09b',
+    skuId: 'hci-cmd-65ml',
+    availableQuantity: 80,
+    reservedQuantity: 0,
+    damagedQuantity: 0,
+    expiryDate: '2028-10-31',
+    updatedAt: '2026-09-27T00:00:00.000Z',
+  },
+  {
+    id: 'daet_batch-2026-30a',
+    branchId: 'daet',
+    batchId: 'batch-2026-30a',
+    skuId: 'hci-cmd-30ml',
+    availableQuantity: 150,
+    reservedQuantity: 5,
+    damagedQuantity: 0,
+    expiryDate: '2028-09-15',
+    updatedAt: '2026-09-27T00:00:00.000Z',
+  },
+  {
+    id: 'labo_batch-2026-09a',
+    branchId: 'labo',
+    batchId: 'batch-2026-09a',
+    skuId: 'hci-cmd-65ml',
+    availableQuantity: 60,
+    reservedQuantity: 5,
+    damagedQuantity: 0,
+    expiryDate: '2028-09-30',
+    updatedAt: '2026-09-27T00:00:00.000Z',
+  },
+  {
+    id: 'labo_batch-2026-30a',
+    branchId: 'labo',
+    batchId: 'batch-2026-30a',
+    skuId: 'hci-cmd-30ml',
+    availableQuantity: 90,
+    reservedQuantity: 0,
+    damagedQuantity: 0,
+    expiryDate: '2028-09-15',
+    updatedAt: '2026-09-27T00:00:00.000Z',
+  },
+];
+
+export function computeAggregateInventoryFromBatches(params: {
+  branchBatches: BranchBatchInventoryRecord[];
+  branchId: string;
+  skuId: string;
+  transitStock?: number;
+  safetyStock?: number;
+  reorderPoint?: number;
+  lastAdjustmentAt?: string;
+}): InventoryItemRecord {
+  const {
+    branchBatches,
+    branchId,
+    skuId,
+    transitStock = 0,
+    safetyStock = 20,
+    reorderPoint = 30,
+    lastAdjustmentAt,
+  } = params;
+
+  const relevantBatches = branchBatches.filter(
+    (b) => b.branchId === branchId && b.skuId === skuId
+  );
+
+  let activeStock = 0;
+  let reservedStock = 0;
+
+  for (const b of relevantBatches) {
+    activeStock += Number(b.availableQuantity) || 0;
+    reservedStock += Number(b.reservedQuantity) || 0;
+  }
+
+  return {
+    id: `${branchId}_${skuId}`,
+    branchId,
+    skuId,
+    activeStock,
+    reservedStock,
+    transitStock,
+    safetyStock,
+    reorderPoint,
+    lastAdjustmentAt: lastAdjustmentAt || new Date().toISOString(),
+    updatedAt: new Date().toISOString(),
+  };
+}
+
+export function verifyInventoryReconciliation(params: {
+  branchBatches: BranchBatchInventoryRecord[];
+  aggregateInventory: InventoryItemRecord[];
+  branchId?: string | null;
+  skuId?: string | null;
+}) {
+  const { branchBatches, aggregateInventory, branchId, skuId } = params;
+
+  const results: Array<{
+    branchId: string;
+    skuId: string;
+    aggregateActiveStock: number;
+    aggregateReservedStock: number;
+    batchAvailableSum: number;
+    batchReservedSum: number;
+    isConsistent: boolean;
+    divergenceDelta: number;
+    checkedAt: string;
+  }> = [];
+
+  const branchesToCheck = branchId ? [branchId] : [...SUPPORTED_BRANCH_IDS];
+  const skusToCheck = skuId ? [skuId] : [...ACTIVE_CONSUMER_SKUS];
+
+  let allConsistent = true;
+
+  for (const bId of branchesToCheck) {
+    for (const sId of skusToCheck) {
+      const agg = aggregateInventory.find((item) => item.branchId === bId && item.skuId === sId);
+      const batches = branchBatches.filter((b) => b.branchId === bId && b.skuId === sId);
+
+      const batchAvailableSum = batches.reduce((sum, b) => sum + (Number(b.availableQuantity) || 0), 0);
+      const batchReservedSum = batches.reduce((sum, b) => sum + (Number(b.reservedQuantity) || 0), 0);
+
+      const aggActive = agg ? Number(agg.activeStock) || 0 : 0;
+      const aggReserved = agg ? Number(agg.reservedStock) || 0 : 0;
+
+      const activeDiff = Math.abs(aggActive - batchAvailableSum);
+      const reservedDiff = Math.abs(aggReserved - batchReservedSum);
+      const divergenceDelta = activeDiff + reservedDiff;
+      const isConsistent = divergenceDelta === 0;
+
+      if (!isConsistent) {
+        allConsistent = false;
+      }
+
+      results.push({
+        branchId: bId,
+        skuId: sId,
+        aggregateActiveStock: aggActive,
+        aggregateReservedStock: aggReserved,
+        batchAvailableSum,
+        batchReservedSum,
+        isConsistent,
+        divergenceDelta,
+        checkedAt: new Date().toISOString(),
+      });
+    }
+  }
+
+  return {
+    allConsistent,
+    totalRecordsChecked: results.length,
+    reconciliationResults: results,
+  };
+}
+
+
 export function getDailyConsultationSlots(dateStr: string, practitionerId: string) {
   const slotDefinitions = [
     { start: '09:00', end: '09:45' },
@@ -2605,6 +2880,480 @@ export function createExpressApp(deps: ServerDependencies = {}): Express {
         commodityType: commodityParam,
         profitability,
         branchScope: branchFilter || 'all_regional_branches',
+      });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  // --- PHASE 7 MILESTONE 1: Multi-Branch Inventory & Stock Reconciliation Endpoints ---
+
+  async function ensureInventorySeeded(): Promise<{ batches: BranchBatchInventoryRecord[]; inventory: InventoryItemRecord[] }> {
+    const batchesSnap = await db.collection('branch_batch_inventory').get();
+    let batches: BranchBatchInventoryRecord[] = [];
+
+    if (!batchesSnap || batchesSnap.empty) {
+      for (const batch of SEED_BRANCH_BATCH_INVENTORY) {
+        await db.collection('branch_batch_inventory').doc(batch.id).set(batch);
+        batches.push(batch);
+      }
+      for (const pb of SEED_PRODUCT_BATCHES) {
+        await db.collection('product_batches').doc(pb.id).set(pb);
+      }
+    } else {
+      batchesSnap.forEach((d: any) => batches.push(d.data()));
+    }
+
+    const invSnap = await db.collection('inventory').get();
+    let inventory: InventoryItemRecord[] = [];
+
+    if (!invSnap || invSnap.empty) {
+      for (const branchId of SUPPORTED_BRANCH_IDS) {
+        for (const skuId of ACTIVE_CONSUMER_SKUS) {
+          const agg = computeAggregateInventoryFromBatches({
+            branchBatches: batches,
+            branchId,
+            skuId,
+          });
+          await db.collection('inventory').doc(agg.id).set(agg);
+          inventory.push(agg);
+        }
+      }
+    } else {
+      invSnap.forEach((d: any) => inventory.push(d.data()));
+    }
+
+    return { batches, inventory };
+  }
+
+  // 1. GET /api/inventory - Retrieve aggregate inventory records with IDOR protection
+  app.get('/api/inventory', async (req: Request, res: Response): Promise<void> => {
+    const user = await requireAuth(req, res);
+    if (!user) return;
+
+    if (user.role !== 'branch_manager' && user.role !== 'regional_director' && user.role !== 'super_admin') {
+      res.status(403).json({ error: 'Access Denied: Inventory access requires authorized staff role.' });
+      return;
+    }
+
+    const requestedBranch = req.query.branchId ? String(req.query.branchId).toLowerCase().trim() : null;
+
+    if (user.role === 'branch_manager') {
+      const assigned = (user.assignedBranchId || 'daet').toLowerCase().trim();
+      if (requestedBranch && requestedBranch !== assigned) {
+        await logAuditEvent(
+          user.uid,
+          user.role,
+          requestedBranch,
+          'unauthorized_cross_branch_inventory_access_blocked',
+          'inventory',
+          null,
+          false,
+          { requestedBranch, assignedBranch: assigned },
+          req
+        );
+        res.status(403).json({ error: 'Access Denied: Branch managers cannot access inventory records of other branches.' });
+        return;
+      }
+    }
+
+    try {
+      const branchFilter = user.role === 'branch_manager'
+        ? (user.assignedBranchId || 'daet').toLowerCase().trim()
+        : requestedBranch;
+
+      const { inventory } = await ensureInventorySeeded();
+      const filtered = branchFilter
+        ? inventory.filter((item) => item.branchId.toLowerCase() === branchFilter)
+        : inventory;
+
+      res.json({
+        inventory: filtered,
+        branchScope: branchFilter || 'all_regional_branches',
+      });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  // 2. GET /api/inventory/batches - Retrieve authoritative batch-level stock records
+  app.get('/api/inventory/batches', async (req: Request, res: Response): Promise<void> => {
+    const user = await requireAuth(req, res);
+    if (!user) return;
+
+    if (user.role !== 'branch_manager' && user.role !== 'regional_director' && user.role !== 'super_admin') {
+      res.status(403).json({ error: 'Access Denied: Batch inventory access requires authorized staff role.' });
+      return;
+    }
+
+    const requestedBranch = req.query.branchId ? String(req.query.branchId).toLowerCase().trim() : null;
+
+    if (user.role === 'branch_manager') {
+      const assigned = (user.assignedBranchId || 'daet').toLowerCase().trim();
+      if (requestedBranch && requestedBranch !== assigned) {
+        await logAuditEvent(
+          user.uid,
+          user.role,
+          requestedBranch,
+          'unauthorized_cross_branch_batch_inventory_access_blocked',
+          'branch_batch_inventory',
+          null,
+          false,
+          { requestedBranch, assignedBranch: assigned },
+          req
+        );
+        res.status(403).json({ error: 'Access Denied: Branch managers cannot access batch records of other branches.' });
+        return;
+      }
+    }
+
+    try {
+      const branchFilter = user.role === 'branch_manager'
+        ? (user.assignedBranchId || 'daet').toLowerCase().trim()
+        : requestedBranch;
+
+      const { batches } = await ensureInventorySeeded();
+      const filtered = branchFilter
+        ? batches.filter((b) => b.branchId.toLowerCase() === branchFilter)
+        : batches;
+
+      res.json({
+        batches: filtered,
+        branchScope: branchFilter || 'all_regional_branches',
+      });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  // 3. POST /api/inventory/adjustments - Record audited stock adjustment & maintain invariant
+  app.post('/api/inventory/adjustments', async (req: Request, res: Response): Promise<void> => {
+    const user = await requireAuth(req, res);
+    if (!user) return;
+
+    if (user.role !== 'branch_manager' && user.role !== 'regional_director' && user.role !== 'super_admin') {
+      res.status(403).json({ error: 'Access Denied: Recording stock adjustments requires authorized staff role.' });
+      return;
+    }
+
+    const { branchId, skuId, batchId, adjustmentType, quantityDelta, reason } = req.body;
+
+    if (!branchId || typeof branchId !== 'string') {
+      res.status(400).json({ error: 'Missing or invalid branchId.' });
+      return;
+    }
+
+    const normalizedBranch = branchId.toLowerCase().trim();
+    if (!SUPPORTED_BRANCH_IDS.includes(normalizedBranch as any)) {
+      res.status(400).json({ error: `Invalid branchId: '${branchId}'. Must be one of: ${SUPPORTED_BRANCH_IDS.join(', ')}` });
+      return;
+    }
+
+    if (user.role === 'branch_manager') {
+      const assigned = (user.assignedBranchId || 'daet').toLowerCase().trim();
+      if (normalizedBranch !== assigned) {
+        await logAuditEvent(
+          user.uid,
+          user.role,
+          normalizedBranch,
+          'unauthorized_cross_branch_inventory_adjustment_blocked',
+          'inventory',
+          null,
+          false,
+          { targetBranch: normalizedBranch, assignedBranch: assigned },
+          req
+        );
+        res.status(403).json({ error: 'Access Denied: Branch managers cannot adjust inventory for other branches.' });
+        return;
+      }
+    }
+
+    if (!skuId || !ACTIVE_CONSUMER_SKUS.includes(skuId as any)) {
+      res.status(400).json({ error: `Invalid skuId: '${skuId}'. Must be one of: ${ACTIVE_CONSUMER_SKUS.join(', ')}` });
+      return;
+    }
+
+    if (!batchId || typeof batchId !== 'string' || batchId.trim().length === 0) {
+      res.status(400).json({ error: 'Missing or invalid batchId.' });
+      return;
+    }
+
+    if (!adjustmentType || !VALID_INVENTORY_ADJUSTMENT_TYPES.includes(adjustmentType as any)) {
+      res.status(400).json({ error: `Invalid adjustmentType: '${adjustmentType}'. Must be one of: ${VALID_INVENTORY_ADJUSTMENT_TYPES.join(', ')}` });
+      return;
+    }
+
+    const delta = Number(quantityDelta);
+    if (!Number.isInteger(delta) || delta === 0) {
+      res.status(400).json({ error: 'quantityDelta must be a non-zero integer.' });
+      return;
+    }
+
+    if (!reason || typeof reason !== 'string' || reason.trim().length < 5) {
+      res.status(400).json({ error: 'reason must be a valid descriptive string of at least 5 characters.' });
+      return;
+    }
+
+    try {
+      await ensureInventorySeeded();
+
+      const batchDocId = `${normalizedBranch}_${batchId.trim()}`;
+      const batchDocRef = db.collection('branch_batch_inventory').doc(batchDocId);
+      const batchSnap = await batchDocRef.get();
+
+      let batchData: BranchBatchInventoryRecord;
+
+      if (!batchSnap.exists) {
+        const seedMatch = SEED_BRANCH_BATCH_INVENTORY.find((b) => b.id === batchDocId);
+        if (seedMatch) {
+          batchData = { ...seedMatch };
+        } else {
+          batchData = {
+            id: batchDocId,
+            branchId: normalizedBranch,
+            batchId: batchId.trim(),
+            skuId,
+            availableQuantity: 0,
+            reservedQuantity: 0,
+            damagedQuantity: 0,
+            expiryDate: '2028-12-31',
+            updatedAt: new Date().toISOString(),
+          };
+        }
+      } else {
+        batchData = batchSnap.data();
+      }
+
+      let newAvailable = Number(batchData.availableQuantity) || 0;
+      let newDamaged = Number(batchData.damagedQuantity) || 0;
+
+      if (adjustmentType === 'count_reconciliation') {
+        newAvailable += delta;
+      } else if (adjustmentType === 'damage_writeoff') {
+        if (delta <= 0) {
+          res.status(400).json({ error: 'damage_writeoff quantityDelta must be positive representing damaged unit count.' });
+          return;
+        }
+        newAvailable -= delta;
+        newDamaged += delta;
+      } else if (adjustmentType === 'sample_withdrawal' || adjustmentType === 'shrinkage_loss') {
+        if (delta <= 0) {
+          res.status(400).json({ error: `${adjustmentType} quantityDelta must be positive representing reduction count.` });
+          return;
+        }
+        newAvailable -= delta;
+      } else if (adjustmentType === 'qc_quarantine') {
+        if (delta <= 0) {
+          res.status(400).json({ error: 'qc_quarantine quantityDelta must be positive representing quarantined count.' });
+          return;
+        }
+        newAvailable -= delta;
+        newDamaged += delta;
+      }
+
+      if (newAvailable < 0) {
+        res.status(400).json({
+          error: `Insufficient available stock for adjustment. Current available: ${batchData.availableQuantity}, requested reduction: ${Math.abs(delta)}.`,
+        });
+        return;
+      }
+
+      const updatedBatch: BranchBatchInventoryRecord = {
+        ...batchData,
+        availableQuantity: newAvailable,
+        damagedQuantity: newDamaged,
+        updatedAt: new Date().toISOString(),
+      };
+
+      await batchDocRef.set(updatedBatch);
+
+      const allBranchBatchesSnap = await db.collection('branch_batch_inventory').get();
+      const allBranchBatches: BranchBatchInventoryRecord[] = [];
+      if (allBranchBatchesSnap && !allBranchBatchesSnap.empty) {
+        allBranchBatchesSnap.forEach((d: any) => allBranchBatches.push(d.data()));
+      }
+      const idx = allBranchBatches.findIndex((b) => b.id === updatedBatch.id);
+      if (idx >= 0) {
+        allBranchBatches[idx] = updatedBatch;
+      } else {
+        allBranchBatches.push(updatedBatch);
+      }
+
+      const updatedAggregate = computeAggregateInventoryFromBatches({
+        branchBatches: allBranchBatches,
+        branchId: normalizedBranch,
+        skuId,
+        lastAdjustmentAt: new Date().toISOString(),
+      });
+
+      await db.collection('inventory').doc(updatedAggregate.id).set(updatedAggregate);
+
+      const adjId = `ADJ-${new Date().toISOString().slice(0, 10).replace(/-/g, '')}-${crypto.randomBytes(3).toString('hex').toUpperCase()}`;
+      const adjustmentRecord: InventoryAdjustmentRecord = {
+        id: adjId,
+        branchId: normalizedBranch,
+        skuId,
+        batchId: batchId.trim(),
+        adjustmentType,
+        quantityDelta: delta,
+        reason: reason.trim(),
+        performedByUid: user.uid,
+        performedByName: user.email || user.uid,
+        timestamp: new Date().toISOString(),
+      };
+
+      await db.collection('inventory_adjustments').doc(adjId).set(adjustmentRecord);
+
+      await logAuditEvent(
+        user.uid,
+        user.role,
+        normalizedBranch,
+        'inventory_adjustment_recorded',
+        'inventory',
+        adjId,
+        true,
+        {
+          skuId,
+          batchId: batchId.trim(),
+          adjustmentType,
+          quantityDelta: delta,
+          newAvailableStock: updatedAggregate.activeStock,
+          newReservedStock: updatedAggregate.reservedStock,
+          reason: reason.trim(),
+        },
+        req
+      );
+
+      res.status(201).json({
+        adjustment: adjustmentRecord,
+        updatedBatch,
+        updatedAggregate,
+      });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  // 4. GET /api/inventory/adjustments - Retrieve adjustment audit trail
+  app.get('/api/inventory/adjustments', async (req: Request, res: Response): Promise<void> => {
+    const user = await requireAuth(req, res);
+    if (!user) return;
+
+    if (user.role !== 'branch_manager' && user.role !== 'regional_director' && user.role !== 'super_admin') {
+      res.status(403).json({ error: 'Access Denied: Viewing adjustments requires authorized staff role.' });
+      return;
+    }
+
+    const requestedBranch = req.query.branchId ? String(req.query.branchId).toLowerCase().trim() : null;
+
+    if (user.role === 'branch_manager') {
+      const assigned = (user.assignedBranchId || 'daet').toLowerCase().trim();
+      if (requestedBranch && requestedBranch !== assigned) {
+        res.status(403).json({ error: 'Access Denied: Branch managers cannot access adjustments of other branches.' });
+        return;
+      }
+    }
+
+    try {
+      const branchFilter = user.role === 'branch_manager'
+        ? (user.assignedBranchId || 'daet').toLowerCase().trim()
+        : requestedBranch;
+
+      const adjustmentsSnap = await db.collection('inventory_adjustments').get();
+      const adjustments: InventoryAdjustmentRecord[] = [];
+      if (adjustmentsSnap && !adjustmentsSnap.empty) {
+        adjustmentsSnap.forEach((d: any) => adjustments.push(d.data()));
+      }
+
+      const filtered = branchFilter
+        ? adjustments.filter((a) => a.branchId.toLowerCase() === branchFilter)
+        : adjustments;
+
+      res.json({
+        adjustments: filtered,
+        branchScope: branchFilter || 'all_regional_branches',
+      });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  // 5. GET /api/inventory/reconciliation - Live mathematical consistency check
+  app.get('/api/inventory/reconciliation', async (req: Request, res: Response): Promise<void> => {
+    const user = await requireAuth(req, res);
+    if (!user) return;
+
+    if (user.role !== 'branch_manager' && user.role !== 'regional_director' && user.role !== 'super_admin') {
+      res.status(403).json({ error: 'Access Denied: Stock reconciliation requires authorized staff role.' });
+      return;
+    }
+
+    const requestedBranch = req.query.branchId ? String(req.query.branchId).toLowerCase().trim() : null;
+
+    if (user.role === 'branch_manager') {
+      const assigned = (user.assignedBranchId || 'daet').toLowerCase().trim();
+      if (requestedBranch && requestedBranch !== assigned) {
+        res.status(403).json({ error: 'Access Denied: Branch managers cannot reconcile inventory of other branches.' });
+        return;
+      }
+    }
+
+    try {
+      const branchFilter = user.role === 'branch_manager'
+        ? (user.assignedBranchId || 'daet').toLowerCase().trim()
+        : requestedBranch;
+
+      const { batches, inventory } = await ensureInventorySeeded();
+
+      const reconciliation = verifyInventoryReconciliation({
+        branchBatches: batches,
+        aggregateInventory: inventory,
+        branchId: branchFilter,
+      });
+
+      await logAuditEvent(
+        user.uid,
+        user.role,
+        branchFilter,
+        'inventory_reconciliation_queried',
+        'inventory',
+        'reconciliation_report',
+        true,
+        {
+          allConsistent: reconciliation.allConsistent,
+          recordsChecked: reconciliation.totalRecordsChecked,
+        },
+        req
+      );
+
+      res.json({
+        reconciliation,
+        branchScope: branchFilter || 'all_regional_branches',
+      });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  // 6. GET /api/branch-inventory/:branchId - Legacy scaffold backward-compatibility adapter
+  app.get('/api/branch-inventory/:branchId', async (req: Request, res: Response): Promise<void> => {
+    const user = await requireAuth(req, res);
+    if (!user) return;
+
+    const branchId = String(req.params.branchId || '').toLowerCase().trim();
+    res.setHeader('X-Deprecated', 'Superseded by /api/inventory in Phase 7');
+
+    try {
+      const { inventory } = await ensureInventorySeeded();
+      const branchItems = inventory.filter((item) => item.branchId.toLowerCase() === branchId);
+      const totalStock = branchItems.reduce((sum, item) => sum + item.activeStock, 0);
+
+      res.json({
+        branchId,
+        stockCount: totalStock,
+        isDeprecatedScaffold: true,
+        recommendedEndpoint: '/api/inventory',
+        lastUpdated: new Date().toISOString(),
       });
     } catch (err: any) {
       res.status(500).json({ error: err.message });

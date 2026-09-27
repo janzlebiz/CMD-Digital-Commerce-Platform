@@ -404,4 +404,87 @@ export interface CommodityProfitabilityRecord {
   grossMarginPercent: number;
 }
 
+// --- Phase 7 Milestone 1: Multi-Branch Inventory & Stock Reconciliation Types ---
+
+/**
+ * @deprecated Legacy inactive scaffold superseded by BranchBatchInventory and InventoryItem in Phase 7.
+ */
+export interface BranchInventory {
+  branchId: string;
+  stockCount: number;
+  lastUpdated?: string;
+}
+
+export type InventoryAdjustmentType =
+  | 'count_reconciliation'
+  | 'damage_writeoff'
+  | 'sample_withdrawal'
+  | 'shrinkage_loss'
+  | 'qc_quarantine';
+
+export type QualityControlStatus = 'pending' | 'passed' | 'failed';
+
+export interface ProductBatch {
+  id: string;
+  batchNumber: string;
+  skuId: string;
+  manufactureDate: string;
+  expiryDate: string;
+  laboratoryCertificateUrl?: string;
+  qualityControlStatus: QualityControlStatus;
+  totalManufacturedQuantity: number;
+  procurementCostBasis?: number;
+  createdAt: string;
+}
+
+export interface BranchBatchInventory {
+  id: string; // branchId_batchId
+  branchId: string;
+  batchId: string;
+  skuId: string;
+  availableQuantity: number;
+  reservedQuantity: number;
+  damagedQuantity: number;
+  expiryDate: string;
+  updatedAt: string;
+}
+
+export interface InventoryItem {
+  id: string; // branchId_skuId
+  branchId: string;
+  skuId: string;
+  activeStock: number;
+  reservedStock: number;
+  transitStock: number;
+  safetyStock: number;
+  reorderPoint: number;
+  lastAdjustmentAt?: string;
+  updatedAt: string;
+}
+
+export interface InventoryAdjustmentRecord {
+  id: string;
+  branchId: string;
+  skuId: string;
+  batchId: string;
+  adjustmentType: InventoryAdjustmentType;
+  quantityDelta: number;
+  reason: string;
+  performedByUid: string;
+  performedByName?: string;
+  timestamp: string;
+}
+
+export interface StockReconciliationReport {
+  branchId: string;
+  skuId: string;
+  aggregateActiveStock: number;
+  aggregateReservedStock: number;
+  batchAvailableSum: number;
+  batchReservedSum: number;
+  isConsistent: boolean;
+  divergenceDelta: number;
+  checkedAt: string;
+}
+
 

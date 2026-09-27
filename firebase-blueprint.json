@@ -219,6 +219,80 @@
         "updatedAt": { "type": "string", "format": "date-time" }
       },
       "required": ["id", "branchId", "category", "description", "amount", "expenseStatus", "incurredAt", "recordedByUid", "createdAt"]
+    },
+    "inventory_item": {
+      "title": "InventoryItem",
+      "description": "Aggregate branch-and-SKU level inventory counter.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "branchId": { "type": "string" },
+        "skuId": { "type": "string" },
+        "activeStock": { "type": "number" },
+        "reservedStock": { "type": "number" },
+        "transitStock": { "type": "number" },
+        "safetyStock": { "type": "number" },
+        "reorderPoint": { "type": "number" },
+        "lastAdjustmentAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["id", "branchId", "skuId", "activeStock", "reservedStock", "transitStock"]
+    },
+    "product_batch": {
+      "title": "ProductBatch",
+      "description": "Product batch registration and quality control record.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "batchNumber": { "type": "string" },
+        "skuId": { "type": "string" },
+        "manufactureDate": { "type": "string" },
+        "expiryDate": { "type": "string" },
+        "laboratoryCertificateUrl": { "type": "string" },
+        "qualityControlStatus": { "type": "string", "enum": ["pending", "passed", "failed"] },
+        "totalManufacturedQuantity": { "type": "number" },
+        "procurementCostBasis": { "type": "number" },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["id", "batchNumber", "skuId", "manufactureDate", "expiryDate", "qualityControlStatus", "totalManufacturedQuantity"]
+    },
+    "branch_batch_inventory": {
+      "title": "BranchBatchInventory",
+      "description": "Authoritative branch-level batch inventory balances.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "branchId": { "type": "string" },
+        "batchId": { "type": "string" },
+        "skuId": { "type": "string" },
+        "availableQuantity": { "type": "number" },
+        "reservedQuantity": { "type": "number" },
+        "damagedQuantity": { "type": "number" },
+        "expiryDate": { "type": "string" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["id", "branchId", "batchId", "skuId", "availableQuantity", "reservedQuantity", "damagedQuantity", "expiryDate"]
+    },
+    "inventory_adjustment": {
+      "title": "InventoryAdjustmentRecord",
+      "description": "Audited inventory adjustment log entry.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "branchId": { "type": "string" },
+        "skuId": { "type": "string" },
+        "batchId": { "type": "string" },
+        "adjustmentType": {
+          "type": "string",
+          "enum": ["count_reconciliation", "damage_writeoff", "sample_withdrawal", "shrinkage_loss", "qc_quarantine"]
+        },
+        "quantityDelta": { "type": "number" },
+        "reason": { "type": "string" },
+        "performedByUid": { "type": "string" },
+        "performedByName": { "type": "string" },
+        "timestamp": { "type": "string", "format": "date-time" }
+      },
+      "required": ["id", "branchId", "skuId", "batchId", "adjustmentType", "quantityDelta", "reason", "performedByUid", "timestamp"]
     }
   },
   "firestore": {
@@ -232,7 +306,23 @@
     },
     "/branch_inventory/{inventoryId}": {
       "schema": "inventory",
-      "description": "Branch-specific stock volumes."
+      "description": "Legacy branch inventory scaffold (superseded by /inventory and /branch_batch_inventory)."
+    },
+    "/inventory/{itemId}": {
+      "schema": "inventory_item",
+      "description": "Aggregate branch-and-SKU inventory counters."
+    },
+    "/product_batches/{batchId}": {
+      "schema": "product_batch",
+      "description": "Manufactured and procured product batch registry."
+    },
+    "/branch_batch_inventory/{itemDocId}": {
+      "schema": "branch_batch_inventory",
+      "description": "Authoritative branch batch inventory quantities."
+    },
+    "/inventory_adjustments/{adjustmentId}": {
+      "schema": "inventory_adjustment",
+      "description": "Audited physical stock adjustments."
     },
     "/consultation_intakes/{intakeId}": {
       "schema": "consultation",

@@ -51,9 +51,47 @@ service cloud.firestore {
       allow write: if false;
     }
 
+    // Legacy inactive scaffold - superseded by /inventory and /branch_batch_inventory in Phase 7
     match /branch_inventory/{inventoryId} {
       allow read: if isSignedIn();
       allow write: if false;
+    }
+
+    // Phase 7: Multi-Branch Inventory & Authoritative Batch Tracking
+    match /inventory/{itemId} {
+      allow get, list: if isSignedIn() && (
+        isRegionalDirector() || 
+        isSuperAdmin() || 
+        (isBranchManager() && get(/databases/$(database)/documents/users/$(request.auth.uid)).data.assignedBranchId == resource.data.branchId)
+      );
+      allow write: if false; // ADR-009: Server-authoritative writes
+    }
+
+    match /product_batches/{batchId} {
+      allow get, list: if isSignedIn() && (
+        isBranchManager() || 
+        isRegionalDirector() || 
+        isSuperAdmin()
+      );
+      allow write: if false; // ADR-009: Server-authoritative writes
+    }
+
+    match /branch_batch_inventory/{itemDocId} {
+      allow get, list: if isSignedIn() && (
+        isRegionalDirector() || 
+        isSuperAdmin() || 
+        (isBranchManager() && get(/databases/$(database)/documents/users/$(request.auth.uid)).data.assignedBranchId == resource.data.branchId)
+      );
+      allow write: if false; // ADR-009: Server-authoritative writes
+    }
+
+    match /inventory_adjustments/{adjustmentId} {
+      allow get, list: if isSignedIn() && (
+        isRegionalDirector() || 
+        isSuperAdmin() || 
+        (isBranchManager() && get(/databases/$(database)/documents/users/$(request.auth.uid)).data.assignedBranchId == resource.data.branchId)
+      );
+      allow write: if false; // ADR-009: Server-authoritative writes
     }
 
     match /consultation_intakes/{intakeId} {
