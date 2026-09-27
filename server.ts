@@ -271,15 +271,33 @@ export interface RawCrmSourceData {
   registrations: any[];
 }
 
+export function getAuthoritativeRegistrationBranch(reg: any): string | undefined {
+  if (typeof reg.branchId === 'string' && reg.branchId.trim().length > 0) {
+    return reg.branchId.trim().toLowerCase();
+  }
+  if (typeof reg.workshopBranch === 'string' && reg.workshopBranch.trim().length > 0) {
+    return reg.workshopBranch.trim().toLowerCase();
+  }
+  if (typeof reg.workshopId === 'string' && reg.workshopId.trim().length > 0) {
+    const known = SEED_WORKSHOPS.find((w) => w.id === reg.workshopId.trim());
+    if (known && typeof known.branchId === 'string' && known.branchId.trim().length > 0) {
+      return known.branchId.trim().toLowerCase();
+    }
+  }
+  return undefined;
+}
+
 export function aggregateCustomerCrmProfiles(
   data: RawCrmSourceData,
   branchFilter?: string | null,
   nowMs: number = Date.now()
 ): any[] {
+  const normalizedBranch = branchFilter ? branchFilter.trim().toLowerCase() : null;
+
   const ordersByUser = new Map<string, any[]>();
   for (const ord of data.orders) {
     if (!ord.userId) continue;
-    if (branchFilter && ord.branchId !== branchFilter) continue;
+    if (normalizedBranch && (typeof ord.branchId !== 'string' || ord.branchId.toLowerCase() !== normalizedBranch)) continue;
     const list = ordersByUser.get(ord.userId) || [];
     list.push(ord);
     ordersByUser.set(ord.userId, list);
@@ -288,9 +306,9 @@ export function aggregateCustomerCrmProfiles(
   const attendanceByUser = new Map<string, number>();
   for (const reg of data.registrations) {
     if (!reg.userId) continue;
-    if (branchFilter) {
-      const regBranch: string | undefined = reg.branchId || (typeof reg.workshopId === 'string' && reg.workshopId.includes(branchFilter) ? branchFilter : undefined);
-      if (regBranch && regBranch !== branchFilter) continue;
+    if (normalizedBranch) {
+      const regBranch = getAuthoritativeRegistrationBranch(reg);
+      if (!regBranch || regBranch !== normalizedBranch) continue;
     }
     if (reg.status === 'attended') {
       attendanceByUser.set(reg.userId, (attendanceByUser.get(reg.userId) || 0) + 1);
@@ -307,16 +325,16 @@ export function aggregateCustomerCrmProfiles(
     candidateUserIds.add(uid);
   }
 
-  if (branchFilter) {
+  if (normalizedBranch) {
     for (const [uid, u] of userMap.entries()) {
-      if (u.assignedBranchId === branchFilter && u.role === 'customer') {
+      if (typeof u.assignedBranchId === 'string' && u.assignedBranchId.toLowerCase() === normalizedBranch && u.role === 'customer') {
         candidateUserIds.add(uid);
       }
     }
     for (const reg of data.registrations) {
       if (!reg.userId) continue;
-      const regBranch: string | undefined = reg.branchId || (typeof reg.workshopId === 'string' && reg.workshopId.includes(branchFilter) ? branchFilter : undefined);
-      if ((!regBranch || regBranch === branchFilter) && reg.status === 'attended') {
+      const regBranch = getAuthoritativeRegistrationBranch(reg);
+      if (regBranch && regBranch === normalizedBranch && reg.status === 'attended') {
         candidateUserIds.add(reg.userId);
       }
     }

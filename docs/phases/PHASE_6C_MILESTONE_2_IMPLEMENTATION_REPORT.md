@@ -42,7 +42,7 @@ The CRM engine dynamically aggregates commercial customer profiles from transact
    - Added `Customer Segments (CRM)` tab to Staff Operations Console.
    - Integrated cohort summaries grid, member drill-down table, and prominent Health Data Privacy Firewall statutory notice banner.
 4. **`/scripts/testPhase6CCrmCohorts.ts`** *(Created)*:
-   - Automated 59-assertion test suite covering authentication, cohort aggregation, branch isolation, zero-leakage clinical data firewall, and ADR-009 audit trails.
+   - Automated 58-assertion test suite covering authentication, cohort aggregation, branch isolation, zero-leakage clinical data firewall, and ADR-009 audit trails.
 5. **`/docs/phases/PHASE_6C_MILESTONE_2_IMPLEMENTATION_REPORT.md`** *(Created)*:
    - This implementation and verification report.
 
@@ -109,11 +109,11 @@ In compliance with Republic Act No. 10173 and the medical act boundaries of Repu
 
 | Test Suite | Total Assertions | Passed | Failed |
 | :--- | :---: | :---: | :---: |
-| **Phase 6C Milestone 2 (`scripts/testPhase6CCrmCohorts.ts`)** | **59** | **59** | **0** |
+| **Phase 6C Milestone 2 (`scripts/testPhase6CCrmCohorts.ts`)** | **58** | **58** | **0** |
 | **Phase 6C Milestone 1 (`scripts/testPhase6CSupportTickets.ts`)** | **96** | **96** | **0** |
 | **Phase 6A Regression (`scripts/testPhase6AConsultations.ts`)** | **53** | **53** | **0** |
 | **Phase 6B Regression (`scripts/testPhase6BWorkshops.ts`)** | **36** | **36** | **0** |
-| **Total Cumulative Platform Test Suite** | **244** | **244** | **0** |
+| **Total Cumulative Platform Test Suite** | **243** | **243** | **0** |
 
 *(Note: The CRM tests use an in-memory/mock Firestore harness and are not independent production Firestore verification).*
 

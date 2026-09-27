@@ -62,7 +62,7 @@ Key financial capabilities include:
    - Added `Financials & Accounting` tab with date presets, KPI cards, balance sheet summary tiles, agricultural commodity analytics (Rice/Copra), expenses table with status filters, "Record Expense" modal with commodity options, and "Mark Paid" disbursement modal.
    - Updated date range parameters to use local calendar-date boundaries (`formatLocalIsoDate`).
 7. **`/scripts/testPhase6CFinanceMetrics.ts`**:
-   - Created automated test suite with 89 assertions covering math formulas, RBAC, branch isolation, field validation, status transitions, financial/commodity endpoints, health data privacy firewall compliance (0 accesses to `/consultation_intakes`), audit logging, and IndexedDB v2 $\rightarrow$ v3 migration.
+   - Created automated test suite with 90 assertions covering math formulas, RBAC, branch isolation, field validation, status transitions, financial/commodity endpoints, health data privacy firewall compliance (0 accesses to `/consultation_intakes`), audit logging, and IndexedDB v2 $\rightarrow$ v3 migration.
 8. **`/docs/phases/PHASE_6C_MILESTONE_3_IMPLEMENTATION_REPORT.md`** *(Created)*:
    - This implementation and verification report.
 
