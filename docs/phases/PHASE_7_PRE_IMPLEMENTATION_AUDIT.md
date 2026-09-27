@@ -15,7 +15,7 @@ This pre-implementation audit establishes the architectural, regulatory, and tec
 Phase 7 is planned to expand the platform's commercial and financial operations into a resilient **Multi-Branch Inventory Synchronization, Expiry & Batch Traceability, and B2B Distribution Logistics Engine**. The system will initially serve the six (6) verified operating branches (`daet`, `labo`, `paracale`, `jose_panganiban`, `capalonga`, `santa_elena`), with architectural provisions for future geographic expansion across all twelve (12) municipalities of Camarines Norte, Philippines as physical distribution hubs are commissioned.
 
 ### 1.1 Statutory & Regulatory Compliance Baseline
-* **Republic Act No. 11967 (Internet Transactions Act of 2023 - ITA) & Implementing Rules and Regulations (IRR):** Mandates truthful and non-misleading digital commerce representations, accurate product availability signals prior to checkout, transparent fulfillment commitments, and complete transaction traceability. Dependencies include alignment with current Department of Trade and Industry (DTI) e-commerce regulations, consumer redress mechanisms (RA 7394), and upcoming Philippine E-Commerce Trustmark compliance standards.
+* **Republic Act No. 11967 (Internet Transactions Act of 2023 - ITA) & Implementing Rules and Regulations (IRR):** Mandates truthful and non-misleading digital commerce representations, accurate product availability signals prior to checkout, transparent fulfillment commitments, and complete transaction traceability. Compliance dependencies include alignment with current Department of Trade and Industry (DTI) e-commerce regulations, consumer redress mechanisms (RA 7394), and active DTI E-Commerce Philippine Trustmark requirements under DTI Department Administrative Order (DAO) No. 22-01 / DTI E-Commerce Bureau guidelines.
 * **Republic Act No. 10173 (Data Privacy Act of 2012 - DPA):** Enforces strict data minimization and boundary isolation (Section 13 sensitive personal information protections). B2B stockist profiles, inventory movements, transit manifests, and batch distribution logs must remain completely decoupled from clinical health records and consultation intakes.
 * **Food Supplement Quality & Classification Assurance (FDA Compliance Baseline):** Products under the CMD banner must be distributed under certified FDA authorizations. Prior to implementing automated batch release and expiration routing, the exact FDA regulatory classification (e.g., registered food/dietary supplement vs. cosmetic/topical mineral solution) and current applicable FDA circulars / post-market surveillance directives must be formally confirmed. The First-Expired, First-Out (FEFO) allocation engine and batch certificate provenance system are designed to support rigorous quality management and regulatory compliance upon activation.
 
@@ -76,6 +76,7 @@ To ensure that First-Expired, First-Out (FEFO) routing is practically implementa
 │        (/branch_batch_inventory/{branchId_batchId})        │
 │  - branchId: "daet"              - batchId: "CMD-2026-09A"│
 │  - availableQuantity: 150        - reservedQuantity: 10   │
+│  - damagedQuantity: 0            - expiryDate: 2028-09-30 │
 └─────────────────────────────┬─────────────────────────────┘
                               │
                               ▼ (Order Checkout / Reservation)
@@ -88,13 +89,28 @@ To ensure that First-Expired, First-Out (FEFO) routing is practically implementa
 └───────────────────────────────────────────────────────────┘
 ```
 
-#### Core Components of the FEFO Architecture:
-1. **Batch-Level Stock Quantities:** Each branch tracks stock per batch in `/branch_batch_inventory`, recording `availableQuantity`, `reservedQuantity`, `allocatedQuantity`, and `damagedQuantity`.
-2. **Batch-Attributed Stock Reservations:** During checkout, stock is reserved against the batch with the *earliest valid expiration date* (`expiryDate > now`) whose `qualityControlStatus == 'passed'`.
-3. **Batch Allocation & Provenance Records (`/batch_allocations`):** Connects every order item directly to the originating `batchId`.
+#### Core Components & Stock Lifecycle:
+1. **Authoritative Batch-Level Stock (`/branch_batch_inventory`):** Each branch tracks stock per batch in `/branch_batch_inventory`, recording `availableQuantity`, `reservedQuantity`, `damagedQuantity`, and `expiryDate`.
+2. **Stock Reservation & Allocation Semantics:**
+   * **`availableQuantity`:** Unreserved, physical stock on branch shelves available for new purchases.
+   * **`reservedQuantity`:** Stock committed to placed orders undergoing fulfillment. During checkout reservation, `availableQuantity` is decremented and `reservedQuantity` is incremented against the batch with earliest expiration date (`expiryDate > now`) whose `qualityControlStatus == 'passed'`.
+   * **Order Completion & Dispatch:** When an order is packed and dispatched, `reservedQuantity` is decremented from `/branch_batch_inventory`, and an immutable `/batch_allocations` record is created storing the `allocatedQuantity` for that fulfilled order line item.
+   * **Order Cancellation:** If an order is cancelled before dispatch, `reservedQuantity` is decremented and restored to `availableQuantity`.
+3. **Batch Allocation & Provenance Records (`/batch_allocations`):** Connects every order item directly to the originating `batchId` and customer UID upon fulfillment.
 4. **Bidirectional Recall Traversal Engine:** In the event of an FDA or manufacturer recall:
    * Querying by `batchNumber` immediately yields all associated `orderId`s, customer UIDs, B2B stockist accounts, branches, and fulfillment timestamps.
    * Enables automated notification generation and quarantine locks across active branch stocks.
+
+### 3.2.1 Explicit Inventory Consistency Invariant
+To prevent state drift between aggregate catalog displays and physical batch records, the platform enforces a strict mathematical consistency invariant:
+* **`/inventory`:** Represents the read-optimized, aggregate branch/SKU view (`id: branchId_skuId`).
+* **`/branch_batch_inventory`:** Represents the authoritative, transactional batch-level stock view (`id: branchId_batchId`).
+
+**Mathematical Consistency Invariant:**
+$$\text{inventory.activeStock} = \sum_{b \in \text{Batches}(\text{branch, sku})} \text{branch\_batch\_inventory}(b).\text{availableQuantity}$$
+$$\text{inventory.reservedStock} = \sum_{b \in \text{Batches}(\text{branch, sku})} \text{branch\_batch\_inventory}(b).\text{reservedQuantity}$$
+
+**Divergence Prevention Rule:** Direct or independent edits to `/inventory` aggregate counters are strictly prohibited. All stock mutations (reservations, cancellations, physical count adjustments, and receipts) must execute transactionally (`db.runTransaction`) on the authoritative `/branch_batch_inventory` records. The aggregate `/inventory` record must be updated in the exact same atomic transaction or derived dynamically from batch records, guaranteeing zero aggregate-vs-batch divergence.
 
 ### 3.3 Stock Transfer Protocol & Dual-Custody State Machine
 
@@ -148,12 +164,12 @@ The forecasting engine computes replenishment indicators using 30-day historical
 3. **Cancelled & Refunded Orders:** Strictly excluded from $V_s$ calculations to prevent artificial demand inflation.
 4. **Inter-Branch Stock Transfers:** Transfer shipments out of a branch must **not** be counted as consumer sales velocity for that branch, preventing circular demand distortion.
 5. **Stockout Periods:** If a branch experiences zero stock for $N$ days during the 30-day window, the effective velocity calculation adjusts the denominator to active in-stock days ($30 - N$) to prevent demand underestimation.
-6. **Safety Stock ($S_s$) Source:** Configured per SKU and branch (default: 14 days of average demand or minimum 20 units).
-7. **Transit Lead-Time ($L_t$) Source:** Derived from a branch-specific transit lead-time matrix (e.g., Daet Central Hub to Capalonga: 3 business days; Central Hub to Santa Elena: 4 business days).
+6. **Safety Stock ($S_s$) Source:** Configured per SKU and branch *(Proposed Configuration Default / Parameterized: default 14 days of average demand or minimum safety buffer of 20 units, subject to operational review)*.
+7. **Transit Lead-Time ($L_t$) Source:** Derived from a branch-specific transit lead-time matrix *(Illustrative Configuration Defaults: e.g., Daet Central Hub to Capalonga: 3 business days; Central Hub to Santa Elena: 4 business days, subject to logistics matrix calibration)*.
 
 ### 3.5 B2B Stockist Partner Portal & Consignment Specifications
 
-* **Wholesale Tier Pricing & Eligibility:**
+* **Wholesale Tier Pricing & Eligibility *(Proposed Configuration Defaults / Subject to Commercial Review & Business Approval)*:**
   * **Tier 1 (Stockist Partner):** Minimum order 50 units (15% discount on `hci-cmd-65ml` / `hci-cmd-30ml`).
   * **Tier 2 (Municipal Distributor):** Minimum order 200 units (25% discount).
   * **Tier 3 (Regional Stockist):** Minimum order 500 units (35% discount).
@@ -364,4 +380,4 @@ When Phase 7 is authorized for development, the automated test harness (`scripts
 
 Phase 7 establishes a comprehensive, mathematically rigorous, and privacy-hardened architecture for multi-branch inventory management, FEFO quality assurance, stock transfers, and B2B distribution.
 
-**Architecture under final pre-implementation review; implementation requires separate authorization after audit certification.**
+**Ready for final certification pending source verification.**
