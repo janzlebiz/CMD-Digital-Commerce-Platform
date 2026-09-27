@@ -412,6 +412,236 @@ export function aggregateCustomerCrmProfiles(
   return results;
 }
 
+// --- PHASE 6C MILESTONE 3: Finance, Expenses & Commodity Analytics Functions ---
+
+export const EXPENSE_CATEGORIES = [
+  'procurement_raw_materials',
+  'packaging_bottles_droppers',
+  'agricultural_copra_processing',
+  'agricultural_rice_milling',
+  'branch_rent_utilities',
+  'logistics_freight',
+  'practitioner_stipends',
+  'marketing_symposia',
+  'miscellaneous',
+] as const;
+
+export type ExpenseCategory = typeof EXPENSE_CATEGORIES[number];
+
+export function parseDateBoundary(dateStr?: string, isEnd = false): number {
+  if (!dateStr) return isEnd ? Number.MAX_SAFE_INTEGER : 0;
+  if (dateStr.length === 10 && /^\d{4}-\d{2}-\d{2}$/.test(dateStr)) {
+    return Date.parse(isEnd ? `${dateStr}T23:59:59.999Z` : `${dateStr}T00:00:00.000Z`);
+  }
+  const parsed = Date.parse(dateStr);
+  return isNaN(parsed) ? (isEnd ? Number.MAX_SAFE_INTEGER : 0) : parsed;
+}
+
+export function calculateFinancialMetrics(params: {
+  orders: any[];
+  expenses: any[];
+  startDate?: string;
+  endDate?: string;
+  branchId?: string | null;
+}) {
+  const { orders = [], expenses = [], startDate, endDate, branchId } = params;
+
+  const startMs = parseDateBoundary(startDate, false);
+  const endMs = parseDateBoundary(endDate, true);
+
+  // Filter expenses
+  const filteredExpenses = expenses.filter((exp) => {
+    if (branchId && exp.branchId !== branchId) return false;
+    const incurredMs = Date.parse(exp.incurredAt || exp.createdAt);
+    if (!isNaN(incurredMs)) {
+      if (incurredMs < startMs || incurredMs > endMs) return false;
+    }
+    return true;
+  });
+
+  // Filter orders (ignore cancelled/refunded)
+  const filteredOrders = orders.filter((ord) => {
+    if (ord.fulfillmentStatus === 'cancelled' || ord.status === 'cancelled' || ord.status === 'refunded') return false;
+    if (branchId && ord.branchId !== branchId) return false;
+    const orderMs = Date.parse(ord.createdAt);
+    if (!isNaN(orderMs)) {
+      if (orderMs < startMs || orderMs > endMs) return false;
+    }
+    return true;
+  });
+
+  let revenue = 0;
+  let cashReceived = 0;
+  let accountsReceivable = 0;
+
+  for (const ord of filteredOrders) {
+    const total = Number(ord.grandTotal ?? ord.total ?? 0);
+    revenue += total;
+    if (ord.paymentStatus === 'paid') {
+      cashReceived += total;
+    } else {
+      accountsReceivable += total;
+    }
+  }
+
+  let totalExpensesIncurred = 0;
+  let totalExpensesPaid = 0;
+  let accountsPayable = 0;
+
+  const expensesByCategory: Record<string, number> = {
+    procurement_raw_materials: 0,
+    packaging_bottles_droppers: 0,
+    agricultural_copra_processing: 0,
+    agricultural_rice_milling: 0,
+    branch_rent_utilities: 0,
+    logistics_freight: 0,
+    practitioner_stipends: 0,
+    marketing_symposia: 0,
+    miscellaneous: 0,
+  };
+
+  for (const exp of filteredExpenses) {
+    const amount = Number(exp.amount) || 0;
+    totalExpensesIncurred += amount;
+    if (exp.expenseStatus === 'paid') {
+      totalExpensesPaid += amount;
+    } else {
+      accountsPayable += amount;
+    }
+
+    if (expensesByCategory[exp.category] !== undefined) {
+      expensesByCategory[exp.category] += amount;
+    } else {
+      expensesByCategory.miscellaneous += amount;
+    }
+  }
+
+  const cashPaid = totalExpensesPaid;
+  const netIncomeAccrual = revenue - totalExpensesIncurred;
+  const netCashFlow = cashReceived - cashPaid;
+
+  return {
+    dateRange: {
+      startDate: startDate || (startMs > 0 ? new Date(startMs).toISOString() : new Date(0).toISOString()),
+      endDate: endDate || (endMs < Number.MAX_SAFE_INTEGER ? new Date(endMs).toISOString() : new Date().toISOString()),
+    },
+    branchId: branchId || undefined,
+    revenue: Math.round(revenue * 100) / 100,
+    totalExpensesIncurred: Math.round(totalExpensesIncurred * 100) / 100,
+    totalExpensesPaid: Math.round(totalExpensesPaid * 100) / 100,
+    netIncomeAccrual: Math.round(netIncomeAccrual * 100) / 100,
+    netCashFlow: Math.round(netCashFlow * 100) / 100,
+    cashReceived: Math.round(cashReceived * 100) / 100,
+    cashPaid: Math.round(cashPaid * 100) / 100,
+    accountsReceivable: Math.round(accountsReceivable * 100) / 100,
+    accountsPayable: Math.round(accountsPayable * 100) / 100,
+    expensesByCategory,
+    orderCount: filteredOrders.length,
+    expenseCount: filteredExpenses.length,
+  };
+}
+
+export function calculateCommodityProfitability(
+  expenses: any[],
+  orders: any[],
+  commodityType: 'rice' | 'copra',
+  branchId?: string | null
+) {
+  const relevantExpenses = expenses.filter((exp) => {
+    if (branchId && exp.branchId !== branchId) return false;
+    const cat = exp.category;
+    const isCatMatch =
+      commodityType === 'rice'
+        ? cat === 'agricultural_rice_milling' || exp.commodityMetadata?.commodityType === 'rice'
+        : cat === 'agricultural_copra_processing' || exp.commodityMetadata?.commodityType === 'copra';
+    return isCatMatch;
+  });
+
+  let totalVolumeProcuredKg = 0;
+  let totalAcquisitionCost = 0;
+  let totalProcessingCost = 0;
+
+  for (const exp of relevantExpenses) {
+    const meta = exp.commodityMetadata;
+    const amt = Number(exp.amount) || 0;
+    if (meta && meta.commodityType === commodityType) {
+      const vol = Number(meta.volumeKg) || 0;
+      const acqCost = Number(meta.acquisitionCostPerKg) ? vol * Number(meta.acquisitionCostPerKg) : amt;
+      const procFee = Number(meta.millingOrDryingFee) || 0;
+      totalVolumeProcuredKg += vol;
+      totalAcquisitionCost += acqCost;
+      totalProcessingCost += procFee;
+    } else {
+      totalProcessingCost += amt;
+    }
+  }
+
+  const totalCostBasis = totalAcquisitionCost + totalProcessingCost;
+  const unitCostPerKg = totalVolumeProcuredKg > 0 ? totalCostBasis / totalVolumeProcuredKg : 0;
+
+  let totalVolumeSoldKg = 0;
+  let totalSalesRevenue = 0;
+
+  for (const ord of orders) {
+    if (ord.fulfillmentStatus === 'cancelled' || ord.status === 'cancelled') continue;
+    if (branchId && ord.branchId !== branchId) continue;
+    if (Array.isArray(ord.items)) {
+      for (const item of ord.items) {
+        const name = String(item.name || '').toLowerCase();
+        const sku = String(item.sku || item.id || '').toLowerCase();
+        const matchesCommodity =
+          commodityType === 'rice'
+            ? name.includes('rice') || sku.includes('rice')
+            : name.includes('copra') || sku.includes('copra') || name.includes('coconut');
+
+        if (matchesCommodity) {
+          const qty = Number(item.quantity) || 1;
+          const unitPrice = Number(item.price) || 0;
+          let itemKg = Number(item.volumeKg);
+          if (isNaN(itemKg) || itemKg <= 0) {
+            if (name.includes('50kg') || name.includes('50 kg') || name.includes('sack')) {
+              itemKg = 50 * qty;
+            } else if (name.includes('25kg') || name.includes('25 kg')) {
+              itemKg = 25 * qty;
+            } else if (name.includes('10kg') || name.includes('10 kg')) {
+              itemKg = 10 * qty;
+            } else if (name.includes('5kg') || name.includes('5 kg')) {
+              itemKg = 5 * qty;
+            } else {
+              itemKg = 1 * qty;
+            }
+          }
+
+          const revenueFromItem = unitPrice * qty;
+          totalVolumeSoldKg += itemKg;
+          totalSalesRevenue += revenueFromItem;
+        }
+      }
+    }
+  }
+
+  const weightedAverageSellingPrice =
+    totalVolumeSoldKg > 0 ? totalSalesRevenue / totalVolumeSoldKg : 0;
+
+  const grossProfit = totalSalesRevenue - unitCostPerKg * totalVolumeSoldKg;
+  const grossMarginPercent =
+    totalSalesRevenue > 0 ? (grossProfit / totalSalesRevenue) * 100 : 0;
+
+  return {
+    commodityType,
+    totalVolumeProcuredKg: Math.round(totalVolumeProcuredKg * 100) / 100,
+    totalAcquisitionCost: Math.round(totalAcquisitionCost * 100) / 100,
+    totalProcessingCost: Math.round(totalProcessingCost * 100) / 100,
+    totalCostBasis: Math.round(totalCostBasis * 100) / 100,
+    totalVolumeSoldKg: Math.round(totalVolumeSoldKg * 100) / 100,
+    totalSalesRevenue: Math.round(totalSalesRevenue * 100) / 100,
+    weightedAverageSellingPrice: Math.round(weightedAverageSellingPrice * 100) / 100,
+    unitCostPerKg: Math.round(unitCostPerKg * 100) / 100,
+    grossProfit: Math.round(grossProfit * 100) / 100,
+    grossMarginPercent: Math.round(grossMarginPercent * 100) / 100,
+  };
+}
+
 export function getDailyConsultationSlots(dateStr: string, practitionerId: string) {
   const slotDefinitions = [
     { start: '09:00', end: '09:45' },
@@ -1973,6 +2203,363 @@ export function createExpressApp(deps: ServerDependencies = {}): Express {
         description: cohortDef.description,
         count: cohortMembers.length,
         members: cohortMembers,
+        branchScope: branchFilter || 'all_regional_branches',
+      });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  // --- PHASE 6C MILESTONE 3: Finance, Expenses & Commodity Analytics Endpoints ---
+
+  // 1. Record New Expense (Server-Authoritative, Branch-Scoped, Audit-Logged)
+  app.post('/api/finance/expenses', async (req: Request, res: Response): Promise<void> => {
+    const user = await requireAuth(req, res);
+    if (!user) return;
+
+    if (user.role !== 'branch_manager' && user.role !== 'regional_director' && user.role !== 'super_admin') {
+      res.status(403).json({ error: 'Access Denied: Recording expenses requires branch_manager, regional_director, or super_admin role.' });
+      return;
+    }
+
+    const {
+      branchId,
+      category,
+      description,
+      amount,
+      expenseStatus,
+      incurredAt,
+      paidAt,
+      paymentReference,
+      commodityMetadata,
+    } = req.body;
+
+    // Enforce branch boundaries
+    if (user.role === 'branch_manager') {
+      const assigned = user.assignedBranchId || 'daet';
+      if (branchId && branchId !== assigned) {
+        res.status(403).json({ error: `Access Denied: Branch managers can only record expenses for their assigned branch (${assigned}).` });
+        return;
+      }
+    }
+
+    const targetBranch = (user.role === 'branch_manager' ? user.assignedBranchId || 'daet' : branchId) || 'daet';
+
+    if (!category || !EXPENSE_CATEGORIES.includes(category)) {
+      res.status(400).json({ error: `Invalid category. Must be one of: ${EXPENSE_CATEGORIES.join(', ')}` });
+      return;
+    }
+
+    if (!description || typeof description !== 'string' || !description.trim()) {
+      res.status(400).json({ error: 'Description is required and cannot be empty.' });
+      return;
+    }
+
+    const parsedAmount = Number(amount);
+    if (isNaN(parsedAmount) || parsedAmount <= 0) {
+      res.status(400).json({ error: 'Amount must be a positive number greater than 0.' });
+      return;
+    }
+
+    const validStatuses = ['paid', 'incurred_pending_payment'];
+    if (!expenseStatus || !validStatuses.includes(expenseStatus)) {
+      res.status(400).json({ error: "Invalid expenseStatus. Must be 'paid' or 'incurred_pending_payment'." });
+      return;
+    }
+
+    const incurredIso = incurredAt ? new Date(incurredAt).toISOString() : new Date().toISOString();
+    const nowIso = new Date().toISOString();
+
+    let safeCommodityMeta: any = null;
+    if (commodityMetadata) {
+      if (!['rice', 'copra'].includes(commodityMetadata.commodityType)) {
+        res.status(400).json({ error: "Invalid commodityMetadata.commodityType. Must be 'rice' or 'copra'." });
+        return;
+      }
+      safeCommodityMeta = {
+        commodityType: commodityMetadata.commodityType,
+        volumeKg: Number(commodityMetadata.volumeKg) || 0,
+        acquisitionCostPerKg: Number(commodityMetadata.acquisitionCostPerKg) || 0,
+        millingOrDryingFee: Number(commodityMetadata.millingOrDryingFee) || 0,
+        notes: commodityMetadata.notes ? String(commodityMetadata.notes).slice(0, 500) : undefined,
+      };
+    }
+
+    const expenseId = `EXP-${new Date().toISOString().slice(0, 10).replace(/-/g, '')}-${crypto.randomBytes(3).toString('hex').toUpperCase()}`;
+
+    const newExpense = {
+      id: expenseId,
+      branchId: targetBranch,
+      category,
+      description: description.trim(),
+      amount: Math.round(parsedAmount * 100) / 100,
+      expenseStatus,
+      incurredAt: incurredIso,
+      paidAt: expenseStatus === 'paid' ? (paidAt ? new Date(paidAt).toISOString() : nowIso) : null,
+      paymentReference: paymentReference ? String(paymentReference).trim() : null,
+      commodityMetadata: safeCommodityMeta,
+      recordedByUid: user.uid,
+      recordedByName: user.email ? user.email.split('@')[0] : 'Staff Member',
+      createdAt: nowIso,
+      updatedAt: nowIso,
+    };
+
+    try {
+      await db.collection('expenses').doc(expenseId).set(newExpense);
+
+      await logAuditEvent(
+        user.uid,
+        user.role,
+        targetBranch,
+        'expense_recorded',
+        'expenses',
+        expenseId,
+        true,
+        {
+          category,
+          amount: newExpense.amount,
+          status: expenseStatus,
+          hasCommodity: !!safeCommodityMeta,
+        },
+        req
+      );
+
+      res.status(201).json({ expense: newExpense });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  // 2. Query Expenses List with Branch Scoping & Filtering
+  app.get('/api/finance/expenses', async (req: Request, res: Response): Promise<void> => {
+    const user = await requireAuth(req, res);
+    if (!user) return;
+
+    if (user.role !== 'branch_manager' && user.role !== 'regional_director' && user.role !== 'super_admin') {
+      res.status(403).json({ error: 'Access Denied: Staff finance operations require branch_manager, regional_director, or super_admin role.' });
+      return;
+    }
+
+    try {
+      const branchFilter = user.role === 'branch_manager' ? (user.assignedBranchId || 'daet') : (req.query.branchId ? String(req.query.branchId) : null);
+      const startDate = req.query.startDate ? String(req.query.startDate) : null;
+      const endDate = req.query.endDate ? String(req.query.endDate) : null;
+      const categoryFilter = req.query.category ? String(req.query.category) : null;
+      const statusFilter = req.query.status ? String(req.query.status) : null;
+
+      let query: any = db.collection('expenses');
+      if (branchFilter) {
+        query = query.where('branchId', '==', branchFilter);
+      }
+
+      const snap = await query.get();
+      let expenses: any[] = [];
+      if (snap && !snap.empty) {
+        snap.forEach((d: any) => expenses.push(d.data()));
+      }
+
+      const startMs = parseDateBoundary(startDate || undefined, false);
+      const endMs = parseDateBoundary(endDate || undefined, true);
+
+      expenses = expenses.filter((e) => {
+        const incurredMs = Date.parse(e.incurredAt || e.createdAt);
+        if (!isNaN(incurredMs)) {
+          if (incurredMs < startMs || incurredMs > endMs) return false;
+        }
+        if (categoryFilter && e.category !== categoryFilter) return false;
+        if (statusFilter && e.expenseStatus !== statusFilter) return false;
+        return true;
+      });
+
+      expenses.sort((a, b) => (Date.parse(b.incurredAt || b.createdAt) || 0) - (Date.parse(a.incurredAt || a.createdAt) || 0));
+
+      res.json({
+        expenses,
+        count: expenses.length,
+        branchScope: branchFilter || 'all_regional_branches',
+      });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  // 3. Update Expense Status (e.g. Incurred -> Paid)
+  app.patch('/api/finance/expenses/:expenseId/status', async (req: Request, res: Response): Promise<void> => {
+    const user = await requireAuth(req, res);
+    if (!user) return;
+
+    if (user.role !== 'branch_manager' && user.role !== 'regional_director' && user.role !== 'super_admin') {
+      res.status(403).json({ error: 'Access Denied: Updating expense status requires authorized staff role.' });
+      return;
+    }
+
+    const { status, paymentReference, paidAt } = req.body;
+    if (!status || !['paid', 'incurred_pending_payment'].includes(status)) {
+      res.status(400).json({ error: "Invalid status. Must be 'paid' or 'incurred_pending_payment'." });
+      return;
+    }
+
+    try {
+      const docRef = db.collection('expenses').doc(req.params.expenseId);
+      const doc = await docRef.get();
+      if (!doc || !doc.exists) {
+        res.status(404).json({ error: 'Expense record not found.' });
+        return;
+      }
+
+      const current = doc.data();
+      if (user.role === 'branch_manager' && current.branchId !== user.assignedBranchId) {
+        res.status(403).json({ error: 'Access Denied: Branch managers can only update expenses for their assigned branch.' });
+        return;
+      }
+
+      const nowIso = new Date().toISOString();
+      const updated = {
+        ...current,
+        expenseStatus: status,
+        paidAt: status === 'paid' ? (paidAt ? new Date(paidAt).toISOString() : (current.paidAt || nowIso)) : null,
+        paymentReference: paymentReference ? String(paymentReference).trim() : current.paymentReference,
+        updatedAt: nowIso,
+      };
+
+      await docRef.set(updated);
+
+      await logAuditEvent(
+        user.uid,
+        user.role,
+        updated.branchId,
+        'expense_status_updated',
+        'expenses',
+        updated.id,
+        true,
+        { previousStatus: current.expenseStatus, newStatus: status },
+        req
+      );
+
+      res.json({ expense: updated });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  // 4. Financial Performance Metrics Summary (Accrual vs. Cash Flow)
+  app.get('/api/finance/metrics', async (req: Request, res: Response): Promise<void> => {
+    const user = await requireAuth(req, res);
+    if (!user) return;
+
+    if (user.role !== 'branch_manager' && user.role !== 'regional_director' && user.role !== 'super_admin') {
+      res.status(403).json({ error: 'Access Denied: Financial performance metrics require authorized staff role.' });
+      return;
+    }
+
+    try {
+      const branchFilter = user.role === 'branch_manager' ? (user.assignedBranchId || 'daet') : (req.query.branchId ? String(req.query.branchId) : null);
+      const startDate = req.query.startDate ? String(req.query.startDate) : undefined;
+      const endDate = req.query.endDate ? String(req.query.endDate) : undefined;
+
+      // Strict Health Data Privacy Firewall: queries orders & expenses only (NEVER consultation_intakes)
+      const [ordersSnap, expensesSnap] = await Promise.all([
+        db.collection('orders').get(),
+        db.collection('expenses').get(),
+      ]);
+
+      const orders: any[] = [];
+      const expenses: any[] = [];
+
+      if (ordersSnap && !ordersSnap.empty) ordersSnap.forEach((d: any) => orders.push(d.data()));
+      if (expensesSnap && !expensesSnap.empty) expensesSnap.forEach((d: any) => expenses.push(d.data()));
+
+      const metrics = calculateFinancialMetrics({
+        orders,
+        expenses,
+        startDate,
+        endDate,
+        branchId: branchFilter,
+      });
+
+      await logAuditEvent(
+        user.uid,
+        user.role,
+        branchFilter,
+        'financial_report_generated',
+        'financial_analytics',
+        'summary',
+        true,
+        {
+          revenue: metrics.revenue,
+          netIncomeAccrual: metrics.netIncomeAccrual,
+          cashReceived: metrics.cashReceived,
+          cashPaid: metrics.cashPaid,
+        },
+        req
+      );
+
+      res.json({
+        metrics,
+        branchScope: branchFilter || 'all_regional_branches',
+      });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  // 5. Agricultural Commodity Profitability & WASP Analytics (Rice & Copra)
+  app.get('/api/finance/commodity-profitability', async (req: Request, res: Response): Promise<void> => {
+    const user = await requireAuth(req, res);
+    if (!user) return;
+
+    if (user.role !== 'branch_manager' && user.role !== 'regional_director' && user.role !== 'super_admin') {
+      res.status(403).json({ error: 'Access Denied: Commodity profitability metrics require authorized staff role.' });
+      return;
+    }
+
+    try {
+      const commodityParam = String(req.query.commodityType || 'rice').toLowerCase();
+      if (commodityParam !== 'rice' && commodityParam !== 'copra') {
+        res.status(400).json({ error: "Invalid commodityType. Must be 'rice' or 'copra'." });
+        return;
+      }
+
+      const branchFilter = user.role === 'branch_manager' ? (user.assignedBranchId || 'daet') : (req.query.branchId ? String(req.query.branchId) : null);
+
+      const [ordersSnap, expensesSnap] = await Promise.all([
+        db.collection('orders').get(),
+        db.collection('expenses').get(),
+      ]);
+
+      const orders: any[] = [];
+      const expenses: any[] = [];
+
+      if (ordersSnap && !ordersSnap.empty) ordersSnap.forEach((d: any) => orders.push(d.data()));
+      if (expensesSnap && !expensesSnap.empty) expensesSnap.forEach((d: any) => expenses.push(d.data()));
+
+      const profitability = calculateCommodityProfitability(
+        expenses,
+        orders,
+        commodityParam as 'rice' | 'copra',
+        branchFilter
+      );
+
+      await logAuditEvent(
+        user.uid,
+        user.role,
+        branchFilter,
+        'commodity_profitability_queried',
+        'agricultural_analytics',
+        commodityParam,
+        true,
+        {
+          volumeProcured: profitability.totalVolumeProcuredKg,
+          volumeSold: profitability.totalVolumeSoldKg,
+          wasp: profitability.weightedAverageSellingPrice,
+          grossMargin: profitability.grossMarginPercent,
+        },
+        req
+      );
+
+      res.json({
+        commodityType: commodityParam,
+        profitability,
         branchScope: branchFilter || 'all_regional_branches',
       });
     } catch (err: any) {

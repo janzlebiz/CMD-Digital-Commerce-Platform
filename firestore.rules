@@ -117,5 +117,19 @@ service cloud.firestore {
       );
       allow write: if false;
     }
+
+    match /expenses/{expenseId} {
+      allow get: if isSignedIn() && (
+        (isBranchManager() && get(/databases/$(database)/documents/users/$(request.auth.uid)).data.assignedBranchId == resource.data.branchId) ||
+        isRegionalDirector() ||
+        isSuperAdmin()
+      );
+      allow list: if isSignedIn() && (
+        (isBranchManager() && get(/databases/$(database)/documents/users/$(request.auth.uid)).data.assignedBranchId == resource.data.branchId) ||
+        isRegionalDirector() ||
+        isSuperAdmin()
+      );
+      allow write: if false;
+    }
   }
 }

@@ -332,4 +332,76 @@ export interface CrmCohortSummary {
   memberCount: number;
 }
 
+// Phase 6C Milestone 3 Expense & Finance Types
+export type ExpenseCategory =
+  | 'procurement_raw_materials'
+  | 'packaging_bottles_droppers'
+  | 'agricultural_copra_processing'
+  | 'agricultural_rice_milling'
+  | 'branch_rent_utilities'
+  | 'logistics_freight'
+  | 'practitioner_stipends'
+  | 'marketing_symposia'
+  | 'miscellaneous';
+
+export type ExpenseStatus = 'paid' | 'incurred_pending_payment';
+
+export type CommodityType = 'rice' | 'copra';
+
+export interface CommodityExpenseMetadata {
+  commodityType: CommodityType;
+  volumeKg: number;
+  acquisitionCostPerKg: number;
+  millingOrDryingFee?: number;
+  notes?: string;
+}
+
+export interface ExpenseRecord {
+  id: string;
+  branchId: string;
+  category: ExpenseCategory;
+  description: string;
+  amount: number;
+  expenseStatus: ExpenseStatus;
+  incurredAt: string;
+  paidAt?: string;
+  paymentReference?: string;
+  commodityMetadata?: CommodityExpenseMetadata;
+  recordedByUid: string;
+  recordedByName?: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface FinanceMetricsSummary {
+  dateRange: { startDate: string; endDate: string };
+  branchId?: string;
+  revenue: number;
+  totalExpensesIncurred: number;
+  totalExpensesPaid: number;
+  netIncomeAccrual: number;
+  netCashFlow: number;
+  cashReceived: number;
+  cashPaid: number;
+  accountsReceivable: number;
+  accountsPayable: number;
+  expensesByCategory: Record<ExpenseCategory, number>;
+  orderCount: number;
+  expenseCount: number;
+}
+
+export interface CommodityProfitabilityRecord {
+  commodityType: CommodityType;
+  totalVolumeProcuredKg: number;
+  totalAcquisitionCost: number;
+  totalProcessingCost: number;
+  totalCostBasis: number;
+  totalVolumeSoldKg: number;
+  totalSalesRevenue: number;
+  weightedAverageSellingPrice: number;
+  unitCostPerKg: number;
+  grossProfit: number;
+  grossMarginPercent: number;
+}
+
 

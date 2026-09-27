@@ -174,6 +174,51 @@
         "updatedAt": { "type": "string", "format": "date-time" }
       },
       "required": ["id", "userId", "customerName", "customerEmail", "branchId", "category", "subject", "description", "status", "slaDueAt", "isEscalated", "createdAt"]
+    },
+    "expense": {
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "branchId": { "type": "string" },
+        "category": {
+          "type": "string",
+          "enum": [
+            "procurement_raw_materials",
+            "packaging_bottles_droppers",
+            "agricultural_copra_processing",
+            "agricultural_rice_milling",
+            "branch_rent_utilities",
+            "logistics_freight",
+            "practitioner_stipends",
+            "marketing_symposia",
+            "miscellaneous"
+          ]
+        },
+        "description": { "type": "string" },
+        "amount": { "type": "number", "minimum": 0 },
+        "expenseStatus": {
+          "type": "string",
+          "enum": ["paid", "incurred_pending_payment"]
+        },
+        "incurredAt": { "type": "string", "format": "date-time" },
+        "paidAt": { "type": "string", "format": "date-time" },
+        "paymentReference": { "type": "string" },
+        "commodityMetadata": {
+          "type": "object",
+          "properties": {
+            "commodityType": { "type": "string", "enum": ["rice", "copra"] },
+            "volumeKg": { "type": "number" },
+            "acquisitionCostPerKg": { "type": "number" },
+            "millingOrDryingFee": { "type": "number" },
+            "notes": { "type": "string" }
+          }
+        },
+        "recordedByUid": { "type": "string" },
+        "recordedByName": { "type": "string" },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["id", "branchId", "category", "description", "amount", "expenseStatus", "incurredAt", "recordedByUid", "createdAt"]
     }
   },
   "firestore": {
@@ -212,6 +257,10 @@
     "/support_tickets/{ticketId}": {
       "schema": "support_ticket",
       "description": "Consumer dispute and redress tickets under RA 11967."
+    },
+    "/expenses/{expenseId}": {
+      "schema": "expense",
+      "description": "Branch expenses, procurement, and agricultural commodity processing costs."
     }
   }
 }
