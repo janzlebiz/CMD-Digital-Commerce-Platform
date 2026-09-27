@@ -8,6 +8,7 @@ process.env.NODE_ENV = 'test';
 import {
   createExpressApp,
   SEED_WORKSHOPS,
+  getHmacSecret,
   generateRegistrationSignature,
   verifyRegistrationSignature,
 } from '../server';
@@ -69,12 +70,14 @@ function createTestHarness(options: {
   users?: Record<string, any>;
   workshops?: Record<string, any>;
   registrations?: Record<string, any>;
+  simulateConcurrencyDelayMs?: number;
 } = {}) {
   const usersStore = new Map<string, any>(Object.entries(options.users || {}));
   const workshopsStore = new Map<string, any>(Object.entries(options.workshops || {}));
   const registrationsStore = new Map<string, any>(Object.entries(options.registrations || {}));
   const auditLogsStore = new Map<string, any>();
   const docVersions = new Map<string, number>();
+  let occConflictCount = 0;
 
   const mockDb: any = {
     _getStoreForCollection: (colName: string) => {
@@ -84,72 +87,91 @@ function createTestHarness(options: {
       if (colName === 'audit_logs') return auditLogsStore;
       return new Map<string, any>();
     },
-    runTransaction: async (updateFunction: (transaction: any) => Promise<any>) => {
-      const readVersions = new Map<string, number>();
-      const writtenDocs = new Map<string, any>();
-      const deletedDocs = new Set<string>();
+    runTransaction: async (updateFunction: (transaction: any) => Promise<any>, maxAttempts = 5) => {
+      let attempt = 0;
+      while (attempt < maxAttempts) {
+        attempt++;
+        const readVersions = new Map<string, number>();
+        const writtenDocs = new Map<string, any>();
+        const deletedDocs = new Set<string>();
 
-      const transaction = {
-        get: async (refOrQuery: any) => {
-          if (!refOrQuery) return null;
+        const transaction = {
+          get: async (refOrQuery: any) => {
+            if (!refOrQuery) return null;
 
-          if (typeof refOrQuery.get === 'function' && refOrQuery._docId) {
-            const path = `${refOrQuery._colName}/${refOrQuery._docId}`;
-            const currentVer = docVersions.get(path) || 1;
-            readVersions.set(path, currentVer);
-            return await refOrQuery.get();
-          }
+            if (options.simulateConcurrencyDelayMs && attempt === 1) {
+              await new Promise((resolve) => setTimeout(resolve, options.simulateConcurrencyDelayMs));
+            }
 
-          if (typeof refOrQuery.get === 'function') {
-            const colName = refOrQuery._colName;
-            const store = mockDb._getStoreForCollection(colName);
-            for (const docId of store.keys()) {
-              const path = `${colName}/${docId}`;
+            if (typeof refOrQuery.get === 'function' && refOrQuery._docId) {
+              const path = `${refOrQuery._colName}/${refOrQuery._docId}`;
               const currentVer = docVersions.get(path) || 1;
               readVersions.set(path, currentVer);
+              return await refOrQuery.get();
             }
-            return await refOrQuery.get();
+
+            if (typeof refOrQuery.get === 'function') {
+              const colName = refOrQuery._colName;
+              const store = mockDb._getStoreForCollection(colName);
+              for (const docId of store.keys()) {
+                const path = `${colName}/${docId}`;
+                const currentVer = docVersions.get(path) || 1;
+                readVersions.set(path, currentVer);
+              }
+              return await refOrQuery.get();
+            }
+            return null;
+          },
+          set: (docRef: any, data: any) => {
+            writtenDocs.set(`${docRef._colName}/${docRef._docId}`, data);
+          },
+          update: (docRef: any, data: any) => {
+            const path = `${docRef._colName}/${docRef._docId}`;
+            const existing = docRef._getStore().get(docRef._docId) || {};
+            writtenDocs.set(path, { ...existing, ...data });
+          },
+          delete: (docRef: any) => {
+            deletedDocs.add(`${docRef._colName}/${docRef._docId}`);
           }
-          return null;
-        },
-        set: (docRef: any, data: any) => {
-          writtenDocs.set(`${docRef._colName}/${docRef._docId}`, data);
-        },
-        update: (docRef: any, data: any) => {
-          const path = `${docRef._colName}/${docRef._docId}`;
-          const existing = docRef._getStore().get(docRef._docId) || {};
-          writtenDocs.set(path, { ...existing, ...data });
-        },
-        delete: (docRef: any) => {
-          deletedDocs.add(`${docRef._colName}/${docRef._docId}`);
+        };
+
+        // Execute updateFunction inside simulated OCC transaction
+        const result = await updateFunction(transaction);
+
+        // Verify versions to check for concurrent write conflicts
+        let hasConflict = false;
+        for (const [path, expectedVer] of readVersions.entries()) {
+          const actualVer = docVersions.get(path) || 1;
+          if (actualVer !== expectedVer) {
+            hasConflict = true;
+            break;
+          }
         }
-      };
 
-      // Execute updateFunction inside simulated OCC transaction
-      const result = await updateFunction(transaction);
-
-      // Verify versions to check for concurrent write conflicts
-      for (const [path, expectedVer] of readVersions.entries()) {
-        const actualVer = docVersions.get(path) || 1;
-        if (actualVer !== expectedVer) {
-          throw new Error('FAILED_PRECONDITION: Transaction conflict detected.');
+        if (hasConflict) {
+          occConflictCount++;
+          if (attempt >= maxAttempts) {
+            throw new Error('FAILED_PRECONDITION: Transaction conflict detected after max retries.');
+          }
+          await new Promise((r) => setTimeout(r, 10 * attempt));
+          continue;
         }
-      }
 
-      // Apply changes atomically
-      for (const [path, data] of writtenDocs.entries()) {
-        const [colName, docId] = path.split('/');
-        mockDb.collection(colName).doc(docId).set(data);
-        docVersions.set(path, (docVersions.get(path) || 1) + 1);
-      }
-      for (const path of deletedDocs) {
-        const [colName, docId] = path.split('/');
-        const store = mockDb._getStoreForCollection(colName);
-        store.delete(docId);
-        docVersions.set(path, (docVersions.get(path) || 1) + 1);
-      }
+        // Apply changes atomically
+        for (const [path, data] of writtenDocs.entries()) {
+          const [colName, docId] = path.split('/');
+          mockDb.collection(colName).doc(docId).set(data);
+          docVersions.set(path, (docVersions.get(path) || 1) + 1);
+        }
+        for (const path of deletedDocs) {
+          const [colName, docId] = path.split('/');
+          const store = mockDb._getStoreForCollection(colName);
+          store.delete(docId);
+          docVersions.set(path, (docVersions.get(path) || 1) + 1);
+        }
 
-      return result;
+        return result;
+      }
     },
     collection: (colName: string) => {
       const store = mockDb._getStoreForCollection(colName);
@@ -238,12 +260,25 @@ function createTestHarness(options: {
     verifyIdToken: async (token: string) => {
       if (token === 'PATIENT_ALICE_TOKEN') return { uid: 'patient-alice-uid', email: 'alice@example.com' };
       if (token === 'PATIENT_BOB_TOKEN') return { uid: 'patient-bob-uid', email: 'bob@example.com' };
-      if (token === 'STAFF_MANAGER_TOKEN') return { uid: 'staff-manager-uid', email: 'manager@example.com' };
+      if (token === 'STAFF_DAET_MANAGER_TOKEN') return { uid: 'staff-daet-manager-uid', email: 'daet_mgr@example.com' };
+      if (token === 'STAFF_LABO_MANAGER_TOKEN') return { uid: 'staff-labo-manager-uid', email: 'labo_mgr@example.com' };
+      if (token === 'STAFF_REGIONAL_DIRECTOR_TOKEN') return { uid: 'staff-regional-director-uid', email: 'rd@example.com' };
+      if (token === 'STAFF_SUPER_ADMIN_TOKEN') return { uid: 'staff-super-admin-uid', email: 'super@example.com' };
+      if (token === 'STAFF_MANAGER_TOKEN') return { uid: 'staff-daet-manager-uid', email: 'daet_mgr@example.com' };
       throw new Error('Invalid Mock Token');
     },
   };
 
-  return { mockDb, mockAuth, usersStore, workshopsStore, registrationsStore, auditLogsStore, docVersions };
+  return {
+    mockDb,
+    mockAuth,
+    usersStore,
+    workshopsStore,
+    registrationsStore,
+    auditLogsStore,
+    docVersions,
+    getOccConflictCount: () => occConflictCount,
+  };
 }
 
 async function runPhase6BTests() {
@@ -371,12 +406,13 @@ async function runPhase6BTests() {
     }
   }
 
-  // --- SECTION 4: Concurrency and Waitlist Management ---
+  // --- SECTION 4: Genuine Concurrency & Waitlist Management ---
   {
-    console.log('\n--- Running Section 4: Concurrency & Waitlist Management ---');
+    console.log('\n--- Running Section 4: Genuine Concurrency & Waitlist Management ---');
     
-    // Create workshop with low capacity of 1
+    // Create workshop with capacity of 1 and configure concurrency delay to exercise OCC
     const harness = createTestHarness({
+      simulateConcurrencyDelayMs: 25,
       users: {
         'patient-alice-uid': { role: 'customer', email: 'alice@example.com' },
         'patient-bob-uid': { role: 'customer', email: 'bob@example.com' },
@@ -411,54 +447,86 @@ async function runPhase6BTests() {
         customerPhone: '+639171112244',
       };
 
-      // Alice registers first
-      const resA = await makeRequest(
-        server,
-        '/api/workshops/register',
-        'POST',
-        payloadAlice,
-        { Authorization: 'Bearer PATIENT_ALICE_TOKEN' }
-      );
+      // Execute genuine concurrent registration requests using Promise.all
+      const [resA, resB] = await Promise.all([
+        makeRequest(
+          server,
+          '/api/workshops/register',
+          'POST',
+          payloadAlice,
+          { Authorization: 'Bearer PATIENT_ALICE_TOKEN' }
+        ),
+        makeRequest(
+          server,
+          '/api/workshops/register',
+          'POST',
+          payloadBob,
+          { Authorization: 'Bearer PATIENT_BOB_TOKEN' }
+        ),
+      ]);
 
-      // Bob registers second (triggers waitlist transition)
-      const resB = await makeRequest(
-        server,
-        '/api/workshops/register',
-        'POST',
-        payloadBob,
-        { Authorization: 'Bearer PATIENT_BOB_TOKEN' }
-      );
+      assert(resA.status === 201 && resB.status === 201, '4.1 Both concurrent registration requests complete with HTTP 201');
 
-      assert(resA.status === 201 && resA.data.registration.status === 'confirmed', '4.1 First registration is allocated a confirmed seat');
-      assert(resB.status === 201 && resB.data.registration.status === 'waitlisted', '4.2 Second registration on filled capacity is automatically waitlisted');
-      assert(resB.data.workshop.seatsAllocated === 1, '4.3 Workshop allocated seats cap at the maximum capacity (1)');
-      assert(resB.data.workshop.waitlistCount === 1, '4.4 Workshop waitlist counter correctly registers 1 waitlisted participant');
+      const statuses = [resA.data.registration.status, resB.data.registration.status];
+      const confirmedCount = statuses.filter(s => s === 'confirmed').length;
+      const waitlistedCount = statuses.filter(s => s === 'waitlisted').length;
+
+      assert(confirmedCount === 1, '4.2 Exactly 1 confirmed registration allocated between concurrent requests');
+      assert(waitlistedCount === 1, '4.3 Exactly 1 waitlisted registration allocated once capacity is reached');
+
+      const updatedWorkshop = harness.workshopsStore.get('wk-01-daet');
+      assert(updatedWorkshop.seatsAllocated === 1, '4.4 Workshop seatsAllocated never exceeds capacity (1)');
+      assert(updatedWorkshop.waitlistCount === 1, '4.5 Workshop waitlistCount is accurately incremented to 1');
+      assert(harness.getOccConflictCount() >= 1, '4.6 Transaction/OCC conflict path exercised with overlapping transactions and retry');
     } finally {
       server.close();
     }
   }
 
-  // --- SECTION 5: Staff Mobile Attendance Check-In Verification ---
+  // --- SECTION 5: Staff Mobile Attendance Check-In & Branch Isolation ---
   {
-    console.log('\n--- Running Section 5: Staff Attendance Check-In API ---');
+    console.log('\n--- Running Section 5: Staff Attendance Check-In & Branch Isolation ---');
 
-    const confirmedRegId = 'REG-CONFIRMED-01';
+    const daetRegId = 'REG-CONFIRMED-DAET-01';
     const waitlistedRegId = 'REG-WAITLISTED-02';
+    const capalongaRegId = 'REG-CONFIRMED-CAP-03';
 
     const harness = createTestHarness({
       users: {
         'patient-alice-uid': { role: 'customer', email: 'alice@example.com' },
-        'staff-manager-uid': { role: 'branch_manager', email: 'manager@example.com', assignedBranchId: 'daet' },
+        'patient-bob-uid': { role: 'customer', email: 'bob@example.com' },
+        'staff-daet-manager-uid': { role: 'branch_manager', email: 'daet_mgr@example.com', assignedBranchId: 'daet' },
+        'staff-labo-manager-uid': { role: 'branch_manager', email: 'labo_mgr@example.com', assignedBranchId: 'labo' },
+        'staff-regional-director-uid': { role: 'regional_director', email: 'rd@example.com', assignedBranchId: 'central' },
+        'staff-super-admin-uid': { role: 'super_admin', email: 'super@example.com', assignedBranchId: 'central' },
+      },
+      workshops: {
+        'wk-01-daet': {
+          id: 'wk-01-daet',
+          title: 'Daet Trace Mineral Science',
+          branchId: 'daet',
+          capacity: 10,
+          seatsAllocated: 2,
+          waitlistCount: 1,
+        },
+        'wk-03-capalonga': {
+          id: 'wk-03-capalonga',
+          title: 'Capalonga Coastal Symposium',
+          branchId: 'capalonga',
+          capacity: 30,
+          seatsAllocated: 1,
+          waitlistCount: 0,
+        },
       },
       registrations: {
-        [confirmedRegId]: {
-          id: confirmedRegId,
+        [daetRegId]: {
+          id: daetRegId,
           userId: 'patient-alice-uid',
           workshopId: 'wk-01-daet',
           customerName: 'Alice Dela Cruz',
           customerEmail: 'alice@example.com',
           status: 'confirmed',
-          signature: generateRegistrationSignature(confirmedRegId, 'patient-alice-uid', 'wk-01-daet', 'confirmed'),
+          signature: generateRegistrationSignature(daetRegId, 'patient-alice-uid', 'wk-01-daet', 'confirmed'),
         },
         [waitlistedRegId]: {
           id: waitlistedRegId,
@@ -469,6 +537,15 @@ async function runPhase6BTests() {
           status: 'waitlisted',
           signature: generateRegistrationSignature(waitlistedRegId, 'patient-bob-uid', 'wk-01-daet', 'waitlisted'),
         },
+        [capalongaRegId]: {
+          id: capalongaRegId,
+          userId: 'patient-alice-uid',
+          workshopId: 'wk-03-capalonga',
+          customerName: 'Alice Dela Cruz',
+          customerEmail: 'alice@example.com',
+          status: 'confirmed',
+          signature: generateRegistrationSignature(capalongaRegId, 'patient-alice-uid', 'wk-03-capalonga', 'confirmed'),
+        },
       },
     });
 
@@ -476,57 +553,127 @@ async function runPhase6BTests() {
     const server = http.createServer(app).listen(0);
 
     try {
-      const signatureA = harness.registrationsStore.get(confirmedRegId).signature;
+      const signatureDaet = harness.registrationsStore.get(daetRegId).signature;
 
       // 5.1 Ordinary customer blocked from check-in action
       const customerScanRes = await makeRequest(
         server,
         '/api/workshops/check-in',
         'POST',
-        { registrationId: confirmedRegId, signature: signatureA },
+        { registrationId: daetRegId, signature: signatureDaet },
         { Authorization: 'Bearer PATIENT_ALICE_TOKEN' }
       );
       assert(customerScanRes.status === 403, '5.1 Ordinary customer blocked from administrative check-in (HTTP 403)');
 
-      // 5.2 Forged signatures are blocked
+      // 5.2 Branch Isolation: Labo branch manager attempting to check in Daet workshop attendee is BLOCKED with HTTP 403
+      const crossBranchRes = await makeRequest(
+        server,
+        '/api/workshops/check-in',
+        'POST',
+        { registrationId: daetRegId, signature: signatureDaet },
+        { Authorization: 'Bearer STAFF_LABO_MANAGER_TOKEN' }
+      );
+      assert(crossBranchRes.status === 403, '5.2 Cross-branch check-in by branch manager blocked with HTTP 403');
+      assert(crossBranchRes.data.error.includes('not authorized to check in participants for workshop'), '5.3 Rejection error specifies branch manager unauthorized for cross-branch check-in');
+
+      // 5.3 Authorized same-branch check-in: Daet branch manager checks in Daet workshop attendee
+      const sameBranchRes = await makeRequest(
+        server,
+        '/api/workshops/check-in',
+        'POST',
+        { registrationId: daetRegId, signature: signatureDaet },
+        { Authorization: 'Bearer STAFF_DAET_MANAGER_TOKEN' }
+      );
+      assert(sameBranchRes.status === 200, '5.4 Same-branch manager check-in succeeds with HTTP 200');
+      assert(sameBranchRes.data.registration.status === 'attended', '5.5 Participant registration status updated to ATTENDED');
+
+      const updatedSig = sameBranchRes.data.registration.signature;
+      const reCalculatedSig = generateRegistrationSignature(daetRegId, 'patient-alice-uid', 'wk-01-daet', 'attended');
+      assert(updatedSig === reCalculatedSig, '5.6 Attendee pass signature dynamically recalculated for ATTENDED state');
+
+      // 5.4 Cross-branch capability: Regional Director can check in attendees across branches (Capalonga)
+      const capalongaSig = harness.registrationsStore.get(capalongaRegId).signature;
+      const rdCheckInRes = await makeRequest(
+        server,
+        '/api/workshops/check-in',
+        'POST',
+        { registrationId: capalongaRegId, signature: capalongaSig },
+        { Authorization: 'Bearer STAFF_REGIONAL_DIRECTOR_TOKEN' }
+      );
+      assert(rdCheckInRes.status === 200, '5.7 Regional Director cross-branch check-in succeeds with HTTP 200');
+      assert(rdCheckInRes.data.registration.status === 'attended', '5.8 Capalonga participant verified by Regional Director');
+
+      // 5.5 Forged or tampered signatures are blocked
       const forgedScanRes = await makeRequest(
         server,
         '/api/workshops/check-in',
         'POST',
-        { registrationId: confirmedRegId, signature: 'FORGED_HMAC_SIGNATURE_HEX_STRING_FORGED_HMAC_SIGNATURE_HEX_STR' },
-        { Authorization: 'Bearer STAFF_MANAGER_TOKEN' }
+        { registrationId: daetRegId, signature: 'FORGED_HMAC_SIGNATURE_HEX_STRING_FORGED_HMAC_SIGNATURE_HEX_STR' },
+        { Authorization: 'Bearer STAFF_DAET_MANAGER_TOKEN' }
       );
-      assert(forgedScanRes.status === 400, '5.2 Forged or tampered attendance pass signatures are rejected with HTTP 400');
-      assert(forgedScanRes.data.error.includes('Signature Verification Failed'), '5.3 Rejected check-in specifies cryptographic verification failure');
+      assert(forgedScanRes.status === 400, '5.9 Forged or tampered attendance pass signatures are rejected with HTTP 400');
+      assert(forgedScanRes.data.error.includes('Signature Verification Failed'), '5.10 Rejected check-in specifies cryptographic verification failure');
 
-      // 5.3 Valid signatures successfully complete check-in
-      const staffScanRes = await makeRequest(
-        server,
-        '/api/workshops/check-in',
-        'POST',
-        { registrationId: confirmedRegId, signature: signatureA },
-        { Authorization: 'Bearer STAFF_MANAGER_TOKEN' }
-      );
-      assert(staffScanRes.status === 200, '5.4 Staff check-in on confirmed registration succeeds with HTTP 200');
-      assert(staffScanRes.data.registration.status === 'attended', '5.5 Participant registration status correctly updated to ATTENDED');
-
-      const updatedSig = staffScanRes.data.registration.signature;
-      const reCalculatedSig = generateRegistrationSignature(confirmedRegId, 'patient-alice-uid', 'wk-01-daet', 'attended');
-      assert(updatedSig === reCalculatedSig, '5.6 Attendee pass signature is dynamically recalculated to reflect the ATTENDED state');
-
-      // 5.4 Waitlisted participant check-in is refused
+      // 5.6 Waitlisted participant check-in is refused
       const signatureB = harness.registrationsStore.get(waitlistedRegId).signature;
       const waitlistScanRes = await makeRequest(
         server,
         '/api/workshops/check-in',
         'POST',
         { registrationId: waitlistedRegId, signature: signatureB },
-        { Authorization: 'Bearer STAFF_MANAGER_TOKEN' }
+        { Authorization: 'Bearer STAFF_DAET_MANAGER_TOKEN' }
       );
-      assert(waitlistScanRes.status === 400, '5.7 Waitlisted participant check-in is refused with HTTP 400');
-      assert(waitlistScanRes.data.error.includes('Waitlisted participants are not confirmed'), '5.8 Waitlisted check-in refusal returns clear warning text');
+      assert(waitlistScanRes.status === 400, '5.11 Waitlisted participant check-in is refused with HTTP 400');
+      assert(waitlistScanRes.data.error.includes('Waitlisted participants are not confirmed'), '5.12 Waitlisted check-in refusal returns clear warning text');
     } finally {
       server.close();
+    }
+  }
+
+  // --- SECTION 6: HMAC Secret Hardening & Fail-Closed Behavior ---
+  {
+    console.log('\n--- Running Section 6: HMAC Secret Hardening & Fail-Closed Behavior ---');
+
+    const originalEnv = process.env.NODE_ENV;
+    const originalSecret = process.env.HMAC_SECRET;
+
+    try {
+      // 6.1 Test environment returns test secret without failure
+      process.env.NODE_ENV = 'test';
+      delete process.env.HMAC_SECRET;
+      const testSecret = getHmacSecret();
+      assert(testSecret.includes('TEST_ENVIRONMENT'), '6.1 Test environment provides isolated test-only HMAC secret');
+
+      // 6.2 Production environment FAILS CLOSED when HMAC_SECRET is missing
+      process.env.NODE_ENV = 'production';
+      delete process.env.HMAC_SECRET;
+      let threwInProd = false;
+      let errorMsg = '';
+      try {
+        getHmacSecret();
+      } catch (err: any) {
+        threwInProd = true;
+        errorMsg = err.message;
+      }
+      assert(threwInProd === true, '6.2 Production fails closed when HMAC_SECRET is missing');
+      assert(errorMsg.includes('FATAL SECURITY ERROR'), '6.3 Fatal security error thrown in production when HMAC_SECRET is absent');
+
+      // 6.3 Production environment succeeds when configured with non-empty HMAC_SECRET
+      process.env.NODE_ENV = 'production';
+      process.env.HMAC_SECRET = 'PROD_SECURE_HMAC_KEY_EXPLICITLY_PROVIDED_2026';
+      const prodSecret = getHmacSecret();
+      assert(prodSecret === 'PROD_SECURE_HMAC_KEY_EXPLICITLY_PROVIDED_2026', '6.4 Production uses configured HMAC_SECRET accurately');
+
+      const prodSignature = generateRegistrationSignature('REG-PROD-01', 'user-123', 'wk-01', 'confirmed');
+      assert(typeof prodSignature === 'string' && prodSignature.length === 64, '6.5 Production generates valid SHA256 signature when secret is configured');
+    } finally {
+      // Restore original environment
+      process.env.NODE_ENV = originalEnv;
+      if (originalSecret !== undefined) {
+        process.env.HMAC_SECRET = originalSecret;
+      } else {
+        delete process.env.HMAC_SECRET;
+      }
     }
   }
 

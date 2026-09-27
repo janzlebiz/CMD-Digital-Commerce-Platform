@@ -113,7 +113,24 @@ export const PRACTITIONER_ROSTER: Record<string, {
   },
 };
 
-export const HMAC_SECRET = process.env.HMAC_SECRET || 'HCI_CMD_QR_SECRET_2026_CAMARINES_NORTE_HMAC';
+export function getHmacSecret(): string {
+  if (process.env.HMAC_SECRET && process.env.HMAC_SECRET.trim().length > 0) {
+    return process.env.HMAC_SECRET.trim();
+  }
+
+  // Fail closed immediately in production if HMAC_SECRET is missing or empty
+  if (process.env.NODE_ENV === 'production') {
+    throw new Error('FATAL SECURITY ERROR: HMAC_SECRET environment variable is missing in production. System failing closed.');
+  }
+
+  // Test-only secret for automated test environments
+  if (process.env.NODE_ENV === 'test') {
+    return 'TEST_ENVIRONMENT_ONLY_HMAC_SECRET_NON_PRODUCTION_0123456789';
+  }
+
+  // Development fallback for local prototyping
+  return 'DEV_ENVIRONMENT_ONLY_HMAC_SECRET_NON_PRODUCTION_FALLBACK';
+}
 
 export const SEED_WORKSHOPS = [
   {
@@ -155,8 +172,9 @@ export const SEED_WORKSHOPS = [
 ];
 
 export function generateRegistrationSignature(registrationId: string, userId: string, workshopId: string, status: string): string {
+  const secret = getHmacSecret();
   const payload = `${registrationId}:${userId}:${workshopId}:${status}`;
-  return crypto.createHmac('sha256', HMAC_SECRET).update(payload).digest('hex');
+  return crypto.createHmac('sha256', secret).update(payload).digest('hex');
 }
 
 export function verifyRegistrationSignature(registrationId: string, userId: string, workshopId: string, status: string, signature: string): boolean {
@@ -1066,6 +1084,38 @@ export function createExpressApp(deps: ServerDependencies = {}): Express {
 
       const reg = regDoc.data();
 
+      // Retrieve associated workshop to verify branch ownership
+      const workshopDoc = await db.collection('workshops').doc(reg.workshopId).get();
+      if (!workshopDoc.exists) {
+        res.status(404).json({ error: `Associated workshop not found: ${reg.workshopId}` });
+        return;
+      }
+      const workshop = workshopDoc.data();
+
+      // Enforce strict branch isolation:
+      // - branch_manager may check in participants ONLY for workshops belonging to their assignedBranchId
+      // - regional_director may operate across branches
+      // - super_admin may operate across branches
+      if (user.role === 'branch_manager') {
+        if (!user.assignedBranchId || user.assignedBranchId !== workshop.branchId) {
+          await logAuditEvent(
+            user.uid,
+            user.role,
+            user.assignedBranchId || 'unassigned',
+            'workshop_checkin_cross_branch_blocked',
+            'workshop_registrations',
+            registrationId,
+            false,
+            { reason: 'cross_branch_forbidden', targetWorkshopBranch: workshop.branchId },
+            req
+          );
+          res.status(403).json({
+            error: `Access Denied: Branch manager (${user.assignedBranchId || 'unassigned'}) is not authorized to check in participants for workshop at '${workshop.branchId}'.`
+          });
+          return;
+        }
+      }
+
       // Recalculate HMAC-SHA256 signature over original registration state to verify authenticity
       const isValid = verifyRegistrationSignature(registrationId, reg.userId, reg.workshopId, reg.status, signature);
       if (!isValid) {
@@ -1098,7 +1148,7 @@ export function createExpressApp(deps: ServerDependencies = {}): Express {
         updatedAt: new Date().toISOString()
       });
 
-      await logAuditEvent(user.uid, user.role, user.assignedBranchId || 'central', 'workshop_attended', 'workshop_registrations', registrationId, true, { originalStatus: reg.status }, req);
+      await logAuditEvent(user.uid, user.role, workshop.branchId, 'workshop_attended', 'workshop_registrations', registrationId, true, { originalStatus: reg.status }, req);
 
       res.status(200).json({
         success: true,
@@ -1170,6 +1220,11 @@ export function createExpressApp(deps: ServerDependencies = {}): Express {
 
 // Start Server & Mount Vite in Dev Mode
 async function startServer() {
+  if (process.env.NODE_ENV === 'production') {
+    // Fail-closed security validation on boot
+    getHmacSecret();
+  }
+
   const app = createExpressApp();
   const PORT = 3000;
 
