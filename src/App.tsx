@@ -26,6 +26,7 @@ import { CartView } from './views/CartView';
 import { CheckoutView } from './views/CheckoutView';
 import { OrdersView } from './views/OrdersView';
 import { AdminDashboardView } from './views/AdminDashboardView';
+import { ConsultationsView } from './views/ConsultationsView';
 import { useEcommerce } from './hooks/useEcommerce';
 import { AuthProvider } from './context/AuthContext';
 
@@ -41,7 +42,6 @@ function MainLayout() {
   const [currentView, setCurrentView] = useState<PageView>('home');
   const ecommerce = useEcommerce();
 
-  // Sync route with URL hash for bookmarking and browser back/forward buttons
   useEffect(() => {
     const handleHashChange = () => {
       const hash = window.location.hash.replace('#', '') as PageView;
@@ -60,6 +60,7 @@ function MainLayout() {
         'cart',
         'checkout',
         'orders',
+        'consultations',
         'admin',
       ];
       if (validViews.includes(hash)) {
@@ -69,16 +70,15 @@ function MainLayout() {
       }
     };
 
-    // Initial check
+    window.addEventListener('hashchange', handleHashChange);
     handleHashChange();
 
-    window.addEventListener('hashchange', handleHashChange);
     return () => window.removeEventListener('hashchange', handleHashChange);
   }, []);
 
   const handleNavigate = (view: PageView) => {
     setCurrentView(view);
-    window.location.hash = view === 'home' ? '' : view;
+    window.location.hash = view;
     window.scrollTo({ top: 0, behavior: 'smooth' });
   };
 
@@ -91,14 +91,7 @@ function MainLayout() {
       case 'education':
         return <EducationView onNavigate={handleNavigate} />;
       case 'products':
-        return (
-          <ProductsView
-            onNavigate={handleNavigate}
-            addToCart={ecommerce.addToCart}
-            getStockLevel={ecommerce.getStockLevel}
-            getSkuPrice={ecommerce.getSkuPrice}
-          />
-        );
+        return <ProductsView onNavigate={handleNavigate} addToCart={ecommerce.addToCart} />;
       case 'branches':
         return <BranchesView onNavigate={handleNavigate} />;
       case 'faq':
@@ -113,19 +106,15 @@ function MainLayout() {
         return <PrivacyView onNavigate={handleNavigate} />;
       case 'returns':
         return <ReturnsView onNavigate={handleNavigate} />;
-      
-      // Phase 2 cases
       case 'cart':
         return (
           <CartView
             cart={ecommerce.cart}
             onNavigate={handleNavigate}
-            updateCartQuantity={ecommerce.updateCartQuantity}
-            removeFromCart={ecommerce.removeFromCart}
             getSkuPrice={ecommerce.getSkuPrice}
-            getStockLevel={ecommerce.getStockLevel}
-            vatConfig={ecommerce.vatConfig}
-            setVatConfig={ecommerce.setVatConfig}
+            updateQuantity={ecommerce.updateQuantity}
+            removeFromCart={ecommerce.removeFromCart}
+            calculateTotals={ecommerce.calculateTotals}
           />
         );
       case 'checkout':
@@ -152,6 +141,8 @@ function MainLayout() {
             restockAll={ecommerce.restockAll}
           />
         );
+      case 'consultations':
+        return <ConsultationsView />;
       case 'admin':
         return <AdminDashboardView onNavigate={handleNavigate} />;
       default:
@@ -163,18 +154,11 @@ function MainLayout() {
 
   return (
     <div className="min-h-screen bg-slate-950 text-slate-100 flex flex-col font-sans selection:bg-amber-500 selection:text-slate-950">
-      {/* Top Statutory Regulatory Advisory */}
       <StatutoryBanner />
-
-      {/* Responsive Main Navigation Header */}
       <Navbar currentView={currentView} onNavigate={handleNavigate} cartCount={totalCartCount} />
-
-      {/* Main Content Area */}
       <main id="main-content" className="flex-1 focus:outline-none">
         {renderCurrentView()}
       </main>
-
-      {/* Comprehensive Legal, Branch Directory & Compliance Footer */}
       <Footer onNavigate={handleNavigate} />
     </div>
   );

@@ -18,7 +18,65 @@ export type PageView =
   | 'cart'
   | 'checkout'
   | 'orders'
+  | 'consultations'
   | 'admin';
+
+export type UserRole = 'customer' | 'practitioner' | 'branch_manager' | 'regional_director' | 'super_admin';
+
+export interface UserProfile {
+  uid: string;
+  email: string;
+  firstName?: string;
+  lastName?: string;
+  role: UserRole;
+  assignedBranchId?: string;
+  createdAt?: string;
+}
+
+export type OrderPaymentStatus = 'pending_payment' | 'payment_verification_required' | 'paid' | 'payment_failed';
+export type OrderFulfillmentStatus = 'pending_processing' | 'ready_for_pickup' | 'in_transit' | 'completed' | 'cancelled';
+export type DeliveryMethod = 'branch_pickup' | 'door_to_door';
+export type PaymentMethod = 'cash_on_delivery' | 'cash_on_pickup' | 'gcash' | 'maya' | 'bank_transfer_bdo';
+
+export interface OrderItem {
+  skuId: string;
+  quantity: number;
+  unitPrice: number;
+  totalPrice: number;
+  productName: string;
+}
+
+export interface CustomerDetails {
+  firstName: string;
+  lastName: string;
+  email: string;
+  mobileNumber: string;
+  shippingAddress?: {
+    barangay: string;
+    municipality: string;
+    province: string;
+    landmark?: string;
+  };
+}
+
+export interface OrderRecord {
+  id: string;
+  userId?: string;
+  customer: CustomerDetails;
+  items: OrderItem[];
+  branchId: string;
+  deliveryMethod: DeliveryMethod;
+  paymentMethod: PaymentMethod;
+  paymentStatus: OrderPaymentStatus;
+  fulfillmentStatus: OrderFulfillmentStatus;
+  subtotal: number;
+  shippingFee: number;
+  taxAmount: number;
+  grandTotal: number;
+  placedAt: string;
+  updatedAt: string;
+  cancellationReason?: string;
+}
 
 export interface AuditLogEntry {
   id: string;
@@ -34,120 +92,46 @@ export interface AuditLogEntry {
   correlationId?: string;
 }
 
-export interface CartItem {
-  skuId: string;
-  quantity: number;
-}
-
-export type PaymentMethod = 'gcash' | 'maya' | 'bank_transfer' | 'cash_on_pickup';
-
-export type FulfillmentMethod = 'pickup' | 'delivery';
-
-export interface CustomerInfo {
-  firstName: string;
-  lastName: string;
-  email: string;
-  phone: string;
-  addressLine1?: string;
-  barangay?: string;
-  municipality: string;
-  province: string;
-}
-
-export interface OrderItem {
-  skuId: string;
+export interface ProductItem {
+  id: string;
   name: string;
+  tagline: string;
   volume: string;
-  quantity: number;
-  unitPrice: number;
-  totalPrice: number;
+  servingSuggestion: string;
+  price: number;
+  description: string;
+  highlights: string[];
+  features: string[];
+  stockCount: number;
 }
 
-export interface Order {
-  id: string;
-  createdAt: string;
-  customer: CustomerInfo;
-  items: OrderItem[];
-  fulfillmentMethod: FulfillmentMethod;
-  pickupBranchId?: string;
-  shippingFee: number;
-  subtotal: number;
-  vatAmount: number;
-  nonVatSales: number;
-  total: number;
-  isVatRegistered: boolean;
-  paymentMethod: PaymentMethod;
-  paymentStatus: 'pending_payment' | 'paid' | 'payment_verification_required';
-  fulfillmentStatus: 'pending_processing' | 'ready_for_pickup' | 'in_transit' | 'completed' | 'cancelled';
-  // VAT breakdown info
-  vatableSales: number;
-  vatExemptSales: number;
-  vatZeroRatedSales: number;
-}
-
-export interface VatConfiguration {
-  isVatRegistered: boolean;
-  vatRatePercent: number; // usually 12
-  isConfiguredByBusiness: boolean; // default false
-}
-
-export interface BranchRecord {
+export interface BranchLocation {
   id: string;
   name: string;
   municipality: string;
-  province: 'Camarines Norte';
-  isCentralHub: boolean;
-  role: string;
-  /** Evidentiary status regarding operational address */
-  addressStatus: 'PENDING_BUSINESS_CONFIRMATION' | 'VERIFIED';
-  addressDisplay: string;
-  addressNote: string;
-  /** Evidentiary status regarding telecommunications contact */
-  phoneStatus: 'PENDING_BUSINESS_CONFIRMATION' | 'VERIFIED';
-  phoneDisplay: string;
-  phoneNote: string;
-  /** Operating hours status */
-  hoursStatus: 'PENDING_OPERATIONAL_AUDIT' | 'VERIFIED';
-  hoursDisplay: string;
-  serviceFeatures: string[];
-  plannedFulfillment: string[];
-  geographicZone: string;
+  address: string;
+  landmark: string;
+  operatingHours: string;
+  phone: string;
+  email: string;
+  pickupSupported: boolean;
+  transitCutoff: string;
 }
 
-export interface SkuRecord {
-  id: string;
+export interface MineralFact {
+  symbol: string;
   name: string;
-  nominalVolume: string;
-  packagingType: string;
-  parentRegistrationNumber: string;
-  registrantCompany: string;
-  /**
-   * Regulatory packaging status under FDA Center for Food Regulation and Research (CFRR)
-   * As determined in Phase 0 audit, FR-4000008713595 covers product formulation,
-   * but packaging volume authorization annex is pending business verification.
-   */
-  fdaStatus: 'FDA_PRESENTATION_EVIDENCE_PENDING_BUSINESS_VERIFICATION';
-  statusDisplay: string;
-  /** Retail pricing status */
-  pricingStatus: 'SRP_PENDING_BUSINESS_CONFIRMATION';
-  pricingDisplay: string;
-  description: string;
-  recommendedUse: string;
-  servingsPerBottle: string;
-  mineralHighlights: string[];
-  keyComposition: {
-    name: string;
-    description: string;
-    nature: string;
-  }[];
+  category: string;
+  percentage: string;
+  biologicalRole: string;
 }
 
-export interface FaqItem {
-  id: string;
-  category: 'regulatory' | 'usage' | 'safety' | 'branches' | 'authenticity';
-  question: string;
-  answer: string;
-  regulatoryAnchor?: string;
+export interface DilutionProtocol {
+  tier: string;
+  targetAudience: string;
+  dropsPerLiter: number;
+  frequency: string;
+  notes: string;
 }
 
 export interface ComplianceArticle {
@@ -158,14 +142,89 @@ export interface ComplianceArticle {
   prohibited: string[];
 }
 
-export type UserRole = 'customer' | 'practitioner' | 'branch_manager' | 'regional_director' | 'super_admin';
+export interface FaqItem {
+  id: string;
+  category: 'regulatory' | 'usage' | 'safety' | 'branches' | 'authenticity';
+  question: string;
+  answer: string;
+  regulatoryAnchor?: string;
+}
 
-export interface UserProfile {
+// Phase 6A Consultation Types
+export type ConsultationServiceCode = 'CNS-IN-PERSON' | 'CNS-VIRTUAL' | 'CNS-FOLLOWUP';
+
+export interface ConsultationService {
+  code: ConsultationServiceCode;
+  title: string;
+  durationMinutes: number;
+  deliveryMode: 'in_person' | 'virtual' | 'hybrid';
+  description: string;
+  supportedBranches?: string[];
+  feeStatus: 'FEE_PENDING_BUSINESS_CONFIRMATION';
+  feeDisplay: string;
+  nonMedicalDisclaimer: string;
+}
+
+export interface PractitionerProfile {
+  id: string;
   uid: string;
-  email: string;
-  firstName?: string;
-  lastName?: string;
-  role: UserRole;
-  assignedBranchId?: string;
-  createdAt?: string;
+  name: string;
+  title: string;
+  bio: string;
+  credentialsStatus: 'CREDENTIALS_PENDING_BUSINESS_CONFIRMATION';
+  certifications: string[];
+  languages: string[];
+  assignedBranches: string[];
+  isAvailableForVirtual: boolean;
+}
+
+export interface ConsultationSlot {
+  slotId: string;
+  practitionerId: string;
+  date: string;
+  startTime: string;
+  endTime: string;
+  isBooked: boolean;
+}
+
+export interface InformedConsentRecord {
+  purpose: string;
+  version: string;
+  timestamp: string;
+  legalBasis: 'RA_10173_SECTION_13_A_EXPLICIT_CONSENT';
+  acknowledgedText: string;
+  withdrawalState: {
+    isWithdrawn: boolean;
+    withdrawnAt?: string;
+  };
+}
+
+export interface ClinicalIntakeData {
+  dietaryHabits: string;
+  waterConsumption: string;
+  lifestyleStress: string;
+  energyLevels: string;
+  declaredConditions: string;
+  hydrationGoals: string;
+}
+
+export interface ConsultationAppointment {
+  id: string;
+  userId: string;
+  customerName: string;
+  customerEmail: string;
+  customerPhone: string;
+  practitionerId: string;
+  practitionerName: string;
+  serviceCode: ConsultationServiceCode;
+  serviceTitle: string;
+  deliveryMode: 'in_person' | 'virtual';
+  branchId?: string;
+  scheduledDate: string;
+  scheduledTime: string;
+  status: 'scheduled' | 'intake_completed' | 'in_consultation' | 'completed' | 'cancelled';
+  intakeId?: string;
+  consentRecord?: InformedConsentRecord;
+  createdAt: string;
+  updatedAt: string;
 }

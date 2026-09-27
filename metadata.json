@@ -1,8 +1,7 @@
 {
-  "name": "CMD Digital Commerce Platform",
-  "description": "Production-oriented digital commerce and wellness platform for HCI CMD / Cell Mineral Drops distribution across Camarines Norte, Philippines.",
-  "requestFramePermissions": [],
-  "majorCapabilities": [
+  "name": "HCI CMD Digital Commerce & Naturopathic Wellness Platform",
+  "description": "Production-grade digital commerce, naturopathic consultation, and branch distribution platform for HCI Cell Mineral Drops (CMD) in Camarines Norte, Philippines.",
+  "permissions": [
     "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"
   ]
 }

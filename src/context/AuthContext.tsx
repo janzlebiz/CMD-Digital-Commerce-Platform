@@ -4,185 +4,80 @@
  */
 
 import React, { createContext, useContext, useState, useEffect } from 'react';
-import {
-  User,
-  onAuthStateChanged,
-  signInWithEmailAndPassword,
-  createUserWithEmailAndPassword,
-  signInWithPopup,
-  GoogleAuthProvider,
-  signOut,
-} from 'firebase/auth';
-import { doc, getDoc, setDoc } from 'firebase/firestore';
-import { auth, db, handleFirestoreError, OperationType } from '../firebase';
-import { UserProfile } from '../types';
+import { UserProfile, UserRole } from '../types';
 
 interface AuthContextType {
-  user: User | null;
+  user: any | null;
   profile: UserProfile | null;
   loading: boolean;
-  error: string | null;
-  registerWithEmail: (email: string, pass: string, firstName: string, lastName: string) => Promise<void>;
-  loginWithEmail: (email: string, pass: string) => Promise<void>;
-  loginWithGoogle: () => Promise<void>;
+  loginDemoUser: (role: UserRole, email: string, branchId?: string) => Promise<void>;
   logout: () => Promise<void>;
-  clearError: () => void;
 }
 
-const AuthContext = createContext<AuthContextType | undefined>(undefined);
+const AuthContext = createContext<AuthContextType>({
+  user: null,
+  profile: null,
+  loading: true,
+  loginDemoUser: async () => {},
+  logout: async () => {},
+});
 
 export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
-  const [user, setUser] = useState<User | null>(null);
+  const [user, setUser] = useState<any | null>(null);
   const [profile, setProfile] = useState<UserProfile | null>(null);
   const [loading, setLoading] = useState<boolean>(true);
-  const [error, setError] = useState<string | null>(null);
 
-  // Sync user profile from Firestore
-  const syncUserProfile = async (firebaseUser: User): Promise<UserProfile> => {
-    const userDocRef = doc(db, 'users', firebaseUser.uid);
-    try {
-      const snap = await getDoc(userDocRef);
-      if (snap.exists()) {
-        const data = snap.data() as UserProfile;
-        setProfile(data);
-        return data;
-      }
-
-      // Profile does not exist yet (e.g. Google Sign-In or new account)
-      const names = (firebaseUser.displayName || '').split(' ');
-      const newProfile: UserProfile = {
-        uid: firebaseUser.uid,
-        email: firebaseUser.email || '',
-        firstName: names[0] || 'Customer',
-        lastName: names.slice(1).join(' ') || '',
-        role: 'customer',
-        createdAt: new Date().toISOString(),
-      };
-
-      await setDoc(userDocRef, newProfile);
-      setProfile(newProfile);
-      return newProfile;
-    } catch (err) {
-      handleFirestoreError(err, OperationType.GET, `users/${firebaseUser.uid}`);
-    }
-  };
-
+  // Initialize demo session from localStorage or default
   useEffect(() => {
-    const unsubscribe = onAuthStateChanged(auth, async (currentUser) => {
-      setUser(currentUser);
-      if (currentUser) {
-        try {
-          await syncUserProfile(currentUser);
-        } catch (err: any) {
-          setError(err.message || 'Failed to load user profile.');
-        }
-      } else {
-        setProfile(null);
+    const savedProfile = localStorage.getItem('hci_cmd_demo_user');
+    if (savedProfile) {
+      try {
+        const parsed = JSON.parse(savedProfile);
+        setProfile(parsed);
+        setUser({
+          uid: parsed.uid,
+          email: parsed.email,
+          getIdToken: async () => `DEMO_TOKEN_${parsed.role.toUpperCase()}`,
+        });
+      } catch {
+        localStorage.removeItem('hci_cmd_demo_user');
       }
-      setLoading(false);
-    });
-
-    return () => unsubscribe();
+    }
+    setLoading(false);
   }, []);
 
-  const registerWithEmail = async (
-    email: string,
-    pass: string,
-    firstName: string,
-    lastName: string
-  ) => {
-    setLoading(true);
-    setError(null);
-    try {
-      const cred = await createUserWithEmailAndPassword(auth, email, pass);
-      const userDocRef = doc(db, 'users', cred.user.uid);
-      const newProfile: UserProfile = {
-        uid: cred.user.uid,
-        email: cred.user.email || email,
-        firstName,
-        lastName,
-        role: 'customer',
-        createdAt: new Date().toISOString(),
-      };
-      await setDoc(userDocRef, newProfile);
-      setProfile(newProfile);
-    } catch (err: any) {
-      setError(err.message || 'Registration failed.');
-      throw err;
-    } finally {
-      setLoading(false);
-    }
-  };
+  const loginDemoUser = async (role: UserRole, email: string, branchId?: string) => {
+    const uid = `demo-${role}-${Date.now().toString().slice(-4)}`;
+    const newProfile: UserProfile = {
+      uid,
+      email,
+      role,
+      assignedBranchId: branchId || (role === 'branch_manager' ? 'daet' : undefined),
+      firstName: role === 'super_admin' ? 'Super' : role === 'practitioner' ? 'Dr. Elena' : 'Client',
+      lastName: role === 'super_admin' ? 'Admin' : role === 'practitioner' ? 'Santos' : 'User',
+      createdAt: new Date().toISOString(),
+    };
 
-  const loginWithEmail = async (email: string, pass: string) => {
-    setLoading(true);
-    setError(null);
-    try {
-      const cred = await signInWithEmailAndPassword(auth, email, pass);
-      await syncUserProfile(cred.user);
-    } catch (err: any) {
-      setError(err.message || 'Login failed.');
-      throw err;
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  const loginWithGoogle = async () => {
-    setLoading(true);
-    setError(null);
-    try {
-      const provider = new GoogleAuthProvider();
-      const cred = await signInWithPopup(auth, provider);
-      await syncUserProfile(cred.user);
-    } catch (err: any) {
-      setError(err.message || 'Google sign-in failed.');
-      throw err;
-    } finally {
-      setLoading(false);
-    }
+    setProfile(newProfile);
+    setUser({
+      uid: newProfile.uid,
+      email: newProfile.email,
+      getIdToken: async () => `DEMO_TOKEN_${newProfile.role.toUpperCase()}`,
+    });
+    localStorage.setItem('hci_cmd_demo_user', JSON.stringify(newProfile));
   };
 
   const logout = async () => {
-    setLoading(true);
-    setError(null);
-    try {
-      await signOut(auth);
-      setUser(null);
-      setProfile(null);
-    } catch (err: any) {
-      setError(err.message || 'Logout failed.');
-      throw err;
-    } finally {
-      setLoading(false);
-    }
+    setUser(null);
+    setProfile(null);
+    localStorage.removeItem('hci_cmd_demo_user');
   };
 
-  const clearError = () => setError(null);
-
   return (
-    <AuthContext.Provider
-      value={{
-        user,
-        profile,
-        loading,
-        error,
-        registerWithEmail,
-        loginWithEmail,
-        loginWithGoogle,
-        logout,
-        clearError,
-      }}
-    >
+    <AuthContext.Provider value={{ user, profile, loading, loginDemoUser, logout }}>
       {children}
     </AuthContext.Provider>
   );
 };
 
-export const useAuth = () => {
-  const context = useContext(AuthContext);
-  if (!context) {
-    throw new Error('useAuth must be used within an AuthProvider');
-  }
-  return context;
-};
+export const useAuth = () => useContext(AuthContext);

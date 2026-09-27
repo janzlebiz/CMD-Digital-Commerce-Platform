@@ -2,12 +2,6 @@ rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
 
-    // Global Safety Net: Default deny catch-all
-    match /{document=**} {
-      allow read, write: if false;
-    }
-
-    // --- REUSABLE SECURITY PRIMITIVES ---
     function isSignedIn() {
       return request.auth != null;
     }
@@ -16,118 +10,71 @@ service cloud.firestore {
       return isSignedIn() && request.auth.uid == userId;
     }
 
-    function getUserData() {
-      return get(/databases/$(database)/documents/users/$(request.auth.uid)).data;
-    }
-
-    function getUserRole() {
-      return getUserData().role;
-    }
-
-    function getAssignedBranch() {
-      return getUserData().assignedBranchId;
-    }
-
-    function hasRole(role) {
-      return isSignedIn() && getUserRole() == role;
-    }
-
-    function isSuperAdmin() {
-      return hasRole('super_admin');
+    function isBranchManager() {
+      return isSignedIn() &&
+        exists(/databases/$(database)/documents/users/$(request.auth.uid)) &&
+        get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'branch_manager';
     }
 
     function isRegionalDirector() {
-      return hasRole('regional_director');
+      return isSignedIn() &&
+        exists(/databases/$(database)/documents/users/$(request.auth.uid)) &&
+        get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'regional_director';
     }
 
-    function isBranchManager() {
-      return hasRole('branch_manager');
+    function isSuperAdmin() {
+      return isSignedIn() &&
+        exists(/databases/$(database)/documents/users/$(request.auth.uid)) &&
+        get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'super_admin';
     }
 
-    // Branch authorization helper for orders:
-    // Super Admin: global access
-    // Regional Director: multi-branch scope
-    // Branch Manager: access strictly if order belongs to user.assignedBranchId
-    function canAccessBranchOrder(orderResource) {
-      return isSuperAdmin() ||
-             isRegionalDirector() ||
-             (isBranchManager() && getAssignedBranch() != null && (
-               orderResource.data.branchId == getAssignedBranch() ||
-               orderResource.data.pickupBranchId == getAssignedBranch()
-             ));
-    }
-
-    // --- COLLECTION MATCHES ---
-
-    // 1. Users Collection rules
     match /users/{userId} {
-      // Customer: get own profile
-      // Staff roles: get profile for administrative management
+      allow get: if isOwner(userId) || isBranchManager() || isRegionalDirector() || isSuperAdmin();
+      allow list: if isRegionalDirector() || isSuperAdmin();
+      allow create: if isOwner(userId) && request.resource.data.role == 'customer';
+      allow update: if isSuperAdmin();
+      allow delete: if isSuperAdmin();
+    }
+
+    match /orders/{orderId} {
       allow get: if isSignedIn() && (
-        isOwner(userId) ||
+        isOwner(resource.data.userId) ||
+        (isBranchManager() && get(/databases/$(database)/documents/users/$(request.auth.uid)).data.assignedBranchId == resource.data.branchId) ||
+        isRegionalDirector() ||
+        isSuperAdmin()
+      );
+      allow list: if isSignedIn() && (
         isBranchManager() ||
         isRegionalDirector() ||
         isSuperAdmin()
       );
-
-      // List user profiles: Only Regional Director or Super Admin (Branch Managers CANNOT dump all users)
-      allow list: if isSignedIn() && (
-        isRegionalDirector() ||
-        isSuperAdmin()
-      );
-      
-      // Creating a profile - regular users cannot escalate roles upon profile creation
-      allow create: if isSignedIn() && isOwner(userId) 
-                    && request.resource.data.role == 'customer';
-                    
-      // Only super_admin can modify user roles or profiles arbitrarily;
-      // Users can update their own non-role profile fields (role must remain unchanged)
-      allow update: if isSignedIn() && (
-        isSuperAdmin() || 
-        (isOwner(userId) && request.resource.data.role == resource.data.role)
-      );
-
-      allow delete: if false;
+      allow write: if false;
     }
 
-    // 2. Orders Collection rules
-    // Locked down: Clients can only READ orders within their explicitly authorized scope.
-    // All WRITES (create, update, delete) must go through Trusted Server APIs.
-    match /orders/{orderId} {
-      allow get: if isSignedIn() && (
-        resource.data.userId == request.auth.uid ||
-        canAccessBranchOrder(resource)
-      );
-
-      allow list: if isSignedIn() && (
-        resource.data.userId == request.auth.uid ||
-        canAccessBranchOrder(resource)
-      );
-
-      allow write: if false; // Absolute lockdown of client writes
-    }
-
-    // 3. Branch Inventory rules
-    // Locked down: Clients can only READ inventory. All WRITES must go through Trusted Server APIs.
     match /branch_inventory/{inventoryId} {
       allow read: if isSignedIn();
-      allow write: if false; // Absolute lockdown of client writes
+      allow write: if false;
     }
 
-    // 4. Consultation Intakes rules
-    // Locked down: Clients cannot read or write directly. Access goes exclusively through Trusted Server APIs.
     match /consultation_intakes/{intakeId} {
       allow read, write: if false;
     }
 
-    // 5. Audit Logs rules
-    // Locked down: Clients cannot write directly. Read is restricted to Super Admin or Regional Director.
+    match /consultation_appointments/{appointmentId} {
+      allow get, list: if isSignedIn() && (
+        isOwner(resource.data.userId) ||
+        isOwner(resource.data.practitionerId) ||
+        isSuperAdmin()
+      );
+      allow write: if false;
+    }
+
     match /audit_logs/{logId} {
       allow get, list: if isSignedIn() && (
         isSuperAdmin() ||
         isRegionalDirector()
       );
-      allow write: if false; // Absolute lockdown of client writes
+      allow write: if false;
     }
   }
 }

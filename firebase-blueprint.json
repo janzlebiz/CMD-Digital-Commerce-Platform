@@ -2,67 +2,51 @@
   "entities": {
     "user": {
       "title": "UserProfile",
-      "description": "Secure user profile representing identities and role taxonomy.",
+      "description": "User profile with role-based access control.",
       "type": "object",
       "properties": {
-        "uid": { "type": "string", "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "uid": { "type": "string" },
         "email": { "type": "string", "format": "email" },
-        "firstName": { "type": "string", "maxLength": 64 },
-        "lastName": { "type": "string", "maxLength": 64 },
-        "phone": { "type": "string", "pattern": "^\\+639\\d{9}$" },
+        "firstName": { "type": "string" },
+        "lastName": { "type": "string" },
         "role": { "type": "string", "enum": ["customer", "practitioner", "branch_manager", "regional_director", "super_admin"] },
         "assignedBranchId": { "type": "string" },
-        "createdAt": { "type": "string", "format": "date-time" },
-        "updatedAt": { "type": "string", "format": "date-time" }
+        "createdAt": { "type": "string", "format": "date-time" }
       },
-      "required": ["uid", "email", "firstName", "lastName", "role", "createdAt", "updatedAt"]
+      "required": ["uid", "email", "role"]
     },
     "order": {
       "title": "OrderRecord",
-      "description": "Commercial transaction and invoice record.",
+      "description": "Order placement record.",
       "type": "object",
       "properties": {
         "id": { "type": "string" },
         "userId": { "type": "string" },
-        "createdAt": { "type": "string", "format": "date-time" },
-        "customer": {
-          "type": "object",
-          "properties": {
-            "firstName": { "type": "string", "maxLength": 64 },
-            "lastName": { "type": "string", "maxLength": 64 },
-            "email": { "type": "string", "format": "email" },
-            "phone": { "type": "string" },
-            "province": { "type": "string" },
-            "municipality": { "type": "string" },
-            "barangay": { "type": "string" },
-            "addressLine1": { "type": "string" }
-          }
-        },
+        "customer": { "type": "object" },
         "items": { "type": "array" },
-        "fulfillmentMethod": { "type": "string", "enum": ["pickup", "delivery"] },
-        "pickupBranchId": { "type": "string" },
-        "shippingFee": { "type": "number" },
+        "branchId": { "type": "string" },
+        "deliveryMethod": { "type": "string" },
+        "paymentMethod": { "type": "string" },
+        "paymentStatus": { "type": "string" },
+        "fulfillmentStatus": { "type": "string" },
         "subtotal": { "type": "number" },
-        "vatAmount": { "type": "number" },
-        "vatableSales": { "type": "number" },
-        "nonVatSales": { "type": "number" },
-        "total": { "type": "number" },
-        "isVatRegistered": { "type": "boolean" },
-        "paymentMethod": { "type": "string", "enum": ["gcash", "maya", "bank_transfer", "cash_on_pickup"] },
-        "paymentStatus": { "type": "string", "enum": ["pending_payment", "paid", "payment_verification_required"] },
-        "fulfillmentStatus": { "type": "string", "enum": ["pending_processing", "ready_for_pickup", "in_transit", "completed", "cancelled"] }
-      }
+        "shippingFee": { "type": "number" },
+        "taxAmount": { "type": "number" },
+        "grandTotal": { "type": "number" },
+        "placedAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["id", "branchId", "items", "grandTotal", "paymentStatus", "fulfillmentStatus"]
     },
     "inventory": {
-      "title": "InventoryRecord",
-      "description": "Branch stock level tracking.",
+      "title": "BranchInventory",
+      "description": "Branch-specific inventory stock balance.",
       "type": "object",
       "properties": {
-        "skuId": { "type": "string" },
-        "branchId": { "type": "string" },
         "stockCount": { "type": "number" },
-        "lastReplenishedAt": { "type": "string", "format": "date-time" }
-      }
+        "lastUpdated": { "type": "string", "format": "date-time" }
+      },
+      "required": ["stockCount"]
     },
     "consultation": {
       "title": "ConsultationIntake",
@@ -77,6 +61,31 @@
         "consentRecord": { "type": "object" },
         "encryptedClinicalIntake": { "type": "object" }
       }
+    },
+    "consultation_appointment": {
+      "title": "ConsultationAppointment",
+      "description": "Scheduled wellness consultation booking record.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "userId": { "type": "string" },
+        "customerName": { "type": "string" },
+        "customerEmail": { "type": "string", "format": "email" },
+        "customerPhone": { "type": "string" },
+        "practitionerId": { "type": "string" },
+        "practitionerName": { "type": "string" },
+        "serviceCode": { "type": "string", "enum": ["CNS-IN-PERSON", "CNS-VIRTUAL", "CNS-FOLLOWUP"] },
+        "serviceTitle": { "type": "string" },
+        "deliveryMode": { "type": "string", "enum": ["in_person", "virtual"] },
+        "branchId": { "type": "string" },
+        "scheduledDate": { "type": "string" },
+        "scheduledTime": { "type": "string" },
+        "status": { "type": "string", "enum": ["scheduled", "intake_completed", "in_consultation", "completed", "cancelled"] },
+        "intakeId": { "type": "string" },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["id", "userId", "practitionerId", "serviceCode", "scheduledDate", "scheduledTime", "status", "createdAt"]
     },
     "audit_log": {
       "title": "AuditLogRecord",
@@ -114,6 +123,10 @@
     "/consultation_intakes/{intakeId}": {
       "schema": "consultation",
       "description": "Consultation intake and encrypted clinical information."
+    },
+    "/consultation_appointments/{appointmentId}": {
+      "schema": "consultation_appointment",
+      "description": "Consultation appointments and scheduling records."
     },
     "/audit_logs/{logId}": {
       "schema": "audit_log",

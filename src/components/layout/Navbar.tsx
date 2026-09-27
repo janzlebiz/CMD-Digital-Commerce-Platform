@@ -7,19 +7,19 @@ import React, { useState } from 'react';
 import { PageView } from '../../types';
 import { useAuth } from '../../context/AuthContext';
 import { AuthModal } from '../auth/AuthModal';
+import { ShoppingCart, Menu, X, Shield, User, LogOut, ChevronDown } from 'lucide-react';
 
 interface NavbarProps {
   currentView: PageView;
   onNavigate: (view: PageView) => void;
-  cartCount?: number;
+  cartCount: number;
 }
 
-export const Navbar: React.FC<NavbarProps> = ({ currentView, onNavigate, cartCount = 0 }) => {
-  const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
-  const [authModalOpen, setAuthModalOpen] = useState(false);
-  const [userDropdownOpen, setUserDropdownOpen] = useState(false);
-
+export const Navbar: React.FC<NavbarProps> = ({ currentView, onNavigate, cartCount }) => {
   const { user, profile, logout } = useAuth();
+  const [mobileMenuOpen, setMobileMenuOpen] = useState<boolean>(false);
+  const [userDropdownOpen, setUserDropdownOpen] = useState<boolean>(false);
+  const [authModalOpen, setAuthModalOpen] = useState<boolean>(false);
 
   const isStaff =
     profile?.role === 'branch_manager' ||
@@ -31,6 +31,7 @@ export const Navbar: React.FC<NavbarProps> = ({ currentView, onNavigate, cartCou
     { view: 'about', label: 'About HCI CMD' },
     { view: 'education', label: 'Mineral Science' },
     { view: 'products', label: 'Product Catalog' },
+    { view: 'consultations', label: '🌿 Consultations' },
     { view: 'branches', label: '6 Branches' },
     { view: 'faq', label: 'FAQ' },
     { view: 'contact', label: 'Contact' },
@@ -44,309 +45,233 @@ export const Navbar: React.FC<NavbarProps> = ({ currentView, onNavigate, cartCou
     window.scrollTo({ top: 0, behavior: 'smooth' });
   };
 
-  const handleLogout = async () => {
-    await logout();
-    setUserDropdownOpen(false);
-  };
-
-  const displayName = profile?.firstName
-    ? `${profile.firstName} ${profile.lastName || ''}`.trim()
-    : user?.email || 'Customer';
+  const displayName = profile
+    ? `${profile.firstName || ''} ${profile.lastName || ''}`.trim() || profile.email
+    : 'Account';
 
   return (
     <>
-      <header className="sticky top-0 z-40 bg-slate-950/95 backdrop-blur-md border-b border-slate-800 text-slate-100 transition-colors print:hidden">
+      <header className="sticky top-0 z-40 bg-slate-900/95 backdrop-blur-md border-b border-slate-800 text-slate-100">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-          <div className="flex items-center justify-between h-20">
-            {/* Brand Logo & Editorial Title */}
-            <button
+          <div className="flex items-center justify-between h-16">
+            {/* Brand Logo & Territory Tag */}
+            <div
+              className="flex items-center gap-3 cursor-pointer group"
               onClick={() => handleNav('home')}
-              className="flex flex-col text-left group focus-visible:ring-2 focus-visible:ring-amber-500 focus-visible:outline-none rounded p-1 -ml-1 transition shrink-0"
             >
-              <div className="flex items-center gap-2">
-                <span className="text-xl sm:text-2xl font-serif font-black tracking-tight text-white group-hover:text-amber-400 transition-colors">
-                  HCI CMD<span className="text-amber-400 text-sm align-super">™</span>
-                </span>
-                <span className="text-xs font-mono font-medium text-amber-400/90 uppercase tracking-widest hidden sm:inline">
-                  Camarines Norte
-                </span>
+              <div className="w-10 h-10 rounded-xl bg-gradient-to-tr from-amber-600 to-amber-400 flex items-center justify-center text-slate-950 font-black text-lg shadow-md group-hover:scale-105 transition">
+                CMD
               </div>
-              <span className="text-[11px] text-slate-400 font-sans tracking-wide">
-                Cell Mineral Drops · Regional Information & Education Platform
-              </span>
-            </button>
-
-            {/* Desktop Actions and Links Wrapper */}
-            <div className="hidden lg:flex items-center space-x-6">
-              {/* Desktop Navigation Links */}
-              <nav className="flex items-center space-x-1" aria-label="Main Navigation">
-                {navLinks.map((link) => {
-                  const isActive = currentView === link.view;
-                  return (
-                    <button
-                      key={link.view}
-                      onClick={() => handleNav(link.view)}
-                      className={`px-3 py-2 text-xs font-medium tracking-wide transition-colors relative focus-visible:ring-2 focus-visible:ring-amber-500 focus-visible:outline-none rounded ${
-                        isActive
-                          ? 'text-amber-300 font-semibold'
-                          : 'text-slate-300 hover:text-white'
-                      }`}
-                      aria-current={isActive ? 'page' : undefined}
-                    >
-                      {link.label}
-                      {isActive && (
-                        <span className="absolute bottom-0 left-3 right-3 h-0.5 bg-amber-400" />
-                      )}
-                    </button>
-                  );
-                })}
-              </nav>
-
-              {/* Vertical separator */}
-              <div className="h-6 w-[1px] bg-slate-800" aria-hidden="true" />
-
-              {/* E-Commerce & Auth Actions */}
-              <div className="flex items-center gap-2">
-                <button
-                  onClick={() => handleNav('orders')}
-                  className={`px-3 py-1.5 text-xs font-medium rounded transition flex items-center gap-1.5 focus-visible:ring-2 focus-visible:ring-amber-500 focus-visible:outline-none ${
-                    currentView === 'orders'
-                      ? 'bg-slate-900 text-amber-400 border border-slate-700'
-                      : 'text-slate-300 hover:text-white hover:bg-slate-900 border border-transparent'
-                  }`}
-                >
-                  <span>📄 My Invoices</span>
-                </button>
-
-                {isStaff && (
-                  <button
-                    onClick={() => handleNav('admin')}
-                    className={`px-3 py-1.5 text-xs font-semibold rounded transition flex items-center gap-1.5 focus-visible:ring-2 focus-visible:ring-amber-500 focus-visible:outline-none ${
-                      currentView === 'admin'
-                        ? 'bg-amber-950 text-amber-300 border border-amber-800'
-                        : 'bg-slate-900 text-slate-300 hover:text-white hover:border-slate-700 border border-slate-800'
-                    }`}
-                  >
-                    <span>🛡️ Staff Ops</span>
-                  </button>
-                )}
-
-                <button
-                  onClick={() => handleNav('cart')}
-                  className={`px-3.5 py-1.5 text-xs font-bold rounded transition flex items-center gap-1.5 focus-visible:ring-2 focus-visible:ring-amber-500 focus-visible:outline-none ${
-                    currentView === 'cart' || cartCount > 0
-                      ? 'bg-amber-500 text-slate-950 font-black'
-                      : 'bg-slate-900 text-slate-300 border border-slate-800 hover:text-white hover:border-slate-700'
-                  }`}
-                >
-                  <span>🛒 Cart</span>
-                  {cartCount > 0 && (
-                    <span
-                      className={`px-1.5 py-0.5 text-[10px] font-mono font-black rounded-full ${
-                        currentView === 'cart' ? 'bg-slate-950 text-amber-400' : 'bg-amber-950 text-amber-300'
-                      }`}
-                    >
-                      {cartCount}
-                    </span>
-                  )}
-                </button>
-
-                {/* User Identity / Auth Dropdown */}
-                {user ? (
-                  <div className="relative">
-                    <button
-                      onClick={() => setUserDropdownOpen(!userDropdownOpen)}
-                      className="px-3 py-1.5 bg-slate-900 border border-slate-700 hover:border-amber-500 text-xs text-amber-300 font-medium rounded-lg flex items-center gap-2 transition"
-                    >
-                      <span>👤 {displayName}</span>
-                      <span className="text-[10px] text-slate-400">▼</span>
-                    </button>
-
-                    {userDropdownOpen && (
-                      <div className="absolute right-0 mt-2 w-48 bg-slate-900 border border-slate-800 rounded-xl shadow-2xl p-2 z-50 text-xs">
-                        <div className="px-3 py-2 border-b border-slate-800 text-slate-400">
-                          <p className="font-bold text-slate-200 truncate">{displayName}</p>
-                          <p className="text-[10px] text-amber-400 uppercase font-mono mt-0.5">
-                            {profile?.role || 'Customer'}
-                          </p>
-                        </div>
-                        <button
-                          onClick={() => handleNav('orders')}
-                          className="w-full text-left px-3 py-2 text-slate-300 hover:bg-slate-800 hover:text-white rounded-lg transition mt-1"
-                        >
-                          📄 My Orders
-                        </button>
-                        {isStaff && (
-                          <button
-                            onClick={() => handleNav('admin')}
-                            className="w-full text-left px-3 py-2 text-amber-300 hover:bg-amber-950/40 rounded-lg transition font-semibold"
-                          >
-                            🛡️ Staff Operations
-                          </button>
-                        )}
-                        <button
-                          onClick={handleLogout}
-                          className="w-full text-left px-3 py-2 text-red-400 hover:bg-red-950/40 rounded-lg transition"
-                        >
-                          🚪 Logout
-                        </button>
-                      </div>
-                    )}
-                  </div>
-                ) : (
-                  <button
-                    onClick={() => setAuthModalOpen(true)}
-                    className="px-3 py-1.5 bg-amber-500/10 border border-amber-500/40 hover:bg-amber-500/20 text-xs font-semibold text-amber-300 rounded-lg transition flex items-center gap-1.5"
-                  >
-                    <span>🔑 Sign In</span>
-                  </button>
-                )}
+              <div>
+                <div className="font-extrabold text-sm sm:text-base text-white tracking-tight flex items-center gap-2">
+                  HCI Cell Mineral Drops
+                </div>
+                <div className="text-[10px] text-amber-400/90 uppercase tracking-widest font-mono">
+                  Camarines Norte Network
+                </div>
               </div>
             </div>
 
-            {/* Mobile E-Commerce Cart Shortcut and Mobile Menu Button */}
-            <div className="flex items-center gap-3 lg:hidden">
-              {/* Quick Mobile Cart Button */}
+            {/* Desktop Navigation Links */}
+            <nav className="hidden xl:flex items-center gap-1">
+              {navLinks.map((link) => (
+                <button
+                  key={link.view}
+                  onClick={() => handleNav(link.view)}
+                  className={`px-3 py-1.5 text-xs font-semibold rounded-lg transition ${
+                    currentView === link.view
+                      ? 'bg-amber-500 text-slate-950 shadow-sm'
+                      : 'text-slate-300 hover:text-white hover:bg-slate-800'
+                  }`}
+                >
+                  {link.label}
+                </button>
+              ))}
+            </nav>
+
+            {/* Action Bar: Staff Ops, Cart, Auth */}
+            <div className="hidden sm:flex items-center gap-2.5">
+              {isStaff && (
+                <button
+                  onClick={() => handleNav('admin')}
+                  className={`px-3 py-1.5 text-xs font-bold rounded-lg border transition flex items-center gap-1.5 ${
+                    currentView === 'admin'
+                      ? 'bg-amber-500 text-slate-950 border-amber-500'
+                      : 'bg-slate-800/80 text-amber-300 border-amber-500/40 hover:bg-amber-500/10'
+                  }`}
+                >
+                  <Shield className="w-3.5 h-3.5" />
+                  <span>Staff Ops</span>
+                </button>
+              )}
+
               <button
                 onClick={() => handleNav('cart')}
-                className="p-2 relative text-slate-300 hover:text-white focus-visible:ring-2 focus-visible:ring-amber-500 focus-visible:outline-none rounded transition"
-                aria-label="View Shopping Cart"
+                className={`px-3.5 py-1.5 text-xs font-bold rounded-lg transition flex items-center gap-1.5 ${
+                  currentView === 'cart' || cartCount > 0
+                    ? 'bg-amber-500 text-slate-950'
+                    : 'bg-slate-800 text-slate-300 border border-slate-700 hover:text-white'
+                }`}
               >
-                <span className="text-lg">🛒</span>
+                <ShoppingCart className="w-3.5 h-3.5" />
+                <span>Cart</span>
                 {cartCount > 0 && (
-                  <span className="absolute -top-1 -right-1 bg-amber-500 text-slate-950 font-mono font-black text-[9px] w-4.5 h-4.5 rounded-full flex items-center justify-center border border-slate-950">
+                  <span className="px-1.5 py-0.2 text-[10px] font-mono font-black rounded-full bg-slate-950 text-amber-400">
                     {cartCount}
                   </span>
                 )}
               </button>
 
-              {/* Mobile Auth Button */}
+              {/* User Dropdown */}
               {user ? (
-                <button
-                  onClick={() => setUserDropdownOpen(!userDropdownOpen)}
-                  className="p-2 text-amber-400 font-bold text-xs bg-slate-900 border border-slate-800 rounded-lg"
-                >
-                  👤
-                </button>
+                <div className="relative">
+                  <button
+                    onClick={() => setUserDropdownOpen(!userDropdownOpen)}
+                    className="px-3 py-1.5 bg-slate-800 border border-slate-700 hover:border-amber-500 text-xs text-amber-300 font-semibold rounded-lg flex items-center gap-2 transition"
+                  >
+                    <User className="w-3.5 h-3.5" />
+                    <span className="max-w-[120px] truncate">{displayName}</span>
+                    <ChevronDown className="w-3 h-3 text-slate-400" />
+                  </button>
+
+                  {userDropdownOpen && (
+                    <div className="absolute right-0 mt-2 w-48 bg-slate-900 border border-slate-700 rounded-xl shadow-2xl p-2 z-50 text-xs space-y-1">
+                      <div className="px-3 py-2 border-b border-slate-800">
+                        <p className="font-bold text-slate-200 truncate">{displayName}</p>
+                        <p className="text-[10px] text-amber-400 uppercase font-mono mt-0.5">
+                          {profile?.role || 'Customer'}
+                        </p>
+                      </div>
+                      <button
+                        onClick={() => handleNav('orders')}
+                        className="w-full text-left px-3 py-2 text-slate-300 hover:bg-slate-800 hover:text-white rounded-lg transition"
+                      >
+                        📄 My Orders
+                      </button>
+                      <button
+                        onClick={() => handleNav('consultations')}
+                        className="w-full text-left px-3 py-2 text-slate-300 hover:bg-slate-800 hover:text-white rounded-lg transition"
+                      >
+                        🌿 My Consultations
+                      </button>
+                      {isStaff && (
+                        <button
+                          onClick={() => handleNav('admin')}
+                          className="w-full text-left px-3 py-2 text-amber-300 hover:bg-amber-950/40 rounded-lg transition font-semibold"
+                        >
+                          🛡️ Staff Operations
+                        </button>
+                      )}
+                      <button
+                        onClick={() => {
+                          logout();
+                          setUserDropdownOpen(false);
+                        }}
+                        className="w-full text-left px-3 py-2 text-red-400 hover:bg-red-950/40 rounded-lg transition flex items-center gap-1.5"
+                      >
+                        <LogOut className="w-3.5 h-3.5" />
+                        Sign Out
+                      </button>
+                    </div>
+                  )}
+                </div>
               ) : (
                 <button
                   onClick={() => setAuthModalOpen(true)}
-                  className="px-2.5 py-1 bg-amber-500 text-slate-950 font-bold text-xs rounded-lg"
+                  className="px-3 py-1.5 bg-amber-500/10 border border-amber-500/40 hover:bg-amber-500/20 text-xs font-semibold text-amber-300 rounded-lg transition flex items-center gap-1.5"
                 >
-                  Sign In
+                  <User className="w-3.5 h-3.5" />
+                  <span>Sign In</span>
                 </button>
               )}
+            </div>
 
-              {/* Mobile Menu Open Toggle */}
+            {/* Mobile Menu Trigger */}
+            <div className="flex items-center gap-2 xl:hidden">
+              <button
+                onClick={() => handleNav('cart')}
+                className="p-2 bg-slate-800 text-amber-400 rounded-lg relative"
+              >
+                <ShoppingCart className="w-4 h-4" />
+                {cartCount > 0 && (
+                  <span className="absolute -top-1 -right-1 px-1 text-[9px] font-bold bg-amber-500 text-slate-950 rounded-full">
+                    {cartCount}
+                  </span>
+                )}
+              </button>
               <button
                 onClick={() => setMobileMenuOpen(!mobileMenuOpen)}
-                className="p-2 text-slate-300 hover:text-white focus-visible:ring-2 focus-visible:ring-amber-500 focus-visible:outline-none rounded"
-                aria-label={mobileMenuOpen ? 'Close Navigation Menu' : 'Open Navigation Menu'}
-                aria-expanded={mobileMenuOpen}
+                className="p-2 bg-slate-800 text-slate-300 hover:text-white rounded-lg"
               >
-                <svg
-                  className="w-6 h-6"
-                  fill="none"
-                  viewBox="0 0 24 24"
-                  stroke="currentColor"
-                  strokeWidth={2}
-                >
-                  {mobileMenuOpen ? (
-                    <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
-                  ) : (
-                    <path strokeLinecap="round" strokeLinejoin="round" d="M4 6h16M4 12h16M4 18h16" />
-                  )}
-                </svg>
+                {mobileMenuOpen ? <X className="w-5 h-5" /> : <Menu className="w-5 h-5" />}
               </button>
             </div>
           </div>
         </div>
 
-        {/* Mobile Menu Drawer */}
+        {/* Mobile Navigation Drawer */}
         {mobileMenuOpen && (
-          <div className="lg:hidden border-t border-slate-800 bg-slate-950 px-4 pt-3 pb-6 space-y-4 shadow-xl">
-            {user && (
-              <div className="p-3 bg-slate-900 border border-slate-800 rounded-xl text-xs flex items-center justify-between">
-                <div>
-                  <p className="font-bold text-slate-200">{displayName}</p>
-                  <p className="text-[10px] text-amber-400 font-mono uppercase">{profile?.role || 'Customer'}</p>
-                </div>
-                <button
-                  onClick={handleLogout}
-                  className="px-2.5 py-1 bg-red-950/60 border border-red-800 text-red-300 text-[11px] font-medium rounded-lg"
-                >
-                  Logout
-                </button>
-              </div>
-            )}
+          <div className="xl:hidden bg-slate-900 border-b border-slate-800 px-4 py-4 space-y-2 text-xs">
+            {navLinks.map((link) => (
+              <button
+                key={link.view}
+                onClick={() => handleNav(link.view)}
+                className={`w-full text-left px-3 py-2 rounded-lg font-semibold transition ${
+                  currentView === link.view
+                    ? 'bg-amber-500 text-slate-950'
+                    : 'text-slate-300 hover:bg-slate-800'
+                }`}
+              >
+                {link.label}
+              </button>
+            ))}
 
-            {/* Main Navigation links */}
-            <div className="space-y-1">
-              <div className="text-[11px] font-mono text-slate-400 uppercase tracking-wider px-3 py-1">
-                Information Sections
-              </div>
-              {navLinks.map((link) => {
-                const isActive = currentView === link.view;
-                return (
+            <div className="pt-3 border-t border-slate-800 space-y-2">
+              {user ? (
+                <>
+                  <div className="px-3 py-1 text-slate-400">
+                    Signed in as <span className="text-amber-400 font-bold">{displayName}</span> (
+                    {profile?.role})
+                  </div>
                   <button
-                    key={link.view}
-                    onClick={() => handleNav(link.view)}
-                    className={`block w-full text-left px-3 py-2 text-sm font-medium rounded transition-colors ${
-                      isActive
-                        ? 'bg-amber-950/40 text-amber-300 font-semibold border-l-2 border-amber-400'
-                        : 'text-slate-300 hover:bg-slate-900 hover:text-white'
-                    }`}
-                    aria-current={isActive ? 'page' : undefined}
+                    onClick={() => handleNav('orders')}
+                    className="w-full text-left px-3 py-2 text-slate-300 hover:bg-slate-800 rounded-lg"
                   >
-                    {link.label}
+                    📄 My Orders
                   </button>
-                );
-              })}
-            </div>
-
-            {/* Mobile E-Commerce specific sections */}
-            <div className="space-y-1 pt-2 border-t border-slate-800/80">
-              <div className="text-[11px] font-mono text-slate-400 uppercase tracking-wider px-3 py-1">
-                E-Commerce Terminal
-              </div>
-
-              <button
-                onClick={() => handleNav('cart')}
-                className={`flex items-center justify-between w-full px-3 py-2 text-sm font-medium rounded transition-colors ${
-                  currentView === 'cart'
-                    ? 'bg-amber-950/40 text-amber-300 font-semibold border-l-2 border-amber-400'
-                    : 'text-slate-300 hover:bg-slate-900 hover:text-white'
-                }`}
-              >
-                <span className="flex items-center gap-1.5">🛒 Shopping Cart</span>
-                {cartCount > 0 && (
-                  <span className="bg-amber-500 text-slate-950 font-mono font-black text-xs px-2 py-0.5 rounded-full">
-                    {cartCount} Items
-                  </span>
-                )}
-              </button>
-
-              <button
-                onClick={() => handleNav('orders')}
-                className={`flex items-center justify-between w-full px-3 py-2 text-sm font-medium rounded transition-colors ${
-                  currentView === 'orders'
-                    ? 'bg-amber-950/40 text-amber-300 font-semibold border-l-2 border-amber-400'
-                    : 'text-slate-300 hover:bg-slate-900 hover:text-white'
-                }`}
-              >
-                <span className="flex items-center gap-1.5">📄 My Invoices & Trackers</span>
-              </button>
-
-              {isStaff && (
+                  <button
+                    onClick={() => handleNav('consultations')}
+                    className="w-full text-left px-3 py-2 text-slate-300 hover:bg-slate-800 rounded-lg"
+                  >
+                    🌿 My Consultations
+                  </button>
+                  {isStaff && (
+                    <button
+                      onClick={() => handleNav('admin')}
+                      className="w-full text-left px-3 py-2 bg-amber-500/20 text-amber-300 font-bold rounded-lg"
+                    >
+                      🛡️ Staff Operations
+                    </button>
+                  )}
+                  <button
+                    onClick={() => {
+                      logout();
+                      setMobileMenuOpen(false);
+                    }}
+                    className="w-full text-left px-3 py-2 text-red-400 hover:bg-slate-800 rounded-lg"
+                  >
+                    🚪 Sign Out
+                  </button>
+                </>
+              ) : (
                 <button
-                  onClick={() => handleNav('admin')}
-                  className={`flex items-center justify-between w-full px-3 py-2 text-sm font-medium rounded transition-colors ${
-                    currentView === 'admin'
-                      ? 'bg-amber-950/40 text-amber-300 font-semibold border-l-2 border-amber-400'
-                      : 'text-amber-400 hover:bg-slate-900 hover:text-amber-300'
-                  }`}
+                  onClick={() => {
+                    setAuthModalOpen(true);
+                    setMobileMenuOpen(false);
+                  }}
+                  className="w-full py-2 bg-amber-500 text-slate-950 font-bold rounded-lg text-center"
                 >
-                  <span className="flex items-center gap-1.5 font-semibold">🛡️ Staff Operations</span>
+                  Sign In
                 </button>
               )}
             </div>
@@ -354,9 +279,7 @@ export const Navbar: React.FC<NavbarProps> = ({ currentView, onNavigate, cartCou
         )}
       </header>
 
-      {/* Auth Modal */}
       <AuthModal isOpen={authModalOpen} onClose={() => setAuthModalOpen(false)} />
     </>
   );
 };
-
