@@ -1,47 +1,52 @@
 # Phase 6C: Pre-Implementation Security, Privacy & Architectural Audit
 
 **Document Reference:** `docs/phases/PHASE_6C_PRE_IMPLEMENTATION_AUDIT.md`  
-**Evaluation Target:** Milestone 6C (CRM/Account Segmentation, Health Data Privacy Firewall, RA 11967 Dispute Redress with 7-Day SLA Escalation, Municipality Geolocation & Replenishment Cohorts)  
-**Baseline Certified:** Phase 0–6B (89/89 automated tests passing: 53 Phase 6A + 36 Phase 6B)  
+**Evaluation Target:** Milestone 6C (Milestone 1: RA 11967 Dispute Redress; Milestone 2: CRM & Account Segmentation; Milestone 3: Expenses, Financial Dashboard & Agricultural/Commodity Profitability Accounting)  
+**Baseline Certified:** Phase 0–6B + Phase 6C Milestones 1 & 2 (244/244 automated assertions passing)  
 **Audit Date:** 2026-09-27  
-**Status:** Pre-Implementation Architectural Assessment  
+**Status:** Pre-Implementation Architectural Assessment (Updated for Milestone 3 Scope)  
 
 ---
 
 ## 1. Executive Summary & Audit Mandate
 
-This pre-implementation audit provides an exhaustive architectural, security, and statutory assessment of the proposed **Phase 6C** capabilities for the **HCI Cell Mineral Drops (CMD) Digital Commerce & Naturopathic Wellness Platform**.
+This pre-implementation audit provides an exhaustive architectural, security, and statutory assessment of Phase 6C capabilities for the **HCI Cell Mineral Drops (CMD) Digital Commerce & Naturopathic Wellness Platform**.
 
-Phase 6C is designed to establish commercial customer lifecycle operations, consumer redress mechanisms under **Republic Act No. 11967** (Internet Transactions Act of 2023 / ITA), and municipality-level replenishment logistics across Camarines Norte, while maintaining an uncompromised **Health Data Privacy Firewall** under **Republic Act No. 10173** (Data Privacy Act of 2012 / DPA) and preserving our **ADR-009 Network-Only** server-authoritative architecture.
+Phase 6C is divided into three strategic milestones:
+1. **Milestone 1 (COMPLETED):** Consumer dispute redress mechanisms under **Republic Act No. 11967** (Internet Transactions Act of 2023 / ITA) with statutory 7-day SLA calculation and dynamic escalation queues.
+2. **Milestone 2 (COMPLETED):** Commercial customer lifecycle operations and account segmentation across 5 cohorts, strictly bound by a **Health Data Privacy Firewall** under **Republic Act No. 10173** (Data Privacy Act of 2012 / DPA) and preserving our **ADR-009 Network-Only** server-authoritative architecture.
+3. **Milestone 3 (PRE-IMPLEMENTATION AUDIT — THIS REVIEW):** Expenses and expense categories, paid vs. incurred expense tracking, financial audit trails, financial analytics dashboard (revenue, expenses, net income, cash received, cash paid, accounts receivable), Rice and Copra agricultural commodity profitability (with Weighted Average Selling Price / WASP), IndexedDB v2 → v3 migration, automated test verification, and responsive mobile-layout requirements.
 
 **CRITICAL IMPLEMENTATION MANDATE:**  
-This document is strictly an audit and planning evaluation. **No Phase 6C application code, endpoints, schemas, rules, or test files have been created or modified.** Phase 6C implementation has **not** started.
+This document is strictly an audit and planning evaluation. **No Milestone 3 application code, endpoints, schemas, rules, or test files have been created or modified.** Milestone 3 implementation has **not** started.
 
 ---
 
 ## 2. Distinction Between Existing Architecture and Unimplemented Proposed Scope
 
-To ensure complete clarity for engineering and compliance reviews, the table below explicitly delineates between **existing capabilities from Phase 0–6B** and **proposed Phase 6C components that DO NOT YET EXIST in the codebase**.
+To ensure complete clarity for engineering and compliance reviews, the table below explicitly delineates between **existing capabilities from Phase 0–6C (Milestones 1 & 2)** and **proposed Milestone 3 components that DO NOT YET EXIST in the codebase**.
 
 ### 2.1 Capability Status Matrix
 
 | Component / Subsystem | Status | Description / Location |
 | :--- | :---: | :--- |
 | **User Identity & Roles** (`customer`, `practitioner`, `branch_manager`, `regional_director`, `super_admin`) | **EXISTING (Phase 0–6B)** | Implemented in `server.ts`, `src/types/index.ts`, `src/context/AuthContext.tsx`. |
-| **Orders & Commerce Data Store** (`/orders/{orderId}`) | **EXISTING (Phase 0–6B)** | Active collection storing shipping addresses, line items, totals, and branch assignments. |
+| **Orders & Commerce Data Store** (`/orders/{orderId}`) | **EXISTING (Phase 0–6B)** | Active collection storing shipping addresses, line items, totals, payment statuses, and branch assignments. |
 | **Clinical Intakes & KMS Envelope Encryption** (`/consultation_intakes/{intakeId}`) | **EXISTING (Phase 6A)** | AES-256-GCM encrypted SPI payloads wrapped by Google Cloud KMS; access locked strictly to assigned practitioners. |
 | **Consultation Appointments & Assignments** | **EXISTING (Phase 6A)** | `/consultation_appointments` and `/consultation_assignments` collections active with OCC booking. |
 | **Workshops Catalog & HMAC-SHA256 Passes** | **EXISTING (Phase 6B)** | `/workshops`, `/workshop_registrations`, dynamic QR signing, and branch check-in enforcement active. |
-| **ADR-009 Server-Authoritative Firestore Rules** | **EXISTING (Phase 0–6B)** | Direct client writes denied (`allow write: if false;`) across operational collections in `firestore.rules`. |
-| **Append-Only Audit Logging** (`/audit_logs`) | **EXISTING (Phase 0–6B)** | `logAuditEvent` helper in `server.ts` recording actor, role, branch, action, and scrubbed metadata. |
-| **Support Tickets Collection & Schema** (`/support_tickets/{ticketId}`) | **NOT YET IMPLEMENTED** | Does **NOT** exist in `firebase-blueprint.json` or `firestore.rules`. |
-| **Support Ticket Express Endpoints** (`/api/support/*`) | **NOT YET IMPLEMENTED** | Does **NOT** exist in `server.ts`. |
-| **CRM Segment Express Endpoints** (`/api/crm/*`) | **NOT YET IMPLEMENTED** | Does **NOT** exist in `server.ts`. |
-| **CRM Customer Segmentation & Analytics Engine** | **NOT YET IMPLEMENTED** | Server-authoritative aggregation engine does **NOT** exist. |
-| **RA 11967 7-Day SLA Escalation Engine** | **NOT YET IMPLEMENTED** | Automatic breach detection and queue routing do **NOT** exist. |
-| **Municipality Geolocation & Replenishment Cohort Engine** | **NOT YET IMPLEMENTED** | 12 Camarines Norte municipality parsing and 30–45 day reorder window calculator do **NOT** exist. |
-| **Phase 6C Automated Test Suite** (`scripts/testPhase6CSupportCRM.ts`) | **NOT YET IMPLEMENTED** | Test runner file does **NOT** exist. |
-| **Phase 6C Frontend Views** (`SupportTicketsView.tsx`, `CrmDashboardView.tsx`) | **NOT YET IMPLEMENTED** | Does **NOT** exist in `src/views/`. |
+| **ADR-009 Server-Authoritative Firestore Rules** | **EXISTING (Phase 0–6C)** | Direct client writes denied (`allow write: if false;`) across operational collections in `firestore.rules`. |
+| **Append-Only Audit Logging** (`/audit_logs`) | **EXISTING (Phase 0–6C)** | `logAuditEvent` helper in `server.ts` recording actor, role, branch, action, and scrubbed metadata. |
+| **Support Tickets Collection & SLA Escalation** (`/support_tickets`) | **EXISTING (Phase 6C M1)** | Implemented in `server.ts`, `src/views/SupportTicketsView.tsx`, 96/96 tests passing. |
+| **CRM Customer Segmentation & Privacy Firewall** (`/api/crm/*`) | **EXISTING (Phase 6C M2)** | Implemented in `server.ts`, `src/views/AdminDashboardView.tsx`, 59/59 tests passing. |
+| **Expenses Data Store & Schema** (`/expenses/{expenseId}`) | **NOT YET IMPLEMENTED** | Does **NOT** exist in `firebase-blueprint.json` or `firestore.rules`. |
+| **Expense Express Endpoints** (`/api/finance/expenses`) | **NOT YET IMPLEMENTED** | Does **NOT** exist in `server.ts`. |
+| **Financial KPI Aggregation Engine** (`/api/finance/metrics`) | **NOT YET IMPLEMENTED** | Revenue, incurred vs. paid expenses, net income, cash flow, and receivables endpoints do **NOT** exist. |
+| **Rice / Copra Profitability & WASP Engine** (`/api/finance/commodity-profitability`) | **NOT YET IMPLEMENTED** | Agricultural value-chain calculations and Weighted Average Selling Price engine do **NOT** exist. |
+| **Financial Audit Events** (`expense_recorded`, `financial_report_generated`) | **NOT YET IMPLEMENTED** | Financial mutation audit triggers do **NOT** exist in `server.ts`. |
+| **Client-Side IndexedDB v2 → v3 Migration** | **NOT YET IMPLEMENTED** | Frontend currently only uses `localStorage`; IndexedDB offline expense caching and migration helper do **NOT** exist. |
+| **Frontend Financials Tab & Date Filter Controls** | **NOT YET IMPLEMENTED** | Does **NOT** exist in `src/views/AdminDashboardView.tsx`. |
+| **Milestone 3 Automated Test Suite** (`scripts/testPhase6CFinanceMetrics.ts`) | **NOT YET IMPLEMENTED** | Test runner file does **NOT** exist. |
 
 ---
 
@@ -235,10 +240,98 @@ To maintain our 100% test pass record (89/89 passing across Phase 6A/6B), Phase 
 
 ---
 
-## 5. Audit Determination & Final Verdict
+## 6. Phase 6C — Milestone 3 Pre-Implementation Audit & Execution Plan
 
-The existing platform architecture (Express backend on Node.js/TypeScript, Firebase Firestore with server-authoritative rules, Google Cloud KMS, and React Tailwind frontend) fully supports the required Phase 6C capabilities without breaking or weakening any prior security guarantees.
+### 6.1 Scope & Architecture Definition
+Milestone 3 establishes server-authoritative financial operations, expense accounting (paid vs. incurred), cash flow metrics, accounts receivable, and agricultural commodity value-chain analytics (Rice and Copra processing with Weighted Average Selling Price) for authorized branch managers and regional directors.
 
-All components that do not yet exist have been explicitly delineated, architectural mitigations have been specified, and integration boundaries have been preserved.
+### 6.2 Pre-Implementation Audit Findings (5 Core Evaluation Dimensions)
 
-### **READY FOR IMPLEMENTATION AFTER AUDIT REVIEW**
+#### 1. What Already Exists
+* **Orders & Commercial Revenue:**
+  - Collection `/orders/{orderId}` tracks grand totals, line items, shipping fees, payment methods (`cash_on_delivery`, `gcash`, `maya`, `bank_transfer_bdo`), and payment statuses.
+* **RBAC & Branch Scoping:**
+  - `requireAuth(req, res)` middleware enforces authentication and extracts user role and `assignedBranchId`.
+  - Scoping pattern: `branch_manager` restricted to branch; `regional_director` and `super_admin` have cross-branch visibility.
+* **Append-Only Audit Infrastructure:**
+  - `logAuditEvent` helper in `server.ts` active for orders, inventory adjustments, workshops, disputes, and CRM.
+* **Frontend Console Architecture:**
+  - `AdminDashboardView.tsx` with operational tabs (`orders`, `inventory`, `audit`, `crm`).
+* **Existing Client Storage:**
+  - Browser `localStorage` is used in `useEcommerce.ts`. No IndexedDB store currently exists in the client codebase.
+
+#### 2. What Is Missing
+* **Expenses Data Store & Schema (`/expenses/{expenseId}`):**
+  - Requires fields: `id`, `branchId`, `category`, `description`, `amount`, `expenseStatus` (`paid` | `incurred_pending_payment`), `incurredAt`, `paidAt`, `paymentReference`, `commodityMetadata` (`commodityType`: `rice` | `copra`, `volumeKg`, `acquisitionCostPerKg`), `recordedByUid`, `createdAt`, `updatedAt`.
+  - Schema not yet defined in `firebase-blueprint.json` or `firestore.rules`.
+* **Server-Authoritative Financial Endpoints (`server.ts`):**
+  - `POST /api/finance/expenses`: Create and validate new expense entries with branch validation.
+  - `GET /api/finance/expenses`: Query expenses with branch scoping and date range filtering (`startDate`, `endDate`).
+  - `GET /api/finance/metrics`: Financial performance aggregator computing:
+    - **Gross & Net Revenue:** Sum of fulfilled/paid order values.
+    - **Incurred vs. Paid Expenses:** Accrued liabilities vs. cash disbursements.
+    - **Net Income:** Accrual (`Revenue - Incurred Expenses`) and cash-basis net margins.
+    - **Cash Received:** Cash collected from orders marked `paid`.
+    - **Cash Paid:** Cash disbursed for expenses marked `paid`.
+    - **Accounts Receivable:** Outstanding uncollected order balances.
+    - **Accounts Payable:** Incurred expenses pending payment disbursement.
+  - `GET /api/finance/commodity-profitability`: Dedicated Rice / Copra agricultural value-chain analytics:
+    - Volume processed (kg, bags/sacks).
+    - Total raw procurement and milling/drying expense.
+    - Commodity derivative revenue.
+    - **Weighted Average Selling Price (WASP):** $\frac{\sum (\text{Selling Price} \times \text{Volume Sold})}{\sum \text{Volume Sold}}$.
+    - Gross profit margin and unit economic contribution.
+* **Financial Audit Logging:**
+  - Wire actions: `expense_recorded`, `expense_status_updated`, `financial_report_generated`.
+* **Client-Side IndexedDB v2 → v3 Migration (`src/utils/indexedDb.ts`):**
+  - Robust upgrade handler implementing `onupgradeneeded` for database upgrade to version 3.
+  - Creates object stores: `orders`, `support_tickets`, `offline_expenses`, and `cached_finance_metrics`.
+* **Frontend Financial Dashboard Component (`src/views/AdminDashboardView.tsx`):**
+  - Add `financials` tab to admin navigation.
+  - Preset & custom date range picker (Today, 7D, MTD, QTD, Custom).
+  - Financial KPI card grid (Revenue, Incurred Expenses, Net Income, Cash Received, Cash Paid, Receivables).
+  - Paid vs. Incurred expense status table.
+  - Rice & Copra commodity profitability card with WASP calculations.
+  - Mobile-responsive layout (collapsible cards, responsive tables, touch-friendly date selectors).
+* **Automated Test Suite (`scripts/testPhase6CFinanceMetrics.ts`):**
+  - Comprehensive suite validating auth, branch scoping, accrual vs. cash formulas, WASP math, and audit logs.
+
+#### 3. Risks & Conflicts with Completed Milestones
+* **Health Data Privacy Firewall (RA 10173):** Financial analytics must strictly avoid any reads or joins with `/consultation_intakes`. Patient clinical data and practitioner encrypted intakes must remain 100% firewalled.
+* **Branch Isolation & IDOR Prevention:** Branch managers must only access and record expenses for their `assignedBranchId`. Cross-branch expense manipulation must fail-closed with HTTP 403.
+* **Accrual vs. Cash Accounting Integrity:** Incurred expenses pending disbursement must not reduce Cash Received, and unpaid orders must reflect in Receivables rather than Cash Received.
+* **Exclusion of Cancelled Transactions:** Cancelled orders or refunded amounts must be filtered out to prevent inflated revenue calculations.
+
+#### 4. Exact Files & Components That Will Need Changes
+1. `src/types/index.ts`: Expense, finance metrics, and commodity profitability types.
+2. `firebase-blueprint.json`: `/expenses` entity schema definition.
+3. `firestore.rules`: Read permissions for staff; write locked down (`allow write: if false;` under ADR-009).
+4. `server.ts`: Aggregation logic, expense routes, financial metrics routes, commodity profitability routes, and audit logging.
+5. `src/utils/indexedDb.ts` *(New)*: Client-side IndexedDB v2 → v3 migration and offline cache utility.
+6. `src/views/AdminDashboardView.tsx`: Financials tab, KPI cards, date filters, expense management UI, and responsive layouts.
+7. `scripts/testPhase6CFinanceMetrics.ts` *(New)*: Automated test verification suite.
+
+#### 5. Recommended Implementation Sequence
+1. **Step 1: Data Contracts & Blueprint/Rules**
+   - Define TypeScript interfaces in `src/types/index.ts`.
+   - Update `firebase-blueprint.json` and `firestore.rules` for `/expenses`.
+2. **Step 2: Server-Side Financial Logic & API Endpoints**
+   - Add pure calculation functions (`calculateFinancialMetrics`, `calculateCommodityProfitability`).
+   - Implement `POST /api/finance/expenses`, `GET /api/finance/expenses`, `GET /api/finance/metrics`, `GET /api/finance/commodity-profitability`.
+   - Wire audit event logging.
+3. **Step 3: Automated Test Suite & Regression Verification**
+   - Build `scripts/testPhase6CFinanceMetrics.ts`.
+   - Run suite and verify 100% pass across Phase 6A, 6B, 6C M1, 6C M2, and 6C M3.
+4. **Step 4: Frontend UI, IndexedDB v3 Migration & Mobile Layout**
+   - Implement `src/utils/indexedDb.ts` with v2 → v3 migration.
+   - Build Financials & Accounting view in `src/views/AdminDashboardView.tsx`.
+   - Verify responsive mobile layout and date filter interactions.
+
+---
+
+## 7. Audit Determination & Final Verdict
+
+The platform architecture is fully equipped to support Phase 6C Milestone 3 without introducing security regressions or compromising previous milestone deliverables.
+
+**STATUS: PRE-IMPLEMENTATION AUDIT COMPLETE — AWAITING AUTHORIZATION TO IMPLEMENT.**
+
