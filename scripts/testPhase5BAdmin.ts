@@ -184,6 +184,15 @@ function createTestHarness(options: {
       if (token === 'CUSTOMER_TOKEN') {
         return { uid: 'customer-uid', email: 'customer@example.com' };
       }
+      if (token === 'STAFF_TOKEN') {
+        return { uid: 'staff-uid', email: 'staff@example.com' };
+      }
+      if (token === 'ADMIN_TOKEN') {
+        return { uid: 'admin-uid', email: 'legacy_admin@example.com' };
+      }
+      if (token === 'LEGACY_MANAGER_TOKEN') {
+        return { uid: 'legacy-manager-uid', email: 'legacy_manager@example.com' };
+      }
       if (token === 'MANAGER_DAET_TOKEN') {
         return { uid: 'manager-daet-uid', email: 'daet_mgr@example.com' };
       }
@@ -307,6 +316,46 @@ async function runPhase5BTests() {
         { Authorization: 'Bearer CUSTOMER_TOKEN' }
       );
       assert(res3.status === 403, 'Test 3.3: Customer role attempting inventory replenishment returns HTTP 403 Access Denied');
+    } finally {
+      server.close();
+    }
+  }
+
+  // --- TEST 3B: Legacy roles (staff, admin, manager) attempting admin operation receive HTTP 403 ---
+  {
+    const harness = createTestHarness({
+      users: {
+        'staff-uid': { role: 'staff' },
+        'admin-uid': { role: 'admin' },
+        'legacy-manager-uid': { role: 'manager' },
+      },
+    });
+    const app = createExpressApp({ db: harness.mockDb, auth: harness.mockAuth, kmsClient: harness.mockKms });
+    const server = http.createServer(app).listen(0);
+
+    try {
+      const resStaff = await makeRequest(server, '/api/admin/orders', 'GET', undefined, {
+        Authorization: 'Bearer STAFF_TOKEN',
+      });
+      assert(resStaff.status === 403, 'Test 3.4: Legacy staff role querying GET /api/admin/orders returns HTTP 403 Access Denied');
+
+      const resAdmin = await makeRequest(
+        server,
+        '/api/admin/orders/update-status',
+        'POST',
+        { orderId: 'HCI-ORD-100', paymentStatus: 'paid' },
+        { Authorization: 'Bearer ADMIN_TOKEN' }
+      );
+      assert(resAdmin.status === 403, 'Test 3.5: Legacy admin role attempting POST /api/admin/orders/update-status returns HTTP 403 Access Denied');
+
+      const resManager = await makeRequest(
+        server,
+        '/api/admin/inventory/replenish',
+        'POST',
+        { branchId: 'daet', skuId: 'hci-cmd-65ml', quantity: 10 },
+        { Authorization: 'Bearer LEGACY_MANAGER_TOKEN' }
+      );
+      assert(resManager.status === 403, 'Test 3.6: Legacy manager role attempting inventory replenishment returns HTTP 403 Access Denied');
     } finally {
       server.close();
     }

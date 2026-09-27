@@ -40,6 +40,7 @@ Object.defineProperty(exports, "__esModule", { value: true });
 exports.fetchClinicalIntakeSecure = exports.saveClinicalIntakeSecure = exports.createOrderSecure = exports.calculateOrder = void 0;
 exports.setDatabase = setDatabase;
 exports.getDatabase = getDatabase;
+exports.setKmsClient = setKmsClient;
 const functions = __importStar(require("firebase-functions"));
 const admin = __importStar(require("firebase-admin"));
 const crypto = __importStar(require("crypto"));
@@ -56,8 +57,11 @@ function getDatabase() {
     return db;
 }
 // Real Cloud KMS Client Initialization
-const kmsClient = new kms_1.KeyManagementServiceClient();
+let kmsClient = new kms_1.KeyManagementServiceClient();
 const KMS_KEY_NAME = 'projects/gen-lang-client-0427039673/locations/global/keyRings/hic-cmd-keyring/cryptoKeys/clinical-spi-key';
+function setKmsClient(customClient) {
+    kmsClient = customClient;
+}
 // Authoritative Business Constants (Server-Authoritative)
 const PRODUCTS_CATALOG = {
     'hci-cmd-65ml': { price: 1200, name: 'HCI Cell Mineral Drops (CMD) — 65 mL Flagship Bottle', volume: '65 mL' },
@@ -87,14 +91,7 @@ async function encryptClinicalPayload(payload) {
         encryptedKeyBase64 = Buffer.from(result.ciphertext).toString('base64');
     }
     catch (kmsErr) {
-        if (process.env.TEST_MOCK_KMS === 'true') {
-            const mockKey = crypto.createHash('sha256').update(KMS_KEY_NAME).digest();
-            const wrapCipher = crypto.createCipheriv('aes-256-cbc', mockKey, Buffer.alloc(16, 0));
-            encryptedKeyBase64 = Buffer.concat([wrapCipher.update(dek), wrapCipher.final()]).toString('base64');
-        }
-        else {
-            throw new Error(`KMS Key Wrapping Error: ${kmsErr.message}`);
-        }
+        throw new Error(`KMS Key Wrapping Error: ${kmsErr.message}`);
     }
     // Encrypt payload string using local AES-256-GCM and DEK
     const plaintext = JSON.stringify(payload);
@@ -127,22 +124,7 @@ async function decryptClinicalPayload(ciphertext, ivBase64, tagBase64, encrypted
         dek = Buffer.from(result.plaintext);
     }
     catch (kmsErr) {
-        if (process.env.TEST_MOCK_KMS === 'true') {
-            try {
-                const mockKey = crypto.createHash('sha256').update(KMS_KEY_NAME).digest();
-                const unwrapCipher = crypto.createDecipheriv('aes-256-cbc', mockKey, Buffer.alloc(16, 0));
-                dek = Buffer.concat([unwrapCipher.update(encryptedKey), unwrapCipher.final()]);
-                if (dek.length !== 32) {
-                    throw new Error('Invalid unwrapped key size.');
-                }
-            }
-            catch (unwrapErr) {
-                throw new Error(`KMS Key Unwrapping Error: ${unwrapErr.message}`);
-            }
-        }
-        else {
-            throw new Error(`KMS Key Unwrapping Error: ${kmsErr.message}`);
-        }
+        throw new Error(`KMS Key Unwrapping Error: ${kmsErr.message}`);
     }
     // Decrypt AES-256-GCM ciphertext using the unwrapped DEK
     const decipher = crypto.createDecipheriv('aes-256-gcm', dek, iv);

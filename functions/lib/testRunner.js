@@ -3,8 +3,41 @@
  * @license
  * SPDX-License-Identifier: Apache-2.0
  */
+var __createBinding = (this && this.__createBinding) || (Object.create ? (function(o, m, k, k2) {
+    if (k2 === undefined) k2 = k;
+    var desc = Object.getOwnPropertyDescriptor(m, k);
+    if (!desc || ("get" in desc ? !m.__esModule : desc.writable || desc.configurable)) {
+      desc = { enumerable: true, get: function() { return m[k]; } };
+    }
+    Object.defineProperty(o, k2, desc);
+}) : (function(o, m, k, k2) {
+    if (k2 === undefined) k2 = k;
+    o[k2] = m[k];
+}));
+var __setModuleDefault = (this && this.__setModuleDefault) || (Object.create ? (function(o, v) {
+    Object.defineProperty(o, "default", { enumerable: true, value: v });
+}) : function(o, v) {
+    o["default"] = v;
+});
+var __importStar = (this && this.__importStar) || (function () {
+    var ownKeys = function(o) {
+        ownKeys = Object.getOwnPropertyNames || function (o) {
+            var ar = [];
+            for (var k in o) if (Object.prototype.hasOwnProperty.call(o, k)) ar[ar.length] = k;
+            return ar;
+        };
+        return ownKeys(o);
+    };
+    return function (mod) {
+        if (mod && mod.__esModule) return mod;
+        var result = {};
+        if (mod != null) for (var k = ownKeys(mod), i = 0; i < k.length; i++) if (k[i] !== "default") __createBinding(result, mod, k[i]);
+        __setModuleDefault(result, mod);
+        return result;
+    };
+})();
 Object.defineProperty(exports, "__esModule", { value: true });
-process.env.TEST_MOCK_KMS = 'true';
+const crypto = __importStar(require("crypto"));
 const index_1 = require("./index");
 // High-Fidelity Transactional In-Memory Test Harness for Firestore
 class InMemoryFirestore {
@@ -151,11 +184,42 @@ async function runTests() {
     // Initialize and inject transactional in-memory test database
     const inMemoryDb = new InMemoryFirestore();
     (0, index_1.setDatabase)(inMemoryDb);
+    // Initialize and inject KMS test substitute client
+    const mockKmsMasterSecret = crypto.createHash('sha256').update('kms-master-test-key').digest();
+    const mockKms = {
+        encrypt: async (req) => {
+            const cipher = crypto.createCipheriv('aes-256-cbc', mockKmsMasterSecret, Buffer.alloc(16, 0));
+            const ciphertext = Buffer.concat([cipher.update(req.plaintext), cipher.final()]);
+            return [{ ciphertext }];
+        },
+        decrypt: async (req) => {
+            const decipher = crypto.createDecipheriv('aes-256-cbc', mockKmsMasterSecret, Buffer.alloc(16, 0));
+            const plaintext = Buffer.concat([decipher.update(req.ciphertext), decipher.final()]);
+            if (plaintext.length !== 32) {
+                throw new Error('Invalid unwrapped key size.');
+            }
+            return [{ plaintext }];
+        },
+    };
+    (0, index_1.setKmsClient)(mockKms);
     // Set up baseline fixtures
     await inMemoryDb.collection('users').doc('manager-daet-10').set({
         uid: 'manager-daet-10',
         role: 'branch_manager',
         assignedBranchId: 'daet',
+    });
+    await inMemoryDb.collection('users').doc('legacy-staff-user').set({
+        uid: 'legacy-staff-user',
+        role: 'staff',
+        assignedBranchId: 'daet',
+    });
+    await inMemoryDb.collection('users').doc('legacy-admin-user').set({
+        uid: 'legacy-admin-user',
+        role: 'admin',
+    });
+    await inMemoryDb.collection('users').doc('legacy-manager-user').set({
+        uid: 'legacy-manager-user',
+        role: 'manager',
     });
     await inMemoryDb.collection('users').doc('practitioner-assigned').set({
         uid: 'practitioner-assigned',
@@ -244,6 +308,56 @@ async function runTests() {
     catch (err) {
         const isPermissionDenied = err.code === 'permission-denied' || err.message.includes('Branch isolation block');
         assert(isPermissionDenied, 'Unauthorized branch access blocked with permission-denied error.');
+    }
+    // --- 2B. Legacy Roles Rejection Tests (staff, admin, manager) ---
+    try {
+        await index_1.createOrderSecure.run({
+            items: [{ skuId: 'hci-cmd-65ml', quantity: 1 }],
+            branchId: 'daet',
+            customer: { firstName: 'Staff' },
+            paymentMethod: 'cash_on_delivery',
+        }, { auth: { uid: 'legacy-staff-user', token: {} } });
+        assert(false, 'Legacy staff role was erroneously allowed to create order.');
+    }
+    catch (err) {
+        assert(err.code === 'permission-denied', 'Legacy staff role rejected with permission-denied.');
+    }
+    try {
+        await index_1.createOrderSecure.run({
+            items: [{ skuId: 'hci-cmd-65ml', quantity: 1 }],
+            branchId: 'daet',
+            customer: { firstName: 'Admin' },
+            paymentMethod: 'cash_on_delivery',
+        }, { auth: { uid: 'legacy-admin-user', token: {} } });
+        assert(false, 'Legacy admin role was erroneously allowed to create order.');
+    }
+    catch (err) {
+        assert(err.code === 'permission-denied', 'Legacy admin role rejected with permission-denied.');
+    }
+    try {
+        await index_1.createOrderSecure.run({
+            items: [{ skuId: 'hci-cmd-65ml', quantity: 1 }],
+            branchId: 'daet',
+            customer: { firstName: 'Manager' },
+            paymentMethod: 'cash_on_delivery',
+        }, { auth: { uid: 'legacy-manager-user', token: {} } });
+        assert(false, 'Legacy manager role was erroneously allowed to create order.');
+    }
+    catch (err) {
+        assert(err.code === 'permission-denied', 'Legacy manager role rejected with permission-denied.');
+    }
+    try {
+        await index_1.saveClinicalIntakeSecure.run({
+            userId: 'patient-jane-99',
+            clinicalIntake: { dietaryHabits: 'None', waterConsumption: 'None', declaredConditions: 'None' },
+            consentRecord: { purpose: 'Wellness', version: 'v1.0' },
+            scheduledAt: new Date().toISOString(),
+            deliveryMode: 'virtual',
+        }, { auth: { uid: 'legacy-admin-user', token: {} } });
+        assert(false, 'Legacy admin role was erroneously allowed clinical save.');
+    }
+    catch (err) {
+        assert(err.code === 'permission-denied', 'Legacy admin role rejected for clinical save with permission-denied.');
     }
     // --- 3. Unauthorized Clinical Access Test ---
     try {

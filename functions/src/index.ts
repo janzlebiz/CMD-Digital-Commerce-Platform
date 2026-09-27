@@ -24,8 +24,12 @@ export function getDatabase() {
 }
 
 // Real Cloud KMS Client Initialization
-const kmsClient = new KeyManagementServiceClient();
+let kmsClient: any = new KeyManagementServiceClient();
 const KMS_KEY_NAME = 'projects/gen-lang-client-0427039673/locations/global/keyRings/hic-cmd-keyring/cryptoKeys/clinical-spi-key';
+
+export function setKmsClient(customClient: any) {
+  kmsClient = customClient;
+}
 
 // Authoritative Business Constants (Server-Authoritative)
 const PRODUCTS_CATALOG: Record<string, { price: number; name: string; volume: string }> = {
@@ -59,13 +63,7 @@ async function encryptClinicalPayload(payload: any): Promise<{ ciphertext: strin
     }
     encryptedKeyBase64 = Buffer.from(result.ciphertext as Uint8Array).toString('base64');
   } catch (kmsErr: any) {
-    if (process.env.TEST_MOCK_KMS === 'true') {
-      const mockKey = crypto.createHash('sha256').update(KMS_KEY_NAME).digest();
-      const wrapCipher = crypto.createCipheriv('aes-256-cbc', mockKey, Buffer.alloc(16, 0));
-      encryptedKeyBase64 = Buffer.concat([wrapCipher.update(dek), wrapCipher.final()]).toString('base64');
-    } else {
-      throw new Error(`KMS Key Wrapping Error: ${kmsErr.message}`);
-    }
+    throw new Error(`KMS Key Wrapping Error: ${kmsErr.message}`);
   }
 
   // Encrypt payload string using local AES-256-GCM and DEK
@@ -102,20 +100,7 @@ async function decryptClinicalPayload(ciphertext: string, ivBase64: string, tagB
     }
     dek = Buffer.from(result.plaintext as Uint8Array);
   } catch (kmsErr: any) {
-    if (process.env.TEST_MOCK_KMS === 'true') {
-      try {
-        const mockKey = crypto.createHash('sha256').update(KMS_KEY_NAME).digest();
-        const unwrapCipher = crypto.createDecipheriv('aes-256-cbc', mockKey, Buffer.alloc(16, 0));
-        dek = Buffer.concat([unwrapCipher.update(encryptedKey), unwrapCipher.final()]);
-        if (dek.length !== 32) {
-          throw new Error('Invalid unwrapped key size.');
-        }
-      } catch (unwrapErr: any) {
-        throw new Error(`KMS Key Unwrapping Error: ${unwrapErr.message}`);
-      }
-    } else {
-      throw new Error(`KMS Key Unwrapping Error: ${kmsErr.message}`);
-    }
+    throw new Error(`KMS Key Unwrapping Error: ${kmsErr.message}`);
   }
 
   // Decrypt AES-256-GCM ciphertext using the unwrapped DEK

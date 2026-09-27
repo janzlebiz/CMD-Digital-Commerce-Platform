@@ -772,9 +772,9 @@ export function createExpressApp(deps: ServerDependencies = {}): Express {
     const user = await requireAuth(req, res);
     if (!user) return;
 
-    // Authorization: Only staff, branch_manager, regional_director, super_admin allowed
-    const isStaff = user.role === 'branch_manager' || user.role === 'regional_director' || user.role === 'super_admin' || (user.role as string) === 'staff' || (user.role as string) === 'admin';
-    if (!isStaff) {
+    // Authorization: Only branch_manager, regional_director, super_admin allowed
+    const isAuthorized = user.role === 'branch_manager' || user.role === 'regional_director' || user.role === 'super_admin';
+    if (!isAuthorized) {
       const errorMsg = `Administrative Access Denied: User role '${user.role}' is not authorized to access administrative order data.`;
       await logAuditEvent(
         user.uid,
@@ -866,9 +866,9 @@ export function createExpressApp(deps: ServerDependencies = {}): Express {
     const user = await requireAuth(req, res);
     if (!user) return;
 
-    // Authorization: Staff / Admin roles
-    const isStaff = user.role === 'branch_manager' || user.role === 'regional_director' || user.role === 'super_admin' || (user.role as string) === 'staff' || (user.role as string) === 'admin';
-    if (!isStaff) {
+    // Authorization: Only branch_manager, regional_director, super_admin allowed
+    const isAuthorized = user.role === 'branch_manager' || user.role === 'regional_director' || user.role === 'super_admin';
+    if (!isAuthorized) {
       const errorMsg = `Administrative Access Denied: User role '${user.role}' is not authorized to update order status.`;
       await logAuditEvent(
         user.uid,
@@ -1089,9 +1089,9 @@ export function createExpressApp(deps: ServerDependencies = {}): Express {
     const user = await requireAuth(req, res);
     if (!user) return;
 
-    // Authorization: Staff / Admin roles
-    const isStaff = user.role === 'branch_manager' || user.role === 'regional_director' || user.role === 'super_admin' || (user.role as string) === 'staff' || (user.role as string) === 'admin';
-    if (!isStaff) {
+    // Authorization: Only branch_manager, regional_director, super_admin allowed
+    const isAuthorized = user.role === 'branch_manager' || user.role === 'regional_director' || user.role === 'super_admin';
+    if (!isAuthorized) {
       const errorMsg = `Administrative Access Denied: User role '${user.role}' is not authorized to replenish inventory.`;
       await logAuditEvent(
         user.uid,
