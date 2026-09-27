@@ -288,6 +288,10 @@ export function aggregateCustomerCrmProfiles(
   const attendanceByUser = new Map<string, number>();
   for (const reg of data.registrations) {
     if (!reg.userId) continue;
+    if (branchFilter) {
+      const regBranch: string | undefined = reg.branchId || (typeof reg.workshopId === 'string' && reg.workshopId.includes(branchFilter) ? branchFilter : undefined);
+      if (regBranch && regBranch !== branchFilter) continue;
+    }
     if (reg.status === 'attended') {
       attendanceByUser.set(reg.userId, (attendanceByUser.get(reg.userId) || 0) + 1);
     }
@@ -307,6 +311,13 @@ export function aggregateCustomerCrmProfiles(
     for (const [uid, u] of userMap.entries()) {
       if (u.assignedBranchId === branchFilter && u.role === 'customer') {
         candidateUserIds.add(uid);
+      }
+    }
+    for (const reg of data.registrations) {
+      if (!reg.userId) continue;
+      const regBranch: string | undefined = reg.branchId || (typeof reg.workshopId === 'string' && reg.workshopId.includes(branchFilter) ? branchFilter : undefined);
+      if ((!regBranch || regBranch === branchFilter) && reg.status === 'attended') {
+        candidateUserIds.add(reg.userId);
       }
     }
   } else {
@@ -428,10 +439,15 @@ export const EXPENSE_CATEGORIES = [
 
 export type ExpenseCategory = typeof EXPENSE_CATEGORIES[number];
 
-export function parseDateBoundary(dateStr?: string, isEnd = false): number {
+export function parseDateBoundary(dateStr?: string, isEnd = false, tzOffset = '+08:00'): number {
   if (!dateStr) return isEnd ? Number.MAX_SAFE_INTEGER : 0;
   if (dateStr.length === 10 && /^\d{4}-\d{2}-\d{2}$/.test(dateStr)) {
-    return Date.parse(isEnd ? `${dateStr}T23:59:59.999Z` : `${dateStr}T00:00:00.000Z`);
+    const formattedTz = tzOffset.startsWith('+') || tzOffset.startsWith('-') ? tzOffset : `+${tzOffset}`;
+    const isoWithTz = isEnd
+      ? `${dateStr}T23:59:59.999${formattedTz}`
+      : `${dateStr}T00:00:00.000${formattedTz}`;
+    const parsed = Date.parse(isoWithTz);
+    return isNaN(parsed) ? (isEnd ? Number.MAX_SAFE_INTEGER : 0) : parsed;
   }
   const parsed = Date.parse(dateStr);
   return isNaN(parsed) ? (isEnd ? Number.MAX_SAFE_INTEGER : 0) : parsed;
@@ -587,8 +603,8 @@ export function calculateCommodityProfitability(
     if (branchId && ord.branchId !== branchId) continue;
     if (Array.isArray(ord.items)) {
       for (const item of ord.items) {
-        const name = String(item.name || '').toLowerCase();
-        const sku = String(item.sku || item.id || '').toLowerCase();
+        const name = String(item.productName || item.name || '').toLowerCase();
+        const sku = String(item.skuId || item.sku || item.id || '').toLowerCase();
         const matchesCommodity =
           commodityType === 'rice'
             ? name.includes('rice') || sku.includes('rice')
@@ -596,7 +612,7 @@ export function calculateCommodityProfitability(
 
         if (matchesCommodity) {
           const qty = Number(item.quantity) || 1;
-          const unitPrice = Number(item.price) || 0;
+          const unitPrice = Number(item.unitPrice !== undefined ? item.unitPrice : item.price) || 0;
           let itemKg = Number(item.volumeKg);
           if (isNaN(itemKg) || itemKg <= 0) {
             if (name.includes('50kg') || name.includes('50 kg') || name.includes('sack')) {
@@ -612,7 +628,7 @@ export function calculateCommodityProfitability(
             }
           }
 
-          const revenueFromItem = unitPrice * qty;
+          const revenueFromItem = Number(item.totalPrice !== undefined ? item.totalPrice : unitPrice * qty);
           totalVolumeSoldKg += itemKg;
           totalSalesRevenue += revenueFromItem;
         }

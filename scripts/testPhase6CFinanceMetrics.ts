@@ -224,7 +224,7 @@ async function runFinanceMetricsSuite() {
       fulfillmentStatus: 'delivered',
       createdAt: '2026-09-10T10:00:00.000Z',
       items: [
-        { id: 'item-1', name: 'HCI Cell Mineral Drops (CMD) — 65 mL', price: 1200, quantity: 2 },
+        { skuId: 'sku-cmd-65ml', productName: 'HCI Cell Mineral Drops (CMD) — 65 mL', unitPrice: 1200, totalPrice: 2400, quantity: 2 },
       ],
     },
     // Daet Order 2: Unpaid Bank Transfer (Accounts Receivable), 1200 PHP
@@ -236,7 +236,7 @@ async function runFinanceMetricsSuite() {
       fulfillmentStatus: 'processing',
       createdAt: '2026-09-15T11:00:00.000Z',
       items: [
-        { id: 'item-2', name: 'HCI Cell Mineral Drops (CMD) — 65 mL', price: 1200, quantity: 1 },
+        { skuId: 'sku-cmd-65ml', productName: 'HCI Cell Mineral Drops (CMD) — 65 mL', unitPrice: 1200, totalPrice: 1200, quantity: 1 },
       ],
     },
     // Daet Order 3: Rice Commodity Order, Paid GCash, 5200 PHP (2 sacks of 50kg rice = 100kg total)
@@ -248,7 +248,7 @@ async function runFinanceMetricsSuite() {
       fulfillmentStatus: 'delivered',
       createdAt: '2026-09-20T14:00:00.000Z',
       items: [
-        { id: 'item-rice', name: 'Organic Red Mountain Rice 50kg Sack', price: 2600, quantity: 2, volumeKg: 100 },
+        { skuId: 'sku-rice-50kg', productName: 'Organic Red Mountain Rice 50kg Sack', unitPrice: 2600, totalPrice: 5200, quantity: 2, volumeKg: 100 },
       ],
     },
     // Labo Order 1: Paid Maya, 1300 PHP
@@ -260,7 +260,7 @@ async function runFinanceMetricsSuite() {
       fulfillmentStatus: 'delivered',
       createdAt: '2026-09-12T09:00:00.000Z',
       items: [
-        { id: 'item-3', name: 'HCI Cell Mineral Drops (CMD) — 30 mL', price: 650, quantity: 2 },
+        { skuId: 'sku-cmd-30ml', productName: 'HCI Cell Mineral Drops (CMD) — 30 mL', unitPrice: 650, totalPrice: 1300, quantity: 2 },
       ],
     },
     // Labo Order 2: Copra Derivative Order, Paid Maya, 1400 PHP (4 bottles of Copra Coconut Oil, 4kg)
@@ -272,7 +272,7 @@ async function runFinanceMetricsSuite() {
       fulfillmentStatus: 'delivered',
       createdAt: '2026-09-18T16:00:00.000Z',
       items: [
-        { id: 'item-copra', name: 'Premium Copra Coconut Oil 1L Bottle', price: 350, quantity: 4, volumeKg: 4 },
+        { skuId: 'sku-copra-oil-1l', productName: 'Premium Copra Coconut Oil 1L Bottle', unitPrice: 350, totalPrice: 1400, quantity: 4, volumeKg: 4 },
       ],
     },
     // Cancelled Order: Should be ignored by metrics
@@ -284,7 +284,7 @@ async function runFinanceMetricsSuite() {
       fulfillmentStatus: 'cancelled',
       status: 'cancelled',
       createdAt: '2026-09-16T12:00:00.000Z',
-      items: [{ id: 'item-c', name: 'Cancelled Item', price: 5000, quantity: 1 }],
+      items: [{ skuId: 'sku-cancelled', productName: 'Cancelled Item', unitPrice: 5000, totalPrice: 5000, quantity: 1 }],
     },
   };
 
@@ -703,11 +703,16 @@ async function runFinanceMetricsSuite() {
 
     console.log('\n--- Test Suite 8: Offline Storage & Date Boundary Verification ---');
     {
-      // 1. Date Boundary Local Calendar Parsing Verification
-      const startMs = parseDateBoundary('2026-09-27', false);
-      const endMs = parseDateBoundary('2026-09-27', true);
+      // 1. Date Boundary Local Calendar Parsing Verification (Asia/Manila +08:00)
+      const startMs = parseDateBoundary('2026-09-27', false, '+08:00');
+      const endMs = parseDateBoundary('2026-09-27', true, '+08:00');
       assert(endMs > startMs, 'End date boundary timestamp is greater than start date boundary');
       assert(endMs - startMs === 86399999, '24-hour calendar-date boundary spans exactly 86,399,999ms');
+      assert(
+        new Date(startMs).toISOString() === '2026-09-26T16:00:00.000Z' &&
+        new Date(endMs).toISOString() === '2026-09-27T15:59:59.999Z',
+        'Asia/Manila calendar-day boundaries map correctly to UTC timestamps'
+      );
 
       // 2. IndexedDB v2 -> v3 Migration Schema & Upgrade Contract
       const mockStores = new Set<string>();

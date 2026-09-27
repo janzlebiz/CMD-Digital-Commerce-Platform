@@ -6,11 +6,11 @@
 **Verification Date:** 2026-09-27  
 **Fulfillment Status:** Complete (Milestone 2 Only — Municipality/Replenishment separate engine, marketing automation, SMS/WhatsApp, and Phase 6D strictly NOT started)  
 **Test Metrics:**  
-- **Phase 6C Milestone 2 Suite:** **59 PASSED**, **0 FAILED**  
+- **Phase 6C Milestone 2 Suite:** **58 PASSED**, **0 FAILED**  
 - **Phase 6C Milestone 1 Suite:** **96 PASSED**, **0 FAILED**  
 - **Phase 6A Regression Suite:** **53 PASSED**, **0 FAILED**  
 - **Phase 6B Regression Suite:** **36 PASSED**, **0 FAILED**  
-- **Cumulative Active Test Suite:** **244 / 244 TOTAL TESTS PASSING (100%)**  
+- **Cumulative Active Test Suite:** **243 / 243 TOTAL TESTS PASSING (100%)**  
 *(Note: The CRM tests use an in-memory/mock Firestore harness and are not independent production Firestore verification).*
 
 ---

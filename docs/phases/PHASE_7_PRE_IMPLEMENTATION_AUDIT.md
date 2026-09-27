@@ -2,17 +2,17 @@
 
 **Document Reference:** `docs/phases/PHASE_7_PRE_IMPLEMENTATION_AUDIT.md`  
 **Evaluation Target:** Phase 7 (Multi-Branch Inventory Synchronization, Expiry & Batch Traceability, Supply Chain Forecasting, B2B Stockist Partner Portal, and Distribution Logistics)  
-**Baseline Certified:** Phase 0–6C Milestones 1–3 (370/370 automated assertions passing)  
+**Baseline Certified:** Phase 0–6C Milestones 1–3 (333/333 automated assertions passing)  
 **Audit Date:** 2026-09-27  
-**Status:** Pre-Implementation Architectural Assessment  
+**Status:** Pre-Implementation Architectural Assessment (Proposed / Unimplemented)  
 
 ---
 
 ## 1. Executive Summary & Audit Mandate
 
-This pre-implementation audit establishes the architectural, regulatory, and technical specifications for **Phase 7** of the **HCI Cell Mineral Drops (CMD) Digital Commerce & Naturopathic Wellness Platform**. 
+This pre-implementation audit establishes the architectural, regulatory, and technical specifications for **Phase 7** of the **HCI Cell Mineral Drops (CMD) Digital Commerce & Naturopathic Wellness Platform**. All Phase 7 features discussed herein are strictly **proposed and unimplemented** pending separate authorization.
 
-Phase 7 expands the platform's commercial and financial operations into a resilient **Multi-Branch Inventory Synchronization, Expiry & Batch Traceability, and B2B Distribution Logistics Engine**. This system will bridge central procurement and local branch operations across the twelve (12) municipalities of Camarines Norte, Philippines.
+Phase 7 will expand the platform's commercial and financial operations into a resilient **Multi-Branch Inventory Synchronization, Expiry & Batch Traceability, and B2B Distribution Logistics Engine**. This system will bridge central procurement and local branch operations across the twelve (12) municipalities of Camarines Norte, Philippines.
 
 ### 1.1 Statutory Compliance Mandate
 * **Republic Act No. 11967 (Internet Transactions Act of 2023 - ITA):** Mandates rigorous tracking of seller inventory, product provenance, delivery commitments, and complete transaction traceability. Consumers must be guaranteed accurate product stock status at checkout.
@@ -23,7 +23,7 @@ Phase 7 expands the platform's commercial and financial operations into a resili
 
 ## 2. Distinction Between Active Codebase and Proposed Phase 7 Scope
 
-No Phase 7 implementation code has been written. To protect the passing 370-test regression baseline, the table below delineates the strict boundary between existing Phase 6C structures and Phase 7 proposals.
+No Phase 7 implementation code has been written. To protect the passing 333-test regression baseline, the table below delineates the strict boundary between existing Phase 6C structures and Phase 7 proposals.
 
 ### 2.1 Capability Status Matrix
 
@@ -206,7 +206,7 @@ match /stock_transfers/{transferId} {
 
 ## 6. Regression & Zero-Impact Certification
 
-To ensure that the 370 passing regression assertions remain completely stable, Phase 7 establishes the following isolation guarantees:
+To ensure that the 333 passing regression assertions remain completely stable, Phase 7 establishes the following isolation guarantees:
 1. **Phase 6A (Clinical Intakes & appointments):** No clinical logic, KMS credentials, or private consultation routes are modified or imported.
 2. **Phase 6B (Workshops & Dynamic QR Passes):** Symposia schedules, check-in signatures, and participant registration remain 100% independent of stock counts.
 3. **Phase 6C Milestones 1–3 (Redress, CRM, and Expenses):** 
