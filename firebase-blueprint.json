@@ -141,6 +141,39 @@
         "updatedAt": { "type": "string", "format": "date-time" }
       },
       "required": ["id", "userId", "workshopId", "status", "signature"]
+    },
+    "support_ticket": {
+      "title": "SupportTicket",
+      "description": "RA 11967 Consumer dispute and redress support tickets with 7-day statutory SLA.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "userId": { "type": "string" },
+        "customerName": { "type": "string" },
+        "customerEmail": { "type": "string" },
+        "customerPhone": { "type": "string" },
+        "orderId": { "type": "string" },
+        "branchId": { "type": "string" },
+        "category": {
+          "type": "string",
+          "enum": ["damaged_product", "delivery_delay", "billing_issue", "product_inquiry", "statutory_dpa_inquiry", "wrong_item", "cancellation_refund"]
+        },
+        "subject": { "type": "string" },
+        "description": { "type": "string" },
+        "status": {
+          "type": "string",
+          "enum": ["submitted", "under_investigation", "escalated_sla_breach", "resolved", "closed"]
+        },
+        "slaDueAt": { "type": "string", "format": "date-time" },
+        "isEscalated": { "type": "boolean" },
+        "resolutionSummary": { "type": "string" },
+        "resolvedAt": { "type": "string", "format": "date-time" },
+        "resolvedByUid": { "type": "string" },
+        "resolvedByName": { "type": "string" },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["id", "userId", "customerName", "customerEmail", "branchId", "category", "subject", "description", "status", "slaDueAt", "isEscalated", "createdAt"]
     }
   },
   "firestore": {
@@ -175,6 +208,10 @@
     "/workshop_registrations/{regId}": {
       "schema": "workshop_registration",
       "description": "User workshop registrations."
+    },
+    "/support_tickets/{ticketId}": {
+      "schema": "support_ticket",
+      "description": "Consumer dispute and redress tickets under RA 11967."
     }
   }
 }

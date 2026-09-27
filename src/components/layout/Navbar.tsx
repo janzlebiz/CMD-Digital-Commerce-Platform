@@ -33,6 +33,7 @@ export const Navbar: React.FC<NavbarProps> = ({ currentView, onNavigate, cartCou
     { view: 'products', label: 'Product Catalog' },
     { view: 'consultations', label: '🌿 Consultations' },
     { view: 'workshops', label: '📅 Workshops' },
+    { view: 'support', label: '⚖️ Redress' },
     { view: 'branches', label: '6 Branches' },
     { view: 'faq', label: 'FAQ' },
     { view: 'contact', label: 'Contact' },
@@ -161,6 +162,12 @@ export const Navbar: React.FC<NavbarProps> = ({ currentView, onNavigate, cartCou
                       >
                         📅 My Workshops
                       </button>
+                      <button
+                        onClick={() => handleNav('support')}
+                        className="w-full text-left px-3 py-2 text-slate-300 hover:bg-slate-800 hover:text-white rounded-lg transition"
+                      >
+                        ⚖️ Redress & Complaints
+                      </button>
                       {isStaff && (
                         <button
                           onClick={() => handleNav('admin')}
@@ -257,6 +264,12 @@ export const Navbar: React.FC<NavbarProps> = ({ currentView, onNavigate, cartCou
                     className="w-full text-left px-3 py-2 text-slate-300 hover:bg-slate-800 rounded-lg"
                   >
                     📅 My Workshops
+                  </button>
+                  <button
+                    onClick={() => handleNav('support')}
+                    className="w-full text-left px-3 py-2 text-slate-300 hover:bg-slate-800 rounded-lg"
+                  >
+                    ⚖️ Redress & Complaints
                   </button>
                   {isStaff && (
                     <button

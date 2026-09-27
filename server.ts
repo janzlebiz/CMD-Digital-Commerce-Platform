@@ -183,6 +183,50 @@ export function verifyRegistrationSignature(registrationId: string, userId: stri
   return crypto.timingSafeEqual(Buffer.from(signature, 'utf8'), Buffer.from(expected, 'utf8'));
 }
 
+// Statutory 7-Day SLA for Consumer Redress under RA 11967
+export const RA11967_SLA_DAYS = 7;
+export const RA11967_SLA_MS = RA11967_SLA_DAYS * 24 * 60 * 60 * 1000;
+
+export const VALID_TICKET_CATEGORIES = [
+  'damaged_product',
+  'delivery_delay',
+  'billing_issue',
+  'product_inquiry',
+  'statutory_dpa_inquiry',
+  'wrong_item',
+  'cancellation_refund',
+] as const;
+
+export const VALID_TICKET_STATUSES = [
+  'submitted',
+  'under_investigation',
+  'escalated_sla_breach',
+  'resolved',
+  'closed',
+] as const;
+
+export function evaluateSlaEscalation(ticket: any): boolean {
+  if (ticket.status !== 'resolved' && ticket.status !== 'closed' && !ticket.isEscalated) {
+    const due = Date.parse(ticket.slaDueAt);
+    if (!isNaN(due) && Date.now() > due) {
+      ticket.isEscalated = true;
+      const prev = ticket.status;
+      ticket.status = 'escalated_sla_breach';
+      ticket.updatedAt = new Date().toISOString();
+      if (!Array.isArray(ticket.escalationHistory)) {
+        ticket.escalationHistory = [];
+      }
+      ticket.escalationHistory.push({
+        escalatedAt: new Date().toISOString(),
+        reason: 'Statutory 7-day internal dispute resolution SLA expired under RA 11967.',
+        previousStatus: prev,
+      });
+      return true;
+    }
+  }
+  return false;
+}
+
 export function getDailyConsultationSlots(dateStr: string, practitionerId: string) {
   const slotDefinitions = [
     { start: '09:00', end: '09:45' },
@@ -1212,6 +1256,366 @@ export function createExpressApp(deps: ServerDependencies = {}): Express {
       res.json({ logs });
     } catch (err: any) {
       res.status(500).json({ error: err.message });
+    }
+  });
+
+  // --- PHASE 6C MILESTONE 1: RA 11967 Consumer Dispute & Support Tickets ---
+
+  // 1. Submit Support Ticket (Customer Grievance)
+  app.post('/api/support/tickets', async (req: Request, res: Response) => {
+    const user = await requireAuth(req, res);
+    if (!user) return;
+
+    if (user.role === 'practitioner') {
+      res.status(403).json({ error: 'Access Denied: Practitioners cannot create consumer redress tickets.' });
+      return;
+    }
+
+    const { branchId, category, subject, description, orderId, customerName, customerPhone } = req.body;
+
+    if (!branchId || typeof branchId !== 'string') {
+      res.status(400).json({ error: 'branchId is required and must be a string.' });
+      return;
+    }
+
+    if (!category || !VALID_TICKET_CATEGORIES.includes(category)) {
+      res.status(400).json({
+        error: `category must be one of: ${VALID_TICKET_CATEGORIES.join(', ')}`,
+      });
+      return;
+    }
+
+    if (!subject || typeof subject !== 'string' || subject.trim().length < 3) {
+      res.status(400).json({ error: 'subject is required (minimum 3 characters).' });
+      return;
+    }
+
+    if (!description || typeof description !== 'string' || description.trim().length < 5) {
+      res.status(400).json({ error: 'description is required (minimum 5 characters).' });
+      return;
+    }
+
+    try {
+      const now = new Date();
+      const createdAt = now.toISOString();
+      const slaDueAt = new Date(now.getTime() + RA11967_SLA_MS).toISOString();
+      const ticketId = `TKT-${now.getTime()}-${crypto.randomBytes(3).toString('hex').toUpperCase()}`;
+
+      const newTicket = {
+        id: ticketId,
+        userId: user.uid,
+        customerName: customerName ? String(customerName).trim() : (user.email ? user.email.split('@')[0] : 'Valued Customer'),
+        customerEmail: user.email,
+        customerPhone: customerPhone ? String(customerPhone).trim() : undefined,
+        orderId: orderId ? String(orderId).trim() : undefined,
+        branchId: String(branchId).trim(),
+        category,
+        subject: subject.trim(),
+        description: description.trim(),
+        status: 'submitted',
+        slaDueAt,
+        isEscalated: false,
+        escalationHistory: [],
+        createdAt,
+        updatedAt: createdAt,
+      };
+
+      await db.collection('support_tickets').doc(ticketId).set(newTicket);
+
+      await logAuditEvent(
+        user.uid,
+        user.role,
+        newTicket.branchId,
+        'support_ticket_created',
+        'support_tickets',
+        ticketId,
+        true,
+        { category, branchId: newTicket.branchId, slaDueAt },
+        req
+      );
+
+      res.status(201).json({
+        ticket: newTicket,
+        statutoryNotice: 'Statutory 7-day internal dispute resolution SLA enforced under RA 11967.',
+      });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  // 2. Query Support Tickets (Strict Ownership & Branch Isolation with Dynamic SLA Evaluation)
+  app.get('/api/support/tickets', async (req: Request, res: Response) => {
+    const user = await requireAuth(req, res);
+    if (!user) return;
+
+    if (user.role === 'practitioner') {
+      res.status(403).json({ error: 'Access Denied: Practitioners do not have access to commercial consumer redress tickets.' });
+      return;
+    }
+
+    try {
+      const snap = await db.collection('support_tickets').get();
+      const allTickets: any[] = [];
+      if (snap && !snap.empty) {
+        snap.forEach((d: any) => allTickets.push(d.data()));
+      }
+
+      // Dynamic SLA Evaluation for overdue tickets
+      for (const t of allTickets) {
+        if (evaluateSlaEscalation(t)) {
+          await db.collection('support_tickets').doc(t.id).set(t);
+          await logAuditEvent(
+            'system',
+            'system',
+            t.branchId,
+            'support_ticket_sla_escalated',
+            'support_tickets',
+            t.id,
+            true,
+            { slaDueAt: t.slaDueAt },
+            req
+          );
+        }
+      }
+
+      let filteredTickets: any[] = [];
+      if (user.role === 'customer') {
+        // Customer ownership isolation: customers only see their own tickets
+        filteredTickets = allTickets.filter((t) => t.userId === user.uid);
+      } else if (user.role === 'branch_manager') {
+        // Branch isolation: branch managers only see tickets for their assigned branch
+        filteredTickets = allTickets.filter((t) => t.branchId === user.assignedBranchId);
+      } else if (user.role === 'regional_director' || user.role === 'super_admin') {
+        // Regional Director and Super Admin have cross-branch oversight
+        filteredTickets = allTickets;
+      }
+
+      // Sort by createdAt descending
+      filteredTickets.sort((a, b) => Date.parse(b.createdAt) - Date.parse(a.createdAt));
+
+      res.json({ tickets: filteredTickets });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  // 3. Get Single Support Ticket (Ownership & Branch Boundary Check)
+  app.get('/api/support/tickets/:ticketId', async (req: Request, res: Response) => {
+    const user = await requireAuth(req, res);
+    if (!user) return;
+
+    if (user.role === 'practitioner') {
+      res.status(403).json({ error: 'Access Denied: Practitioners do not have access to support tickets.' });
+      return;
+    }
+
+    try {
+      const doc = await db.collection('support_tickets').doc(req.params.ticketId).get();
+      if (!doc || !doc.exists) {
+        res.status(404).json({ error: 'Support ticket not found.' });
+        return;
+      }
+
+      const ticket = doc.data();
+
+      // Enforce access boundaries
+      if (user.role === 'customer' && ticket.userId !== user.uid) {
+        res.status(403).json({ error: 'Access Denied: Customer cannot view another user\'s support ticket.' });
+        return;
+      }
+
+      if (user.role === 'branch_manager' && ticket.branchId !== user.assignedBranchId) {
+        res.status(403).json({ error: 'Access Denied: Branch managers may only view tickets for their assigned branch.' });
+        return;
+      }
+
+      // Dynamic SLA evaluation check
+      if (evaluateSlaEscalation(ticket)) {
+        await db.collection('support_tickets').doc(ticket.id).set(ticket);
+        await logAuditEvent(
+          'system',
+          'system',
+          ticket.branchId,
+          'support_ticket_sla_escalated',
+          'support_tickets',
+          ticket.id,
+          true,
+          { slaDueAt: ticket.slaDueAt },
+          req
+        );
+      }
+
+      res.json({ ticket });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  // 4. Update Support Ticket Status / Resolve (Transactional & Branch Guarded)
+  app.patch('/api/support/tickets/:ticketId', async (req: Request, res: Response) => {
+    const user = await requireAuth(req, res);
+    if (!user) return;
+
+    if (user.role === 'customer') {
+      res.status(403).json({ error: 'Access Denied: Customers cannot administratively update support tickets.' });
+      return;
+    }
+
+    if (user.role === 'practitioner') {
+      res.status(403).json({ error: 'Access Denied: Practitioners cannot update support tickets.' });
+      return;
+    }
+
+    const { status, resolutionSummary, internalNotes } = req.body;
+
+    if (status && !VALID_TICKET_STATUSES.includes(status)) {
+      res.status(400).json({ error: `Invalid status. Must be one of: ${VALID_TICKET_STATUSES.join(', ')}` });
+      return;
+    }
+
+    if (status === 'resolved') {
+      if (!resolutionSummary || typeof resolutionSummary !== 'string' || resolutionSummary.trim().length < 5) {
+        res.status(400).json({ error: 'resolutionSummary (minimum 5 characters) is required when resolving a ticket.' });
+        return;
+      }
+    }
+
+    try {
+      const updated = await db.runTransaction(async (tx: any) => {
+        const docRef = db.collection('support_tickets').doc(req.params.ticketId);
+        const doc = await tx.get(docRef);
+        if (!doc || !doc.exists) {
+          throw new Error('NOT_FOUND: Support ticket not found.');
+        }
+
+        const current = doc.data();
+
+        // Branch Isolation: Branch Manager must match ticket branch
+        if (user.role === 'branch_manager' && current.branchId !== user.assignedBranchId) {
+          throw new Error('PERMISSION_DENIED: Branch managers may only update tickets for their assigned branch.');
+        }
+
+        const patch: any = {
+          updatedAt: new Date().toISOString(),
+        };
+
+        if (status) {
+          patch.status = status;
+        }
+
+        if (status === 'resolved') {
+          patch.resolutionSummary = resolutionSummary.trim();
+          patch.resolvedAt = new Date().toISOString();
+          patch.resolvedByUid = user.uid;
+          patch.resolvedByName = user.email;
+        }
+
+        if (internalNotes && typeof internalNotes === 'string') {
+          patch.internalNotes = internalNotes.trim();
+        }
+
+        const merged = { ...current, ...patch };
+        tx.set(docRef, merged);
+        return merged;
+      });
+
+      await logAuditEvent(
+        user.uid,
+        user.role,
+        updated.branchId,
+        'support_ticket_status_updated',
+        'support_tickets',
+        updated.id,
+        true,
+        { status: updated.status },
+        req
+      );
+
+      res.json({ ticket: updated });
+    } catch (err: any) {
+      if (err.message.startsWith('NOT_FOUND')) {
+        res.status(404).json({ error: err.message });
+      } else if (err.message.startsWith('PERMISSION_DENIED')) {
+        res.status(403).json({ error: err.message });
+      } else {
+        res.status(500).json({ error: err.message });
+      }
+    }
+  });
+
+  // 5. Escalate Support Ticket (SLA Breach or Expedited Redress Queue)
+  app.post('/api/support/tickets/:ticketId/escalate', async (req: Request, res: Response) => {
+    const user = await requireAuth(req, res);
+    if (!user) return;
+
+    if (user.role === 'practitioner') {
+      res.status(403).json({ error: 'Access Denied: Practitioners cannot escalate support tickets.' });
+      return;
+    }
+
+    try {
+      const updated = await db.runTransaction(async (tx: any) => {
+        const docRef = db.collection('support_tickets').doc(req.params.ticketId);
+        const doc = await tx.get(docRef);
+        if (!doc || !doc.exists) {
+          throw new Error('NOT_FOUND: Support ticket not found.');
+        }
+
+        const current = doc.data();
+
+        // Customer can only escalate their own ticket
+        if (user.role === 'customer' && current.userId !== user.uid) {
+          throw new Error('PERMISSION_DENIED: Customers can only escalate their own tickets.');
+        }
+
+        // Branch manager can only escalate their own branch tickets
+        if (user.role === 'branch_manager' && current.branchId !== user.assignedBranchId) {
+          throw new Error('PERMISSION_DENIED: Branch managers can only escalate tickets for their assigned branch.');
+        }
+
+        const now = new Date().toISOString();
+        const reason = req.body.reason ? String(req.body.reason).trim() : 'Manual escalation under RA 11967 consumer redress procedures.';
+
+        const history = Array.isArray(current.escalationHistory) ? [...current.escalationHistory] : [];
+        history.push({
+          escalatedAt: now,
+          reason,
+          previousStatus: current.status,
+        });
+
+        const merged = {
+          ...current,
+          status: 'escalated_sla_breach',
+          isEscalated: true,
+          escalationHistory: history,
+          updatedAt: now,
+        };
+
+        tx.set(docRef, merged);
+        return merged;
+      });
+
+      await logAuditEvent(
+        user.uid,
+        user.role,
+        updated.branchId,
+        'support_ticket_manually_escalated',
+        'support_tickets',
+        updated.id,
+        true,
+        { reason: req.body.reason },
+        req
+      );
+
+      res.json({ ticket: updated });
+    } catch (err: any) {
+      if (err.message.startsWith('NOT_FOUND')) {
+        res.status(404).json({ error: err.message });
+      } else if (err.message.startsWith('PERMISSION_DENIED')) {
+        res.status(403).json({ error: err.message });
+      } else {
+        res.status(500).json({ error: err.message });
+      }
     }
   });
 

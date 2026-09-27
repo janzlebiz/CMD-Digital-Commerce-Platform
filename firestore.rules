@@ -101,5 +101,20 @@ service cloud.firestore {
       );
       allow write: if false;
     }
+
+    match /support_tickets/{ticketId} {
+      allow get: if isSignedIn() && (
+        isOwner(resource.data.userId) ||
+        (isBranchManager() && get(/databases/$(database)/documents/users/$(request.auth.uid)).data.assignedBranchId == resource.data.branchId) ||
+        isRegionalDirector() ||
+        isSuperAdmin()
+      );
+      allow list: if isSignedIn() && (
+        isBranchManager() ||
+        isRegionalDirector() ||
+        isSuperAdmin()
+      );
+      allow write: if false;
+    }
   }
 }

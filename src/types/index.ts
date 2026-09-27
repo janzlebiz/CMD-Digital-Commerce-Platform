@@ -20,7 +20,8 @@ export type PageView =
   | 'orders'
   | 'consultations'
   | 'admin'
-  | 'workshops';
+  | 'workshops'
+  | 'support';
 
 export type UserRole = 'customer' | 'practitioner' | 'branch_manager' | 'regional_director' | 'super_admin';
 
@@ -255,3 +256,50 @@ export interface WorkshopRegistration {
   createdAt: string;
   updatedAt: string;
 }
+
+// Phase 6C Support Ticket & Redress Types (RA 11967)
+export type TicketCategory =
+  | 'damaged_product'
+  | 'delivery_delay'
+  | 'billing_issue'
+  | 'product_inquiry'
+  | 'statutory_dpa_inquiry'
+  | 'wrong_item'
+  | 'cancellation_refund';
+
+export type TicketStatus =
+  | 'submitted'
+  | 'under_investigation'
+  | 'escalated_sla_breach'
+  | 'resolved'
+  | 'closed';
+
+export interface TicketEscalationEntry {
+  escalatedAt: string;
+  reason: string;
+  previousStatus: TicketStatus;
+}
+
+export interface SupportTicket {
+  id: string;
+  userId: string;
+  customerName: string;
+  customerEmail: string;
+  customerPhone?: string;
+  orderId?: string;
+  branchId: string;
+  category: TicketCategory;
+  subject: string;
+  description: string;
+  status: TicketStatus;
+  slaDueAt: string; // ISO 8601 statutory 7-day SLA deadline
+  isEscalated: boolean;
+  resolutionSummary?: string;
+  resolvedAt?: string;
+  resolvedByUid?: string;
+  resolvedByName?: string;
+  escalationHistory?: TicketEscalationEntry[];
+  createdAt: string;
+  updatedAt: string;
+}
+
