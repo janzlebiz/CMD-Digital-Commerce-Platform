@@ -57,21 +57,102 @@ export function createExpressApp(deps: ServerDependencies = {}): Express {
   const app = express();
   app.use(express.json());
 
+  // Assign a unique Correlation ID middleware for end-to-end request tracing
+  app.use((req, res, next) => {
+    (req as any).correlationId = crypto.randomUUID ? crypto.randomUUID() : `TRACE-${Date.now()}-${crypto.randomBytes(4).toString('hex')}`;
+    next();
+  });
+
   const db = deps.db || getFirestore('ai-studio-cmddigitalcommer-8d70f45b-1636-42ba-9e2d-f063a7b0e086');
   const auth = deps.auth || getAuth();
   const kmsClient = deps.kmsClient || new KeyManagementServiceClient();
+
+  // --- SERVER-AUTHORITATIVE STRUCTURED AUDIT LOGGER (FAIL CLOSED & SAFE-SCRUBBING) ---
+  async function logAuditEvent(
+    actorUid: string | null,
+    actorRole: string | null,
+    branchId: string | null,
+    action: string,
+    targetResource: string,
+    targetId: string | null,
+    success: boolean,
+    metadata?: Record<string, any>,
+    req?: Request
+  ) {
+    try {
+      const correlationId = req ? ((req as any).correlationId || crypto.randomUUID()) : crypto.randomUUID();
+
+      // Scrub metadata to prevent storing passwords, tokens, keys, clinical plaintexts, or secrets
+      const scrubbedMetadata: Record<string, any> = {};
+      if (metadata) {
+        const sensitiveKeys = [
+          'password', 'token', 'key', 'ciphertext', 'iv', 'tag', 'encryptedKey', 
+          'clinicalIntake', 'clinicalData', 'dietaryHabits', 'waterConsumption', 
+          'declaredConditions', 'card', 'cvv', 'secret', 'authHeader', 'authorization', 'signature'
+        ];
+        for (const [k, val] of Object.entries(metadata)) {
+          if (sensitiveKeys.some(s => k.toLowerCase().includes(s))) {
+            scrubbedMetadata[k] = '[REDACTED_SENSITIVE_DATA]';
+          } else {
+            scrubbedMetadata[k] = val;
+          }
+        }
+      }
+
+      const logId = `AUDIT-${Date.now()}-${crypto.randomBytes(4).toString('hex')}`;
+      await db.collection('audit_logs').doc(logId).set({
+        id: logId,
+        actorUid: actorUid || 'unauthenticated',
+        actorRole: actorRole || 'guest',
+        branchId: branchId || null,
+        action,
+        targetResource,
+        targetId: targetId || null,
+        timestamp: FieldValue.serverTimestamp(),
+        success,
+        metadata: scrubbedMetadata,
+        correlationId,
+      });
+    } catch (err) {
+      console.error('Failed to write structured audit log event:', err);
+    }
+  }
 
   // --- STRICT TOKEN AUTHENTICATION (NO HEADER/BODY FALLBACKS) ---
   async function requireAuth(req: Request, res: Response): Promise<AuthenticatedUser | null> {
     const authHeader = req.headers.authorization;
     if (!authHeader || !authHeader.startsWith('Bearer ')) {
-      res.status(401).json({ error: 'Authentication Required: Missing or invalid Bearer authorization token.' });
+      const errorMsg = 'Authentication Required: Missing or invalid Bearer authorization token.';
+      await logAuditEvent(
+        null,
+        null,
+        null,
+        'authorization_failure',
+        'auth',
+        null,
+        false,
+        { error: errorMsg, path: req.path },
+        req
+      );
+      res.status(401).json({ error: errorMsg });
       return null;
     }
 
     const token = authHeader.split('Bearer ')[1].trim();
     if (!token) {
-      res.status(401).json({ error: 'Authentication Required: Empty bearer token.' });
+      const errorMsg = 'Authentication Required: Empty bearer token.';
+      await logAuditEvent(
+        null,
+        null,
+        null,
+        'authorization_failure',
+        'auth',
+        null,
+        false,
+        { error: errorMsg, path: req.path },
+        req
+      );
+      res.status(401).json({ error: errorMsg });
       return null;
     }
 
@@ -82,7 +163,19 @@ export function createExpressApp(deps: ServerDependencies = {}): Express {
       uid = decoded.uid;
       email = decoded.email;
     } catch (err: any) {
-      res.status(401).json({ error: `Authentication Failed: Invalid or expired Firebase ID token (${err.message}).` });
+      const errorMsg = `Authentication Failed: Invalid or expired Firebase ID token (${err.message}).`;
+      await logAuditEvent(
+        null,
+        null,
+        null,
+        'authorization_failure',
+        'auth',
+        null,
+        false,
+        { error: errorMsg, path: req.path },
+        req
+      );
+      res.status(401).json({ error: errorMsg });
       return null;
     }
 
@@ -100,7 +193,19 @@ export function createExpressApp(deps: ServerDependencies = {}): Express {
         email: data?.email || email,
       };
     } catch (err: any) {
-      res.status(500).json({ error: `Authorization Lookup Failed: Unable to verify user profile (${err.message}).` });
+      const errorMsg = `Authorization Lookup Failed: Unable to verify user profile (${err.message}).`;
+      await logAuditEvent(
+        uid,
+        null,
+        null,
+        'authorization_failure',
+        'auth',
+        uid,
+        false,
+        { error: errorMsg, path: req.path },
+        req
+      );
+      res.status(500).json({ error: errorMsg });
       return null;
     }
   }
@@ -292,7 +397,19 @@ export function createExpressApp(deps: ServerDependencies = {}): Express {
 
       // Phase 3 Branch Isolation Check
       if (user.assignedBranchId && user.assignedBranchId !== branchId && user.role !== 'super_admin') {
-        res.status(403).json({ error: `Branch Isolation Block: User is authorized only for branch '${user.assignedBranchId}'.` });
+        const errorMsg = `Branch Isolation Block: User is authorized only for branch '${user.assignedBranchId}'.`;
+        await logAuditEvent(
+          user.uid,
+          user.role,
+          user.assignedBranchId || null,
+          'authorization_failure',
+          'orders',
+          null,
+          false,
+          { error: errorMsg, requestedBranchId: branchId },
+          req
+        );
+        res.status(403).json({ error: errorMsg });
         return;
       }
 
@@ -363,9 +480,36 @@ export function createExpressApp(deps: ServerDependencies = {}): Express {
         transaction.set(orderRef, orderRecord);
       });
 
+      // Audit order creation success
+      await logAuditEvent(
+        user.uid,
+        user.role,
+        branchId,
+        'order_creation_success',
+        'orders',
+        orderId,
+        true,
+        { total, itemsCount: canonicalItems.length },
+        req
+      );
+
       res.json({ orderId, success: true });
     } catch (err: any) {
       const isValidationError = err.message.includes('Inventory') || err.message.includes('Invalid SKU');
+      
+      // Audit order creation failure
+      await logAuditEvent(
+        user.uid,
+        user.role,
+        req.body?.branchId || null,
+        'order_creation_failure',
+        'orders',
+        null,
+        false,
+        { error: err.message },
+        req
+      );
+
       res.status(isValidationError ? 400 : 500).json({ error: err.message });
     }
   });
@@ -375,8 +519,8 @@ export function createExpressApp(deps: ServerDependencies = {}): Express {
     const user = await requireAuth(req, res);
     if (!user) return;
 
+    const patientUid = req.body.patientUid || req.body.userId;
     try {
-      const patientUid = req.body.patientUid || req.body.userId;
       const { clinicalIntake, consentRecord, scheduledAt, deliveryMode } = req.body;
 
       if (!patientUid) {
@@ -391,7 +535,19 @@ export function createExpressApp(deps: ServerDependencies = {}): Express {
 
       // Role check: Only practitioners and super_admins can save clinical records
       if (user.role !== 'practitioner' && user.role !== 'super_admin') {
-        res.status(403).json({ error: `Clinical Access Denied: User role '${user.role}' is not authorized to create clinical intakes.` });
+        const errorMsg = `Clinical Access Denied: User role '${user.role}' is not authorized to create clinical intakes.`;
+        await logAuditEvent(
+          user.uid,
+          user.role,
+          user.assignedBranchId || null,
+          'authorization_failure',
+          'consultation_intakes',
+          patientUid,
+          false,
+          { error: errorMsg },
+          req
+        );
+        res.status(403).json({ error: errorMsg });
         return;
       }
 
@@ -399,7 +555,19 @@ export function createExpressApp(deps: ServerDependencies = {}): Express {
       if (user.role === 'practitioner') {
         const isAssigned = await verifyPractitionerAssignment(user.uid, patientUid);
         if (!isAssigned) {
-          res.status(403).json({ error: `Clinical Boundary Block: Practitioner '${user.uid}' is not assigned to patient '${patientUid}'.` });
+          const errorMsg = `Clinical Boundary Block: Practitioner '${user.uid}' is not assigned to patient '${patientUid}'.`;
+          await logAuditEvent(
+            user.uid,
+            user.role,
+            user.assignedBranchId || null,
+            'authorization_failure',
+            'consultation_intakes',
+            patientUid,
+            false,
+            { error: errorMsg },
+            req
+          );
+          res.status(403).json({ error: errorMsg });
           return;
         }
       }
@@ -436,8 +604,34 @@ export function createExpressApp(deps: ServerDependencies = {}): Express {
       // Strict Firestore Persistence (Fails closed if write fails)
       await db.collection('consultation_intakes').doc(intakeId).set(secureRecord);
 
+      // Audit clinical intake creation success
+      await logAuditEvent(
+        user.uid,
+        user.role,
+        user.assignedBranchId || null,
+        'clinical_intake_create_success',
+        'consultation_intakes',
+        intakeId,
+        true,
+        { patientUid },
+        req
+      );
+
       res.json({ intakeId, success: true });
     } catch (err: any) {
+      // Audit clinical intake creation failure
+      await logAuditEvent(
+        user.uid,
+        user.role,
+        user.assignedBranchId || null,
+        'clinical_intake_create_failure',
+        'consultation_intakes',
+        patientUid || null,
+        false,
+        { error: err.message },
+        req
+      );
+
       res.status(500).json({ error: err.message });
     }
   });
@@ -447,8 +641,8 @@ export function createExpressApp(deps: ServerDependencies = {}): Express {
     const user = await requireAuth(req, res);
     if (!user) return;
 
+    const { intakeId } = req.body;
     try {
-      const { intakeId } = req.body;
       if (!intakeId) {
         res.status(400).json({ error: 'intakeId parameter is required.' });
         return;
@@ -470,17 +664,53 @@ export function createExpressApp(deps: ServerDependencies = {}): Express {
       // Phase 3 Authorization Matrix
       if (user.role === 'customer') {
         if (record.userId !== user.uid) {
-          res.status(403).json({ error: 'Clinical Access Denied: Patients may only access their own consultation records.' });
+          const errorMsg = 'Clinical Access Denied: Patients may only access their own consultation records.';
+          await logAuditEvent(
+            user.uid,
+            user.role,
+            user.assignedBranchId || null,
+            'authorization_failure',
+            'consultation_intakes',
+            intakeId,
+            false,
+            { error: errorMsg, patientUid: record.userId },
+            req
+          );
+          res.status(403).json({ error: errorMsg });
           return;
         }
       } else if (user.role === 'practitioner') {
         const isAssigned = record.practitionerId === user.uid || (await verifyPractitionerAssignment(user.uid, record.userId));
         if (!isAssigned) {
-          res.status(403).json({ error: `Clinical Boundary Block: Practitioner '${user.uid}' is not assigned to patient '${record.userId}'.` });
+          const errorMsg = `Clinical Boundary Block: Practitioner '${user.uid}' is not assigned to patient '${record.userId}'.`;
+          await logAuditEvent(
+            user.uid,
+            user.role,
+            user.assignedBranchId || null,
+            'authorization_failure',
+            'consultation_intakes',
+            intakeId,
+            false,
+            { error: errorMsg, patientUid: record.userId },
+            req
+          );
+          res.status(403).json({ error: errorMsg });
           return;
         }
       } else if (user.role !== 'super_admin') {
-        res.status(403).json({ error: `Clinical Access Denied: User role '${user.role}' is not authorized to access clinical records.` });
+        const errorMsg = `Clinical Access Denied: User role '${user.role}' is not authorized to access clinical records.`;
+        await logAuditEvent(
+          user.uid,
+          user.role,
+          user.assignedBranchId || null,
+          'authorization_failure',
+          'consultation_intakes',
+          intakeId,
+          false,
+          { error: errorMsg, patientUid: record.userId },
+          req
+        );
+        res.status(403).json({ error: errorMsg });
         return;
       }
 
@@ -490,6 +720,19 @@ export function createExpressApp(deps: ServerDependencies = {}): Express {
         record.encryptedClinicalIntake.iv,
         record.encryptedClinicalIntake.tag,
         record.encryptedClinicalIntake.encryptedKey
+      );
+
+      // Audit clinical intake read success (decryptedPayload is scrubbed inside logAuditEvent)
+      await logAuditEvent(
+        user.uid,
+        user.role,
+        user.assignedBranchId || null,
+        'clinical_intake_access_success',
+        'consultation_intakes',
+        intakeId,
+        true,
+        { patientUid: record.userId, metadataVersion: record.consentRecord?.version },
+        req
       );
 
       res.json({
@@ -502,6 +745,19 @@ export function createExpressApp(deps: ServerDependencies = {}): Express {
         kmsKeyId: record.encryptedClinicalIntake.kmsKeyId,
       });
     } catch (err: any) {
+      // Audit clinical intake read failure
+      await logAuditEvent(
+        user.uid,
+        user.role,
+        user.assignedBranchId || null,
+        'clinical_intake_access_failure',
+        'consultation_intakes',
+        intakeId || null,
+        false,
+        { error: err.message },
+        req
+      );
+
       res.status(500).json({ error: err.message });
     }
   });
@@ -514,7 +770,19 @@ export function createExpressApp(deps: ServerDependencies = {}): Express {
     // Authorization: Only staff, branch_manager, regional_director, super_admin allowed
     const isStaff = user.role === 'branch_manager' || user.role === 'regional_director' || user.role === 'super_admin' || (user.role as string) === 'staff' || (user.role as string) === 'admin';
     if (!isStaff) {
-      res.status(403).json({ error: `Administrative Access Denied: User role '${user.role}' is not authorized to access administrative order data.` });
+      const errorMsg = `Administrative Access Denied: User role '${user.role}' is not authorized to access administrative order data.`;
+      await logAuditEvent(
+        user.uid,
+        user.role,
+        user.assignedBranchId || null,
+        'authorization_failure',
+        'orders',
+        null,
+        false,
+        { error: errorMsg },
+        req
+      );
+      res.status(403).json({ error: errorMsg });
       return;
     }
 
@@ -524,7 +792,19 @@ export function createExpressApp(deps: ServerDependencies = {}): Express {
       // Branch Isolation Enforcer
       if (user.assignedBranchId && user.role !== 'super_admin' && user.role !== 'regional_director') {
         if (requestedBranchId && requestedBranchId !== user.assignedBranchId) {
-          res.status(403).json({ error: `Branch Isolation Block: User assigned to branch '${user.assignedBranchId}' cannot query administrative orders for branch '${requestedBranchId}'.` });
+          const errorMsg = `Branch Isolation Block: User assigned to branch '${user.assignedBranchId}' cannot query administrative orders for branch '${requestedBranchId}'.`;
+          await logAuditEvent(
+            user.uid,
+            user.role,
+            user.assignedBranchId || null,
+            'authorization_failure',
+            'orders',
+            null,
+            false,
+            { error: errorMsg, requestedBranchId },
+            req
+          );
+          res.status(403).json({ error: errorMsg });
           return;
         }
       }
@@ -544,8 +824,34 @@ export function createExpressApp(deps: ServerDependencies = {}): Express {
         docs.push(doc.data());
       });
 
+      // Audit administrative action success
+      await logAuditEvent(
+        user.uid,
+        user.role,
+        targetBranchId || user.assignedBranchId || null,
+        'admin_orders_list_success',
+        'orders',
+        null,
+        true,
+        { requestedBranchId, targetBranchId },
+        req
+      );
+
       res.json({ orders: docs, count: docs.length });
     } catch (err: any) {
+      // Audit administrative action failure
+      await logAuditEvent(
+        user.uid,
+        user.role,
+        user.assignedBranchId || null,
+        'admin_orders_list_failure',
+        'orders',
+        null,
+        false,
+        { error: err.message },
+        req
+      );
+
       res.status(500).json({ error: err.message });
     }
   });
@@ -558,12 +864,24 @@ export function createExpressApp(deps: ServerDependencies = {}): Express {
     // Authorization: Staff / Admin roles
     const isStaff = user.role === 'branch_manager' || user.role === 'regional_director' || user.role === 'super_admin' || (user.role as string) === 'staff' || (user.role as string) === 'admin';
     if (!isStaff) {
-      res.status(403).json({ error: `Administrative Access Denied: User role '${user.role}' is not authorized to update order status.` });
+      const errorMsg = `Administrative Access Denied: User role '${user.role}' is not authorized to update order status.`;
+      await logAuditEvent(
+        user.uid,
+        user.role,
+        user.assignedBranchId || null,
+        'authorization_failure',
+        'orders',
+        req.body?.orderId || null,
+        false,
+        { error: errorMsg },
+        req
+      );
+      res.status(403).json({ error: errorMsg });
       return;
     }
 
+    const { orderId, paymentStatus, fulfillmentStatus } = req.body;
     try {
-      const { orderId, paymentStatus, fulfillmentStatus } = req.body;
       if (!orderId) {
         res.status(400).json({ error: 'orderId parameter is required.' });
         return;
@@ -591,7 +909,19 @@ export function createExpressApp(deps: ServerDependencies = {}): Express {
 
       // Branch Isolation Check
       if (user.assignedBranchId && user.assignedBranchId !== orderBranchId && user.role !== 'super_admin' && user.role !== 'regional_director') {
-        res.status(403).json({ error: `Branch Isolation Block: User assigned to branch '${user.assignedBranchId}' cannot modify order '${orderId}' belonging to branch '${orderBranchId}'.` });
+        const errorMsg = `Branch Isolation Block: User assigned to branch '${user.assignedBranchId}' cannot modify order '${orderId}' belonging to branch '${orderBranchId}'.`;
+        await logAuditEvent(
+          user.uid,
+          user.role,
+          user.assignedBranchId || null,
+          'authorization_failure',
+          'orders',
+          orderId,
+          false,
+          { error: errorMsg, orderBranchId },
+          req
+        );
+        res.status(403).json({ error: errorMsg });
         return;
       }
 
@@ -696,6 +1026,19 @@ export function createExpressApp(deps: ServerDependencies = {}): Express {
         transaction.update(orderRef, updates);
       });
 
+      // Audit order status change or cancellation success
+      await logAuditEvent(
+        user.uid,
+        user.role,
+        orderBranchId || user.assignedBranchId || null,
+        isCancelling ? 'order_cancellation_success' : 'order_status_update_success',
+        'orders',
+        orderId,
+        true,
+        { paymentStatus, fulfillmentStatus, oldPaymentStatus: currentPaymentStatus, oldFulfillmentStatus: currentFulfillmentStatus },
+        req
+      );
+
       res.json({
         success: true,
         orderId,
@@ -704,6 +1047,20 @@ export function createExpressApp(deps: ServerDependencies = {}): Express {
       });
     } catch (err: any) {
       const isValidationError = err.message.includes('Missing Inventory Record') || err.message.includes('Invalid Order Data');
+
+      // Audit order update/cancellation failure
+      await logAuditEvent(
+        user.uid,
+        user.role,
+        user.assignedBranchId || null,
+        'order_status_update_failure',
+        'orders',
+        orderId || null,
+        false,
+        { error: err.message },
+        req
+      );
+
       res.status(isValidationError ? 400 : 500).json({ error: err.message });
     }
   });
@@ -716,13 +1073,24 @@ export function createExpressApp(deps: ServerDependencies = {}): Express {
     // Authorization: Staff / Admin roles
     const isStaff = user.role === 'branch_manager' || user.role === 'regional_director' || user.role === 'super_admin' || (user.role as string) === 'staff' || (user.role as string) === 'admin';
     if (!isStaff) {
-      res.status(403).json({ error: `Administrative Access Denied: User role '${user.role}' is not authorized to replenish inventory.` });
+      const errorMsg = `Administrative Access Denied: User role '${user.role}' is not authorized to replenish inventory.`;
+      await logAuditEvent(
+        user.uid,
+        user.role,
+        user.assignedBranchId || null,
+        'authorization_failure',
+        'branch_inventory',
+        null,
+        false,
+        { error: errorMsg },
+        req
+      );
+      res.status(403).json({ error: errorMsg });
       return;
     }
 
+    const { branchId, skuId, quantity } = req.body;
     try {
-      const { branchId, skuId, quantity } = req.body;
-
       if (!branchId || !skuId) {
         res.status(400).json({ error: 'branchId and skuId parameters are required.' });
         return;
@@ -740,7 +1108,19 @@ export function createExpressApp(deps: ServerDependencies = {}): Express {
 
       // Branch Isolation Check
       if (user.assignedBranchId && user.assignedBranchId !== branchId && user.role !== 'super_admin' && user.role !== 'regional_director') {
-        res.status(403).json({ error: `Branch Isolation Block: User assigned to branch '${user.assignedBranchId}' cannot replenish inventory for branch '${branchId}'.` });
+        const errorMsg = `Branch Isolation Block: User assigned to branch '${user.assignedBranchId}' cannot replenish inventory for branch '${branchId}'.`;
+        await logAuditEvent(
+          user.uid,
+          user.role,
+          user.assignedBranchId || null,
+          'authorization_failure',
+          'branch_inventory',
+          null,
+          false,
+          { error: errorMsg, branchId },
+          req
+        );
+        res.status(403).json({ error: errorMsg });
         return;
       }
 
@@ -766,6 +1146,19 @@ export function createExpressApp(deps: ServerDependencies = {}): Express {
         }
       });
 
+      // Audit inventory replenishment success
+      await logAuditEvent(
+        user.uid,
+        user.role,
+        branchId,
+        'inventory_replenishment_success',
+        'branch_inventory',
+        `${branchId}_${skuId}`,
+        true,
+        { skuId, quantity, newStockCount },
+        req
+      );
+
       res.json({
         success: true,
         branchId,
@@ -774,6 +1167,97 @@ export function createExpressApp(deps: ServerDependencies = {}): Express {
         newStockCount,
       });
     } catch (err: any) {
+      // Audit inventory replenishment failure
+      await logAuditEvent(
+        user.uid,
+        user.role,
+        user.assignedBranchId || null,
+        'inventory_replenishment_failure',
+        'branch_inventory',
+        null,
+        false,
+        { error: err.message, branchId, skuId },
+        req
+      );
+
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  // --- 8. POST /api/admin/users/update-role ---
+  app.post('/api/admin/users/update-role', async (req: Request, res: Response): Promise<void> => {
+    const user = await requireAuth(req, res);
+    if (!user) return;
+
+    // Authorization: Only super_admin can modify user roles
+    if (user.role !== 'super_admin') {
+      const errorMsg = 'Administrative Access Denied: Only super_admin can change user roles.';
+      await logAuditEvent(
+        user.uid,
+        user.role,
+        user.assignedBranchId || null,
+        'authorization_failure',
+        'users',
+        req.body.targetUid || null,
+        false,
+        { error: errorMsg },
+        req
+      );
+      res.status(403).json({ error: errorMsg });
+      return;
+    }
+
+    try {
+      const { targetUid, role } = req.body;
+      if (!targetUid || !role) {
+        res.status(400).json({ error: 'targetUid and role parameters are required.' });
+        return;
+      }
+
+      const validRoles = ['customer', 'practitioner', 'branch_manager', 'regional_director', 'super_admin'];
+      if (!validRoles.includes(role)) {
+        res.status(400).json({ error: `Invalid role parameter: ${role}` });
+        return;
+      }
+
+      const userRef = db.collection('users').doc(targetUid);
+      const userSnap = await userRef.get();
+      if (!userSnap.exists) {
+        res.status(404).json({ error: `User with UID '${targetUid}' not found.` });
+        return;
+      }
+
+      const oldRole = userSnap.get('role');
+
+      await db.runTransaction(async (transaction) => {
+        transaction.update(userRef, { role, updatedAt: FieldValue.serverTimestamp() });
+      });
+
+      await logAuditEvent(
+        user.uid,
+        user.role,
+        user.assignedBranchId || null,
+        'role_update_success',
+        'users',
+        targetUid,
+        true,
+        { oldRole, newRole: role },
+        req
+      );
+
+      res.json({ success: true, targetUid, newRole: role });
+    } catch (err: any) {
+      await logAuditEvent(
+        user.uid,
+        user.role,
+        user.assignedBranchId || null,
+        'role_update_failure',
+        'users',
+        req.body.targetUid || null,
+        false,
+        { error: err.message },
+        req
+      );
       res.status(500).json({ error: err.message });
     }
   });
@@ -784,7 +1268,7 @@ export function createExpressApp(deps: ServerDependencies = {}): Express {
 // Start HTTP Server
 async function startServer() {
   const app = createExpressApp();
-  const PORT = process.env.PORT || 3000;
+  const PORT = Number(process.env.PORT) || 3000;
   const isProd = process.env.NODE_ENV === 'production';
 
   // Mount Vite or Dist

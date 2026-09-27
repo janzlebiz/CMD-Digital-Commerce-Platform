@@ -98,7 +98,7 @@ function createTestHarness(options: {
     },
     runTransaction: async (updateFunction: (tx: any) => Promise<any>) => {
       const stageUpdates = new Map<string, any>();
-      const stageSets = new Map<string, { col: string; docId: string; val: any }>();
+      const stageSets = new Map<any, any>();
 
       const mockTx = {
         get: async (docRef: any) => {

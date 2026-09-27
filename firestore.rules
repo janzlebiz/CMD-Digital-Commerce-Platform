@@ -119,5 +119,15 @@ service cloud.firestore {
     match /consultation_intakes/{intakeId} {
       allow read, write: if false;
     }
+
+    // 5. Audit Logs rules
+    // Locked down: Clients cannot write directly. Read is restricted to Super Admin or Regional Director.
+    match /audit_logs/{logId} {
+      allow get, list: if isSignedIn() && (
+        isSuperAdmin() ||
+        isRegionalDirector()
+      );
+      allow write: if false; // Absolute lockdown of client writes
+    }
   }
 }

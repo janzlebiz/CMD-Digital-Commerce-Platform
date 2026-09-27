@@ -142,7 +142,10 @@ function MainLayout() {
           <OrdersView
             orders={ecommerce.orders}
             onNavigate={handleNavigate}
-            advanceOrderStatus={ecommerce.advanceOrderStatus}
+            advanceOrderStatus={(orderId) => {
+              const ord = ecommerce.orders.find((o) => o.id === orderId);
+              ecommerce.advanceOrderStatus(orderId, ord?.fulfillmentStatus || 'pending_processing');
+            }}
             cancelOrder={ecommerce.cancelOrder}
             restockAll={ecommerce.restockAll}
           />

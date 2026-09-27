@@ -107,8 +107,8 @@ function createTestHarness(options: {
       if (options.simulateFirestoreFailure) {
         throw new Error('Simulated Firestore Transaction Failure (ABORTED)');
       }
-      const stageUpdates = new Map<string, any>();
-      const stageSets = new Map<string, { col: string; docId: string; val: any }>();
+      const stageUpdates = new Map<any, any>();
+      const stageSets = new Map<any, any>();
 
       const mockTx = {
         get: async (docRef: any) => {
