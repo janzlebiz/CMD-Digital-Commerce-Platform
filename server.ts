@@ -1039,6 +1039,20 @@ export function createExpressApp(deps: ServerDependencies = {}): Express {
         req
       );
 
+      if (isCancelling) {
+        await logAuditEvent(
+          user.uid,
+          user.role,
+          orderBranchId || user.assignedBranchId || null,
+          'inventory_restoration_success',
+          'branch_inventory',
+          orderId,
+          true,
+          { itemsCount: orderData.items?.length, branchId: orderBranchId },
+          req
+        );
+      }
+
       res.json({
         success: true,
         orderId,
@@ -1258,6 +1272,79 @@ export function createExpressApp(deps: ServerDependencies = {}): Express {
         { error: err.message },
         req
       );
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  // --- 9. GET /api/admin/audit-logs ---
+  app.get('/api/admin/audit-logs', async (req: Request, res: Response): Promise<void> => {
+    const user = await requireAuth(req, res);
+    if (!user) return;
+
+    // Authorization: Only super_admin and regional_director can view audit logs
+    const isAuthorized = user.role === 'super_admin' || user.role === 'regional_director';
+    if (!isAuthorized) {
+      const errorMsg = `Administrative Access Denied: User role '${user.role}' is not authorized to access audit logs.`;
+      await logAuditEvent(
+        user.uid,
+        user.role,
+        user.assignedBranchId || null,
+        'authorization_failure',
+        'audit_logs',
+        null,
+        false,
+        { error: errorMsg },
+        req
+      );
+      res.status(403).json({ error: errorMsg });
+      return;
+    }
+
+    try {
+      const limitParam = parseInt(req.query.limit as string, 10) || 50;
+      let logs: any[] = [];
+
+      try {
+        const snapshot = await db.collection('audit_logs')
+          .orderBy('timestamp', 'desc')
+          .limit(Math.min(limitParam, 100))
+          .get();
+
+        snapshot.forEach((docSnap: any) => {
+          const data = docSnap.data();
+          logs.push({
+            id: docSnap.id || data.id,
+            ...data,
+            timestamp: data.timestamp?.toDate ? data.timestamp.toDate().toISOString() : data.timestamp,
+          });
+        });
+      } catch (orderErr) {
+        // Fallback without orderBy for test harnesses or unindexed environments
+        const fallbackSnap = await db.collection('audit_logs').get();
+        fallbackSnap.forEach((docSnap: any) => {
+          const data = docSnap.data();
+          logs.push({
+            id: docSnap.id || data.id,
+            ...data,
+            timestamp: data.timestamp?.toDate ? data.timestamp.toDate().toISOString() : data.timestamp,
+          });
+        });
+      }
+
+      await logAuditEvent(
+        user.uid,
+        user.role,
+        user.assignedBranchId || null,
+        'audit_logs_read_success',
+        'audit_logs',
+        null,
+        true,
+        { count: logs.length },
+        req
+      );
+
+      res.json({ logs, count: logs.length });
+    } catch (err: any) {
       res.status(500).json({ error: err.message });
     }
   });

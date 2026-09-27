@@ -21,6 +21,13 @@ export const Navbar: React.FC<NavbarProps> = ({ currentView, onNavigate, cartCou
 
   const { user, profile, logout } = useAuth();
 
+  const isStaff =
+    profile?.role === 'branch_manager' ||
+    profile?.role === 'regional_director' ||
+    profile?.role === 'super_admin' ||
+    (profile?.role as string) === 'staff' ||
+    (profile?.role as string) === 'admin';
+
   const navLinks: { view: PageView; label: string }[] = [
     { view: 'home', label: 'Home' },
     { view: 'about', label: 'About HCI CMD' },
@@ -113,6 +120,19 @@ export const Navbar: React.FC<NavbarProps> = ({ currentView, onNavigate, cartCou
                   <span>📄 My Invoices</span>
                 </button>
 
+                {isStaff && (
+                  <button
+                    onClick={() => handleNav('admin')}
+                    className={`px-3 py-1.5 text-xs font-semibold rounded transition flex items-center gap-1.5 focus-visible:ring-2 focus-visible:ring-amber-500 focus-visible:outline-none ${
+                      currentView === 'admin'
+                        ? 'bg-amber-950 text-amber-300 border border-amber-800'
+                        : 'bg-slate-900 text-slate-300 hover:text-white hover:border-slate-700 border border-slate-800'
+                    }`}
+                  >
+                    <span>🛡️ Staff Ops</span>
+                  </button>
+                )}
+
                 <button
                   onClick={() => handleNav('cart')}
                   className={`px-3.5 py-1.5 text-xs font-bold rounded transition flex items-center gap-1.5 focus-visible:ring-2 focus-visible:ring-amber-500 focus-visible:outline-none ${
@@ -158,6 +178,14 @@ export const Navbar: React.FC<NavbarProps> = ({ currentView, onNavigate, cartCou
                         >
                           📄 My Orders
                         </button>
+                        {isStaff && (
+                          <button
+                            onClick={() => handleNav('admin')}
+                            className="w-full text-left px-3 py-2 text-amber-300 hover:bg-amber-950/40 rounded-lg transition font-semibold"
+                          >
+                            🛡️ Staff Operations
+                          </button>
+                        )}
                         <button
                           onClick={handleLogout}
                           className="w-full text-left px-3 py-2 text-red-400 hover:bg-red-950/40 rounded-lg transition"
@@ -310,6 +338,19 @@ export const Navbar: React.FC<NavbarProps> = ({ currentView, onNavigate, cartCou
               >
                 <span className="flex items-center gap-1.5">📄 My Invoices & Trackers</span>
               </button>
+
+              {isStaff && (
+                <button
+                  onClick={() => handleNav('admin')}
+                  className={`flex items-center justify-between w-full px-3 py-2 text-sm font-medium rounded transition-colors ${
+                    currentView === 'admin'
+                      ? 'bg-amber-950/40 text-amber-300 font-semibold border-l-2 border-amber-400'
+                      : 'text-amber-400 hover:bg-slate-900 hover:text-amber-300'
+                  }`}
+                >
+                  <span className="flex items-center gap-1.5 font-semibold">🛡️ Staff Operations</span>
+                </button>
+              )}
             </div>
           </div>
         )}

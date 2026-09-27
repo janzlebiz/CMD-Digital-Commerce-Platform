@@ -77,6 +77,25 @@
         "consentRecord": { "type": "object" },
         "encryptedClinicalIntake": { "type": "object" }
       }
+    },
+    "audit_log": {
+      "title": "AuditLogRecord",
+      "description": "Server-authoritative append-only administrative and security event log.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "actorUid": { "type": "string" },
+        "actorRole": { "type": "string" },
+        "branchId": { "type": "string" },
+        "action": { "type": "string" },
+        "targetResource": { "type": "string" },
+        "targetId": { "type": "string" },
+        "timestamp": { "type": "string", "format": "date-time" },
+        "success": { "type": "boolean" },
+        "metadata": { "type": "object" },
+        "correlationId": { "type": "string" }
+      },
+      "required": ["id", "actorUid", "actorRole", "action", "targetResource", "timestamp", "success"]
     }
   },
   "firestore": {
@@ -95,6 +114,10 @@
     "/consultation_intakes/{intakeId}": {
       "schema": "consultation",
       "description": "Consultation intake and encrypted clinical information."
+    },
+    "/audit_logs/{logId}": {
+      "schema": "audit_log",
+      "description": "Append-only structured audit logs."
     }
   }
 }

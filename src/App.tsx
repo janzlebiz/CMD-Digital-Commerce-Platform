@@ -25,6 +25,7 @@ import { ReturnsView } from './views/ReturnsView';
 import { CartView } from './views/CartView';
 import { CheckoutView } from './views/CheckoutView';
 import { OrdersView } from './views/OrdersView';
+import { AdminDashboardView } from './views/AdminDashboardView';
 import { useEcommerce } from './hooks/useEcommerce';
 import { AuthProvider } from './context/AuthContext';
 
@@ -59,6 +60,7 @@ function MainLayout() {
         'cart',
         'checkout',
         'orders',
+        'admin',
       ];
       if (validViews.includes(hash)) {
         setCurrentView(hash);
@@ -150,6 +152,8 @@ function MainLayout() {
             restockAll={ecommerce.restockAll}
           />
         );
+      case 'admin':
+        return <AdminDashboardView onNavigate={handleNavigate} />;
       default:
         return <HomeView onNavigate={handleNavigate} />;
     }

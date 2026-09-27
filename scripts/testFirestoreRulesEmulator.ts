@@ -109,6 +109,14 @@ async function runRealEmulatorTests() {
       userId: 'cust-101',
       encryptedData: 'aes-ciphertext-mock',
     });
+
+    // 5. Seed audit log
+    await setDoc(doc(db, 'audit_logs', 'audit-seed-101'), {
+      id: 'audit-seed-101',
+      actorUid: 'super-admin',
+      action: 'system_bootstrap',
+      success: true,
+    });
   });
 
   // --- SECTION 1: CUSTOMERS ACCESS VERIFICATION ---
@@ -154,6 +162,12 @@ async function runRealEmulatorTests() {
     await assertFails(updateDoc(doc(custDb, 'users', 'cust-101'), { role: 'super_admin' }));
   });
 
+  await test('1.9 Customer cannot read or write audit logs', async () => {
+    await assertFails(getDoc(doc(custDb, 'audit_logs', 'audit-seed-101')));
+    await assertFails(getDocs(collection(custDb, 'audit_logs')));
+    await assertFails(setDoc(doc(custDb, 'audit_logs', 'audit-forged'), { action: 'hack' }));
+  });
+
   // --- SECTION 2: BRANCH MANAGER ACCESS VERIFICATION ---
   const mgrDaetContext = testEnv.authenticatedContext('mgr-daet');
   const mgrDaetDb = mgrDaetContext.firestore();
@@ -195,6 +209,12 @@ async function runRealEmulatorTests() {
     await assertFails(updateDoc(doc(mgrDaetDb, 'branch_inventory', 'daet_hci-cmd-65ml'), { stockCount: 999 }));
   });
 
+  await test('2.8 Branch manager cannot read or write audit logs', async () => {
+    await assertFails(getDoc(doc(mgrDaetDb, 'audit_logs', 'audit-seed-101')));
+    await assertFails(getDocs(collection(mgrDaetDb, 'audit_logs')));
+    await assertFails(setDoc(doc(mgrDaetDb, 'audit_logs', 'audit-forged'), { action: 'hack' }));
+  });
+
   // --- SECTION 3: REGIONAL DIRECTOR ACCESS VERIFICATION ---
   const regDirContext = testEnv.authenticatedContext('reg-dir');
   const regDirDb = regDirContext.firestore();
@@ -216,6 +236,12 @@ async function runRealEmulatorTests() {
     await assertFails(setDoc(doc(regDirDb, 'consultation_intakes', 'intake-new'), { data: 'test' }));
   });
 
+  await test('3.4 Regional director can read audit logs but cannot write directly', async () => {
+    await assertSucceeds(getDoc(doc(regDirDb, 'audit_logs', 'audit-seed-101')));
+    await assertSucceeds(getDocs(collection(regDirDb, 'audit_logs')));
+    await assertFails(setDoc(doc(regDirDb, 'audit_logs', 'audit-forged'), { action: 'hack' }));
+  });
+
   // --- SECTION 4: SUPER ADMIN ACCESS VERIFICATION ---
   const superAdminContext = testEnv.authenticatedContext('super-admin');
   const superAdminDb = superAdminContext.firestore();
@@ -235,6 +261,12 @@ async function runRealEmulatorTests() {
     await assertFails(setDoc(doc(superAdminDb, 'consultation_intakes', 'intake-admin'), { data: 'test' }));
   });
 
+  await test('4.3 Super admin can read audit logs but cannot write directly', async () => {
+    await assertSucceeds(getDoc(doc(superAdminDb, 'audit_logs', 'audit-seed-101')));
+    await assertSucceeds(getDocs(collection(superAdminDb, 'audit_logs')));
+    await assertFails(setDoc(doc(superAdminDb, 'audit_logs', 'audit-forged'), { action: 'hack' }));
+  });
+
   // --- SECTION 5: UNAUTHENTICATED GUEST LOCKDOWN ---
   const unauthContext = testEnv.unauthenticatedContext();
   const unauthDb = unauthContext.firestore();
@@ -246,6 +278,12 @@ async function runRealEmulatorTests() {
     await assertFails(getDocs(collection(unauthDb, 'users')));
     await assertFails(getDoc(doc(unauthDb, 'branch_inventory', 'daet_hci-cmd-65ml')));
     await assertFails(getDoc(doc(unauthDb, 'consultation_intakes', 'intake-cust-101')));
+  });
+
+  await test('5.2 Unauthenticated guest cannot read or write audit logs', async () => {
+    await assertFails(getDoc(doc(unauthDb, 'audit_logs', 'audit-seed-101')));
+    await assertFails(getDocs(collection(unauthDb, 'audit_logs')));
+    await assertFails(setDoc(doc(unauthDb, 'audit_logs', 'audit-forged'), { action: 'hack' }));
   });
 
   await testEnv.cleanup();

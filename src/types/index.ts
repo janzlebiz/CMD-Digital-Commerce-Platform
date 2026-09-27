@@ -17,7 +17,22 @@ export type PageView =
   | 'returns'
   | 'cart'
   | 'checkout'
-  | 'orders';
+  | 'orders'
+  | 'admin';
+
+export interface AuditLogEntry {
+  id: string;
+  actorUid: string;
+  actorRole: string;
+  branchId?: string | null;
+  action: string;
+  targetResource: string;
+  targetId?: string | null;
+  timestamp: string;
+  success: boolean;
+  metadata?: Record<string, any>;
+  correlationId?: string;
+}
 
 export interface CartItem {
   skuId: string;

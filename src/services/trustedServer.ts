@@ -220,4 +220,22 @@ export class TrustedServerController {
 
     return res.json();
   }
+
+  /**
+   * 9. Admin: Fetch audit logs for authorized staff (super_admin, regional_director)
+   */
+  public static async fetchAuditLogs(limit = 50): Promise<any> {
+    const headers = await this.getAuthHeaders();
+    const res = await fetch(`/api/admin/audit-logs?limit=${limit}`, {
+      method: 'GET',
+      headers,
+    });
+
+    if (!res.ok) {
+      const errData = await res.json().catch(() => ({ error: 'Audit logs query failed' }));
+      throw new Error(errData.error || `HTTP error ${res.status}`);
+    }
+
+    return res.json();
+  }
 }
