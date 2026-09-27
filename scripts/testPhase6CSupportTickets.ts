@@ -11,10 +11,17 @@ import {
   RA11967_SLA_MS,
   VALID_TICKET_CATEGORIES,
   VALID_TICKET_STATUSES,
+  SUPPORTED_BRANCH_IDS,
   evaluateSlaEscalation,
 } from '../server';
 import crypto from 'crypto';
 import http from 'http';
+import fs from 'fs';
+import path from 'path';
+import { fileURLToPath } from 'url';
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
 
 // Helper to execute test HTTP requests
 async function makeRequest(
@@ -336,6 +343,21 @@ async function runPhase6CTests() {
     const harness = createTestHarness({
       users: {
         'patient-alice-uid': { role: 'customer', email: 'alice@example.com' },
+        'patient-bob-uid': { role: 'customer', email: 'bob@example.com' },
+      },
+      orders: {
+        'ORD-ALICE-LABO-200': {
+          id: 'ORD-ALICE-LABO-200',
+          userId: 'patient-alice-uid',
+          branchId: 'labo',
+          grandTotal: 1200,
+        },
+        'ORD-BOB-CAPALONGA-300': {
+          id: 'ORD-BOB-CAPALONGA-300',
+          userId: 'patient-bob-uid',
+          branchId: 'capalonga',
+          grandTotal: 2400,
+        },
       },
     });
 
@@ -369,19 +391,83 @@ async function runPhase6CTests() {
         { category: 'damaged_product', subject: 'Inquiry', description: 'Description text here' },
         { Authorization: 'Bearer PATIENT_ALICE_TOKEN' }
       );
-      assert(missingBranchRes.status === 400, '2.3 Ticket creation without branchId rejected with HTTP 400');
+      assert(missingBranchRes.status === 400, '2.3 Ticket creation without branchId and without order rejected with HTTP 400');
 
-      // 2.2 Valid Ticket Creation succeeds with HTTP 201
+      // 2.4 Customer attempting an invalid branch
+      const invalidBranchRes = await makeRequest(
+        server,
+        '/api/support/tickets',
+        'POST',
+        { branchId: 'naga_city', category: 'damaged_product', subject: 'Inquiry', description: 'Valid description text' },
+        { Authorization: 'Bearer PATIENT_ALICE_TOKEN' }
+      );
+      assert(invalidBranchRes.status === 400, '2.4 Customer attempting invalid branch rejected with HTTP 400');
+      assert(invalidBranchRes.data.error.includes('Must be one of supported branches'), '2.5 Rejection lists supported platform branch identifiers');
+
+      // 2.5 Customer attempting to associate an order that doesn't exist
+      const nonExistentOrderRes = await makeRequest(
+        server,
+        '/api/support/tickets',
+        'POST',
+        { orderId: 'ORD-NONEXISTENT-999', category: 'damaged_product', subject: 'Inquiry', description: 'Valid description text' },
+        { Authorization: 'Bearer PATIENT_ALICE_TOKEN' }
+      );
+      assert(nonExistentOrderRes.status === 404, '2.6 Ticket referencing non-existent order rejected with HTTP 404');
+
+      // 2.6 Customer attempting to associate another user's order
+      const crossOrderRes = await makeRequest(
+        server,
+        '/api/support/tickets',
+        'POST',
+        { orderId: 'ORD-BOB-CAPALONGA-300', category: 'damaged_product', subject: 'Inquiry', description: 'Valid description text' },
+        { Authorization: 'Bearer PATIENT_ALICE_TOKEN' }
+      );
+      assert(crossOrderRes.status === 403, '2.7 Customer referencing another user\'s order rejected with HTTP 403');
+
+      // 2.7 Customer attempting to use a different branch than the associated order
+      const branchMismatchRes = await makeRequest(
+        server,
+        '/api/support/tickets',
+        'POST',
+        {
+          orderId: 'ORD-ALICE-LABO-200',
+          branchId: 'daet', // Mismatched! Order was for 'labo'
+          category: 'damaged_product',
+          subject: 'Damaged item',
+          description: 'Dropper was cracked upon delivery.',
+        },
+        { Authorization: 'Bearer PATIENT_ALICE_TOKEN' }
+      );
+      assert(branchMismatchRes.status === 400, '2.8 Customer attempting different branch than associated order rejected with HTTP 400');
+      assert(branchMismatchRes.data.error.includes('Branch mismatch'), '2.9 Error explicitly identifies branch mismatch with order');
+
+      // 2.8 Valid same-branch ticket creation with associated order
+      const orderLinkedRes = await makeRequest(
+        server,
+        '/api/support/tickets',
+        'POST',
+        {
+          orderId: 'ORD-ALICE-LABO-200',
+          branchId: 'labo', // Matches order authoritative branch
+          category: 'damaged_product',
+          subject: 'Broken Seal on 65ml Dropper',
+          description: 'Received shipment with broken tamper-evident seal and leaking dropper cap.',
+        },
+        { Authorization: 'Bearer PATIENT_ALICE_TOKEN' }
+      );
+      assert(orderLinkedRes.status === 201, '2.10 Valid same-branch ticket creation with order succeeds with HTTP 201');
+      assert(orderLinkedRes.data.ticket.branchId === 'labo', '2.11 Ticket branchId matches order authoritative branch (labo)');
+      assert(orderLinkedRes.data.ticket.orderId === 'ORD-ALICE-LABO-200', '2.12 Ticket accurately references associated orderId');
+
+      // 2.9 Valid standalone ticket creation (no orderId, valid supported branch)
       const validPayload = {
         branchId: 'daet',
         category: 'damaged_product',
         subject: 'Damaged 65ml Dropper Cap',
         description: 'Received shipment with broken tamper-evident seal and leaking dropper cap.',
-        orderId: 'ORD-2026-9901',
         customerPhone: '+639171234567',
       };
 
-      const beforeTime = Date.now();
       const createRes = await makeRequest(
         server,
         '/api/support/tickets',
@@ -389,28 +475,27 @@ async function runPhase6CTests() {
         validPayload,
         { Authorization: 'Bearer PATIENT_ALICE_TOKEN' }
       );
-      const afterTime = Date.now();
 
-      assert(createRes.status === 201, '2.4 Valid support ticket creation succeeds with HTTP 201');
-      assert(createRes.data.ticket && createRes.data.ticket.id.startsWith('TKT-'), '2.5 Ticket identifier generated with authoritative prefix');
-      assert(createRes.data.ticket.status === 'submitted', '2.6 Initial ticket status is SUBMITTED');
-      assert(createRes.data.ticket.userId === 'patient-alice-uid', '2.7 Ticket bound to authenticated customer UID');
-      assert(createRes.data.ticket.branchId === 'daet', '2.8 Ticket branch set to Daet');
+      assert(createRes.status === 201, '2.13 Valid standalone support ticket creation succeeds with HTTP 201');
+      assert(createRes.data.ticket && createRes.data.ticket.id.startsWith('TKT-'), '2.14 Ticket identifier generated with authoritative prefix');
+      assert(createRes.data.ticket.status === 'submitted', '2.15 Initial ticket status is SUBMITTED');
+      assert(createRes.data.ticket.userId === 'patient-alice-uid', '2.16 Ticket bound to authenticated customer UID');
+      assert(createRes.data.ticket.branchId === 'daet', '2.17 Ticket branch set to Daet');
 
-      // 2.3 Statutory 7-Day SLA Due Date Calculation
+      // Statutory 7-Day SLA Due Date Calculation
       const createdAtMs = Date.parse(createRes.data.ticket.createdAt);
       const slaDueAtMs = Date.parse(createRes.data.ticket.slaDueAt);
       const differenceMs = slaDueAtMs - createdAtMs;
       const expected7DaysMs = 7 * 24 * 60 * 60 * 1000;
 
-      assert(differenceMs === expected7DaysMs, '2.9 Statutory 7-day SLA deadline calculated exactly as createdAt + 7 days (604,800,000 ms)');
-      assert(createRes.data.ticket.isEscalated === false, '2.10 Ticket isEscalated initializes to false');
-      assert(createRes.data.statutoryNotice.includes('RA 11967'), '2.11 Statutory consumer protection notice returned in API response');
+      assert(differenceMs === expected7DaysMs, '2.18 Statutory 7-day SLA deadline calculated exactly as createdAt + 7 days (604,800,000 ms)');
+      assert(createRes.data.ticket.isEscalated === false, '2.19 Ticket isEscalated initializes to false');
+      assert(createRes.data.statutoryNotice.includes('RA 11967'), '2.20 Statutory consumer protection notice returned in API response');
 
       // Verify persistence in store
       const persisted = harness.supportTicketsStore.get(createRes.data.ticket.id);
-      assert(persisted !== undefined, '2.12 Ticket successfully persisted in support_tickets store');
-      assert(persisted.subject === validPayload.subject, '2.13 Persisted subject matches input payload');
+      assert(persisted !== undefined, '2.21 Ticket successfully persisted in support_tickets store');
+      assert(persisted.subject === validPayload.subject, '2.22 Persisted subject matches input payload');
     } finally {
       server.close();
     }
@@ -964,6 +1049,134 @@ async function runPhase6CTests() {
     } finally {
       server.close();
     }
+  }
+
+  // --- SECTION 9: Firestore Rules & Branch Manager List Isolation ---
+  {
+    console.log('\n--- Running Section 9: Firestore Rules & Branch Manager List Isolation ---');
+
+    // 9.1 Verify firestore.rules file on disk explicitly bounds list to branchId
+    const rulesPath = path.resolve(__dirname, '../firestore.rules');
+    const rulesContent = fs.readFileSync(rulesPath, 'utf8');
+
+    assert(rulesContent.includes('match /support_tickets/{ticketId}'), '9.1 Firestore rules contain match block for /support_tickets/{ticketId}');
+    assert(rulesContent.includes('allow write: if false;'), '9.2 ADR-009 Network-Only write rule enforced (allow write: if false)');
+
+    const ticketRuleBlock = rulesContent.slice(rulesContent.indexOf('match /support_tickets/{ticketId}'));
+    const listRuleMatch = ticketRuleBlock.includes('allow list: if isSignedIn()') &&
+      ticketRuleBlock.includes('get(/databases/$(database)/documents/users/$(request.auth.uid)).data.assignedBranchId == resource.data.branchId');
+    assert(listRuleMatch, '9.3 Firestore list rule enforces branch manager assignedBranchId equality with ticket branchId');
+
+    // 9.2 Firestore Read Path Security Simulation Function
+    interface MockAuthContext {
+      uid: string;
+      role: string;
+      assignedBranchId?: string;
+    }
+
+    interface MockTicketResource {
+      id: string;
+      userId: string;
+      branchId: string;
+    }
+
+    function evaluateFirestoreRule(
+      operation: 'get' | 'list' | 'create' | 'update' | 'delete',
+      auth: MockAuthContext | null,
+      resource: MockTicketResource | null,
+      queryBranchFilter?: string
+    ): boolean {
+      if (operation === 'create' || operation === 'update' || operation === 'delete') {
+        return false; // allow write: if false;
+      }
+
+      if (!auth) return false;
+
+      if (operation === 'get' && resource) {
+        const isOwner = auth.uid === resource.userId;
+        const isBranchMgr = auth.role === 'branch_manager' && auth.assignedBranchId === resource.branchId;
+        const isRD = auth.role === 'regional_director';
+        const isSuper = auth.role === 'super_admin';
+        return isOwner || isBranchMgr || isRD || isSuper;
+      }
+
+      if (operation === 'list') {
+        if (auth.role === 'regional_director' || auth.role === 'super_admin') {
+          return true;
+        }
+        if (auth.role === 'branch_manager') {
+          return queryBranchFilter !== undefined && queryBranchFilter === auth.assignedBranchId;
+        }
+        if (auth.role === 'customer') {
+          return true;
+        }
+        return false;
+      }
+
+      return false;
+    }
+
+    const daetManager: MockAuthContext = { uid: 'mgr-daet-1', role: 'branch_manager', assignedBranchId: 'daet' };
+    const daetTicket: MockTicketResource = { id: 'TKT-1', userId: 'cust-1', branchId: 'daet' };
+    const laboTicket: MockTicketResource = { id: 'TKT-2', userId: 'cust-2', branchId: 'labo' };
+
+    // Branch manager Daet listing Daet tickets -> Allowed
+    assert(
+      evaluateFirestoreRule('list', daetManager, null, 'daet') === true,
+      '9.4 Branch manager Daet querying Daet branch tickets is permitted on list'
+    );
+
+    // Branch manager Daet attempting to list Labo tickets -> Denied!
+    assert(
+      evaluateFirestoreRule('list', daetManager, null, 'labo') === false,
+      '9.5 Branch manager Daet querying Labo branch tickets is strictly rejected on list'
+    );
+
+    // Branch manager Daet attempting unfiltered query across all branches -> Denied!
+    assert(
+      evaluateFirestoreRule('list', daetManager, null, undefined) === false,
+      '9.6 Branch manager Daet attempting unfiltered query across all branches is rejected on list'
+    );
+
+    // Branch manager Daet reading Daet ticket (get) -> Allowed
+    assert(
+      evaluateFirestoreRule('get', daetManager, daetTicket) === true,
+      '9.7 Branch manager Daet reading Daet ticket is permitted on get'
+    );
+
+    // Branch manager Daet attempting to read Labo ticket (get) -> Denied!
+    assert(
+      evaluateFirestoreRule('get', daetManager, laboTicket) === false,
+      '9.8 Branch manager Daet attempting to read Labo ticket is strictly rejected on get'
+    );
+
+    // Regional Director listing across all branches -> Allowed
+    const rdAuth: MockAuthContext = { uid: 'rd-1', role: 'regional_director' };
+    assert(
+      evaluateFirestoreRule('list', rdAuth, null, undefined) === true,
+      '9.9 Regional Director listing across all branches is permitted'
+    );
+
+    // Super Admin listing across all branches -> Allowed
+    const superAuth: MockAuthContext = { uid: 'super-1', role: 'super_admin' };
+    assert(
+      evaluateFirestoreRule('list', superAuth, null, undefined) === true,
+      '9.10 Super Admin listing across all branches is permitted'
+    );
+
+    // Direct client write attempts -> Strictly denied (ADR-009)
+    assert(
+      evaluateFirestoreRule('create', daetManager, daetTicket) === false,
+      '9.11 Direct client write (create) to /support_tickets is strictly denied'
+    );
+    assert(
+      evaluateFirestoreRule('update', daetManager, daetTicket) === false,
+      '9.12 Direct client write (update) to /support_tickets is strictly denied'
+    );
+    assert(
+      evaluateFirestoreRule('delete', daetManager, daetTicket) === false,
+      '9.13 Direct client write (delete) to /support_tickets is strictly denied'
+    );
   }
 
   console.log('\n================================================================');

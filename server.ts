@@ -197,6 +197,15 @@ export const VALID_TICKET_CATEGORIES = [
   'cancellation_refund',
 ] as const;
 
+export const SUPPORTED_BRANCH_IDS = [
+  'daet',
+  'labo',
+  'capalonga',
+  'paracale',
+  'jose_panganiban',
+  'santa_elena',
+] as const;
+
 export const VALID_TICKET_STATUSES = [
   'submitted',
   'under_investigation',
@@ -1273,11 +1282,6 @@ export function createExpressApp(deps: ServerDependencies = {}): Express {
 
     const { branchId, category, subject, description, orderId, customerName, customerPhone } = req.body;
 
-    if (!branchId || typeof branchId !== 'string') {
-      res.status(400).json({ error: 'branchId is required and must be a string.' });
-      return;
-    }
-
     if (!category || !VALID_TICKET_CATEGORIES.includes(category)) {
       res.status(400).json({
         error: `category must be one of: ${VALID_TICKET_CATEGORIES.join(', ')}`,
@@ -1296,6 +1300,53 @@ export function createExpressApp(deps: ServerDependencies = {}): Express {
     }
 
     try {
+      let authoritativeBranchId: string;
+
+      if (orderId && typeof orderId === 'string' && orderId.trim().length > 0) {
+        const trimmedOrderId = orderId.trim();
+        const orderDoc = await db.collection('orders').doc(trimmedOrderId).get();
+        if (!orderDoc || !orderDoc.exists) {
+          res.status(404).json({ error: `Associated order not found: ${trimmedOrderId}` });
+          return;
+        }
+
+        const orderData = orderDoc.data();
+        if (orderData.userId !== user.uid) {
+          res.status(403).json({ error: 'Access Denied: Associated order does not belong to authenticated customer.' });
+          return;
+        }
+
+        const orderBranch = orderData.branchId;
+        if (!orderBranch || !SUPPORTED_BRANCH_IDS.includes(orderBranch as any)) {
+          res.status(400).json({ error: `Associated order has invalid branch assignment: ${orderBranch}` });
+          return;
+        }
+
+        if (branchId && typeof branchId === 'string' && branchId.trim().toLowerCase() !== orderBranch.toLowerCase()) {
+          res.status(400).json({
+            error: `Branch mismatch: Supplied branchId '${branchId}' does not match associated order's authoritative branch '${orderBranch}'.`,
+          });
+          return;
+        }
+
+        authoritativeBranchId = orderBranch;
+      } else {
+        if (!branchId || typeof branchId !== 'string') {
+          res.status(400).json({ error: 'branchId is required and must be a string when no associated order is supplied.' });
+          return;
+        }
+
+        const normalizedBranch = branchId.trim().toLowerCase();
+        if (!SUPPORTED_BRANCH_IDS.includes(normalizedBranch as any)) {
+          res.status(400).json({
+            error: `Invalid branchId '${branchId}'. Must be one of supported branches: ${SUPPORTED_BRANCH_IDS.join(', ')}`,
+          });
+          return;
+        }
+
+        authoritativeBranchId = normalizedBranch;
+      }
+
       const now = new Date();
       const createdAt = now.toISOString();
       const slaDueAt = new Date(now.getTime() + RA11967_SLA_MS).toISOString();
@@ -1307,8 +1358,8 @@ export function createExpressApp(deps: ServerDependencies = {}): Express {
         customerName: customerName ? String(customerName).trim() : (user.email ? user.email.split('@')[0] : 'Valued Customer'),
         customerEmail: user.email,
         customerPhone: customerPhone ? String(customerPhone).trim() : undefined,
-        orderId: orderId ? String(orderId).trim() : undefined,
-        branchId: String(branchId).trim(),
+        orderId: orderId && typeof orderId === 'string' && orderId.trim().length > 0 ? orderId.trim() : undefined,
+        branchId: authoritativeBranchId,
         category,
         subject: subject.trim(),
         description: description.trim(),

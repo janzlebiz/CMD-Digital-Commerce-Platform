@@ -110,7 +110,8 @@ service cloud.firestore {
         isSuperAdmin()
       );
       allow list: if isSignedIn() && (
-        isBranchManager() ||
+        isOwner(resource.data.userId) ||
+        (isBranchManager() && get(/databases/$(database)/documents/users/$(request.auth.uid)).data.assignedBranchId == resource.data.branchId) ||
         isRegionalDirector() ||
         isSuperAdmin()
       );
