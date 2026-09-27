@@ -2,7 +2,7 @@
 
 **Document Reference:** `docs/phases/PHASE_7_PRE_IMPLEMENTATION_AUDIT.md`  
 **Evaluation Target:** Phase 7 (Multi-Branch Inventory Synchronization, Expiry & Batch Traceability, Supply Chain Forecasting, B2B Stockist Partner Portal, and Distribution Logistics)  
-**Baseline Certified:** Phase 0–6C Milestones 1–3 (333/333 automated assertions passing)  
+**Baseline Certified:** Phase 0–6C Milestones 1–3 (333/333 automated regression assertions passing)  
 **Audit Date:** 2026-09-27  
 **Status:** Pre-Implementation Architectural Assessment (Proposed / Unimplemented)  
 
@@ -12,12 +12,12 @@
 
 This pre-implementation audit establishes the architectural, regulatory, and technical specifications for **Phase 7** of the **HCI Cell Mineral Drops (CMD) Digital Commerce & Naturopathic Wellness Platform**. All Phase 7 features discussed herein are strictly **proposed and unimplemented** pending separate authorization.
 
-Phase 7 will expand the platform's commercial and financial operations into a resilient **Multi-Branch Inventory Synchronization, Expiry & Batch Traceability, and B2B Distribution Logistics Engine**. This system will bridge central procurement and local branch operations across the twelve (12) municipalities of Camarines Norte, Philippines.
+Phase 7 is planned to expand the platform's commercial and financial operations into a resilient **Multi-Branch Inventory Synchronization, Expiry & Batch Traceability, and B2B Distribution Logistics Engine**. The system will initially serve the six (6) verified operating branches (`daet`, `labo`, `paracale`, `jose_panganiban`, `capalonga`, `santa_elena`), with architectural provisions for future geographic expansion across all twelve (12) municipalities of Camarines Norte, Philippines as physical distribution hubs are commissioned.
 
-### 1.1 Statutory Compliance Mandate
-* **Republic Act No. 11967 (Internet Transactions Act of 2023 - ITA):** Mandates rigorous tracking of seller inventory, product provenance, delivery commitments, and complete transaction traceability. Consumers must be guaranteed accurate product stock status at checkout.
-* **Republic Act No. 10173 (Data Privacy Act of 2012 - DPA):** Mandates strict data minimization and boundary isolation. B2B stockist profiles, inventory movements, and batch distribution logs must remain completely decoupled from clinical health records.
-* **Administrative Order No. 2013-0022 (FDA Quality Management):** Requires strict batch-level tracking, laboratory certificate associations, and FEFO (First-Expired, First-Out) shelf-life reservation for food supplements (such as ionic cell mineral drops).
+### 1.1 Statutory & Regulatory Compliance Baseline
+* **Republic Act No. 11967 (Internet Transactions Act of 2023 - ITA) & Implementing Rules and Regulations (IRR):** Mandates truthful and non-misleading digital commerce representations, accurate product availability signals prior to checkout, transparent fulfillment commitments, and complete transaction traceability. Dependencies include alignment with current Department of Trade and Industry (DTI) e-commerce regulations, consumer redress mechanisms (RA 7394), and upcoming Philippine E-Commerce Trustmark compliance standards.
+* **Republic Act No. 10173 (Data Privacy Act of 2012 - DPA):** Enforces strict data minimization and boundary isolation (Section 13 sensitive personal information protections). B2B stockist profiles, inventory movements, transit manifests, and batch distribution logs must remain completely decoupled from clinical health records and consultation intakes.
+* **Food Supplement Quality & Classification Assurance (FDA Compliance Baseline):** Products under the CMD banner must be distributed under certified FDA authorizations. Prior to implementing automated batch release and expiration routing, the exact FDA regulatory classification (e.g., registered food/dietary supplement vs. cosmetic/topical mineral solution) and current applicable FDA circulars / post-market surveillance directives must be formally confirmed. The First-Expired, First-Out (FEFO) allocation engine and batch certificate provenance system are designed to support rigorous quality management and regulatory compliance upon activation.
 
 ---
 
@@ -25,100 +25,161 @@ Phase 7 will expand the platform's commercial and financial operations into a re
 
 No Phase 7 implementation code has been written. To protect the passing 333-test regression baseline, the table below delineates the strict boundary between existing Phase 6C structures and Phase 7 proposals.
 
-### 2.1 Capability Status Matrix
+### 2.1 Current State vs. Proposed Phase 7 Capabilities
 
-| Component / Subsystem | Status | Current Location / Existing Logic | Proposed Phase 7 Scope (NOT YET STARTED) |
+| Component / Subsystem | Current Codebase Status | Existing Location / Logic | Proposed Phase 7 Scope (PROPOSED / UNIMPLEMENTED) |
 | :--- | :---: | :--- | :--- |
-| **Branch Expense Ledger** | **ACTIVE** | `server.ts` routes `/api/finance/expenses` | Read-only ledger feed integrated as inventory cost-basis. |
-| **CRM Cohort Aggregation** | **ACTIVE** | `server.ts` routes `/api/crm/cohorts` | Direct integration with B2B Stockist tiering rules. |
-| **Clinical Intakes (KMS)** | **ACTIVE** | `/consultation_intakes` (AES-256-GCM) | **STRICTLY EXCLUDED** via the Data Privacy Firewall. |
-| **Multi-Branch Inventory Stock** | **UNSTARTED** | *None* (Stock status is not managed per-branch) | Real-time ledger `/inventory` with active adjustments. |
-| **Batch Expiry & QC Control** | **UNSTARTED** | *None* | FEFO allocation engine & batch registry `/product_batches`. |
-| **Inter-Branch Stock Transfers** | **UNSTARTED** | *None* | Dual-custody transfer workflow `/stock_transfers`. |
-| **Lead-Time Supply Forecasting** | **UNSTARTED** | *None* | Sales velocity and Reorder Point (ROP) math engine. |
-| **B2B Bulk Stockist Portal** | **UNSTARTED** | *None* | Tiered pricing engines, deposit ledgers, credit limits. |
+| **Branch Expense Ledger** | **ACTIVE** | `server.ts` routes `/api/finance/expenses` | Future read-only integration to calculate batch cost bases from raw material expenses. |
+| **CRM Cohort Aggregation** | **ACTIVE** | `server.ts` routes `/api/crm/cohorts` | Direct integration with B2B Stockist tiering and wholesale eligibility verification. |
+| **Clinical Intakes (KMS)** | **ACTIVE** | `/consultation_intakes` (AES-256-GCM) | **STRICTLY EXCLUDED** via the Health Data Privacy Firewall. |
+| **Legacy Inventory Scaffold** | **INACTIVE SCAFFOLD** | `BranchInventory` interface & `/branch_inventory` rule | Inactive legacy schema. Architectural decision required to deprecate or extend before creating `/inventory`. |
+| **Operational Inventory Engine** | **UNSTARTED** | *None* (No server-side reservation/adjustment logic) | Transaction-safe real-time multi-branch inventory engine with FEFO batch allocation. |
+| **Batch Expiry & QC Control** | **UNSTARTED** | *None* | FEFO batch allocation, QC status registry (`/product_batches`), and recall tracing. |
+| **Inter-Branch Stock Transfers** | **UNSTARTED** | *None* | Dual-custody transfer workflow (`/stock_transfers`) with conservation-of-stock enforcement. |
+| **Lead-Time Supply Forecasting** | **UNSTARTED** | *None* | Sales velocity ($V_s$), Days of Stock (DOS), and Reorder Point (ROP) math engine. |
+| **B2B Bulk Stockist Portal** | **UNSTARTED** | *None* | Tiered wholesale pricing, deposit-backed consignment ledgers, and credit limit controls. |
+
+### 2.2 Inventory Subsystem Architectural Decision Point
+The codebase currently contains an inactive type definition (`BranchInventory`) and a legacy Firestore rule (`match /branch_inventory/{inventoryId} { allow read: if isSignedIn(); allow write: if false; }`). There is **no operational server-side inventory engine** backing this rule. Prior to implementing Phase 7, an architectural decision must be confirmed:
+1. **Option A (Deprecate & Supersede):** Deprecate `/branch_inventory` and introduce the fully normalized `/inventory`, `/product_batches`, and `/branch_batch_inventory` schema.
+2. **Option B (Extend Legacy Path):** Refactor the existing `/branch_inventory` collection to house batch-attributed quantities and update security rules accordingly.
 
 ---
 
-## 3. Comprehensive Phase 7 Technical Capabilities & Specifications
+## 3. Comprehensive Phase 7 Technical Capabilities & Architecture
 
-### 3.1 Multi-Branch Stock Ledger & SKU Definitions
-* **SKUs Managed:**
-  * `CMD-60ML`: Cell Mineral Drops Standard (60ml bottle, ~1,000 drops)
-  * `CMD-30ML`: Cell Mineral Drops Travel Size (30ml bottle, ~500 drops)
-  * `RM-IONIC`: Bulk Raw Ionic Trace Mineral Concentrate (Procurement grade)
-  * `PACK-BTL`: Empty Glass Dropper Bottles (Packaging stock)
-* **Real-Time Stock Counters:**
-  * Stores total active stock, reserved stock (awaiting shipment/pickup), and transit stock across all 6 verified branches (`daet`, `labo`, `paracale`, `jose_panganiban`, `capalonga`, `santa_elena`).
-* **Symmetric Adjustments:**
-  * Enables authorized staff to record audited stock counts, shrinkage, damages, or laboratory sample withdrawals.
+### 3.1 Source Catalog Alignment & Proposed SKU Definitions
+The platform's existing, verified source catalog provides two commercial consumer SKUs:
+* **`hci-cmd-65ml` (Active Consumer SKU):** HCI Cell Mineral Drops (CMD) — 65 mL Flagship Bottle (~960 drops).
+* **`hci-cmd-30ml` (Active Consumer SKU):** HCI Cell Mineral Drops (CMD) — 30 mL Compact Dropper (~450 drops).
 
-### 3.2 FEFO Batch Allocation & Laboratory Certificate Provenance
-* **Product Batch Registry (`/product_batches`):**
-  * Tracks every manufactured/procured batch of CMD.
-  * Fields: `batchNumber`, `manufactureDate`, `expiryDate`, `laboratoryCertificateUrl` (FDA quality analysis), `qualityControlStatus` (`pending` | `passed` | `failed`).
-* **First-Expired, First-Out (FEFO) Allocation:**
-  * When a customer or B2B stockist places an order, the server-side commerce engine automatically reserves stock from the batch with the *earliest expiry date* that is marked as `passed` QC.
-* **Recall Recall Orchestrator:**
-  * In the event of a product quality alert, this engine lists all customers, B2B partners, and order IDs that received bottles mapped to the target `batchNumber`.
+**Proposed Phase 7 Supply Chain & Packaging SKUs (Proposed / Unimplemented):**
+* **`rm-ionic-concentrate` (Proposed Raw Material):** Bulk Raw Ionic Trace Mineral Concentrate (procurement grade, measured in Liters/Kilograms).
+* **`pack-dropper-bottle-65ml` (Proposed Packaging):** 65 mL Amber Glass Dropper Bottles with tamper-evident dropper pipettes.
+* **`pack-dropper-bottle-30ml` (Proposed Packaging):** 30 mL Amber Glass Dropper Bottles with tamper-evident dropper pipettes.
 
-### 3.3 Inter-Branch Stock Transfer Dual-Custody Ledger (`/stock_transfers`)
-To prevent "ghost inventory" and transit loss, stock transfers follow a strict dual-custody handshake:
-1. **Initiation (`requested` $\rightarrow$ `in_transit`):**
-   * Sender branch (e.g., Daet Hub) initiates transfer.
-   * `Source_Stock` is decremented; the quantity is moved into a `transit_pool` state bound to the transfer ID.
-2. **Acceptance Handshake (`received` | `rejected_damaged`):**
-   * The receiving branch manager inspects physical delivery.
-   * On acceptance: Items are subtracted from `transit_pool` and added to receiving branch active stock.
-   * On rejection (leakage, damage, loss): Items are recorded as transit-loss expenses and audited in `/audit_logs`.
+### 3.2 Implementable FEFO Batch Architecture & Provenance Tracing
+
+To ensure that First-Expired, First-Out (FEFO) routing is practically implementable and verifiable, stock must be tracked at both the aggregate branch level and the discrete batch level.
 
 ```
-[Source Active Stock] 
-         │  (1. Sender Manager Initiates)
-         ▼
-[Transit Pool (Locked)]
-         │  (2. Delivery arrives; Receiver Manager Inspects)
-         ├──► ACCEPTED ──► [Destination Active Stock]
-         └──► REJECTED ──► [Loss Written Off as Expense Category 'miscellaneous']
+┌───────────────────────────────────────────────────────────┐
+│              Product Batch Registry                       │
+│              (/product_batches/{batchId})                 │
+│  - batchNumber: "CMD-2026-09A"   - expiryDate: 2028-09-30 │
+│  - qualityControlStatus: "passed"                         │
+└─────────────────────────────┬─────────────────────────────┘
+                              │
+                              ▼
+┌───────────────────────────────────────────────────────────┐
+│        Branch Batch Inventory (Stock by Batch & Branch)    │
+│        (/branch_batch_inventory/{branchId_batchId})        │
+│  - branchId: "daet"              - batchId: "CMD-2026-09A"│
+│  - availableQuantity: 150        - reservedQuantity: 10   │
+└─────────────────────────────┬─────────────────────────────┘
+                              │
+                              ▼ (Order Checkout / Reservation)
+┌───────────────────────────────────────────────────────────┐
+│           Batch Allocation & Provenance Record            │
+│           (/batch_allocations/{allocationId})             │
+│  - orderId: "ORD-2026-901"       - batchId: "CMD-2026-09A"│
+│  - skuId: "hci-cmd-65ml"         - allocatedQuantity: 2   │
+│  - customerUid: "user-101"       - branchId: "daet"       │
+└───────────────────────────────────────────────────────────┘
 ```
 
-### 3.4 Supply Chain Forecasting & Dynamic Reorder Points (ROP)
-* **Branch-Specific Sales Velocity ($V_s$):**
-  * Computes 30-day moving sales average: $V_s = \frac{\text{Units Sold in 30 Days}}{30}$.
+#### Core Components of the FEFO Architecture:
+1. **Batch-Level Stock Quantities:** Each branch tracks stock per batch in `/branch_batch_inventory`, recording `availableQuantity`, `reservedQuantity`, `allocatedQuantity`, and `damagedQuantity`.
+2. **Batch-Attributed Stock Reservations:** During checkout, stock is reserved against the batch with the *earliest valid expiration date* (`expiryDate > now`) whose `qualityControlStatus == 'passed'`.
+3. **Batch Allocation & Provenance Records (`/batch_allocations`):** Connects every order item directly to the originating `batchId`.
+4. **Bidirectional Recall Traversal Engine:** In the event of an FDA or manufacturer recall:
+   * Querying by `batchNumber` immediately yields all associated `orderId`s, customer UIDs, B2B stockist accounts, branches, and fulfillment timestamps.
+   * Enables automated notification generation and quarantine locks across active branch stocks.
+
+### 3.3 Stock Transfer Protocol & Dual-Custody State Machine
+
+Inter-branch stock transfers must enforce strict conservation-of-stock and idempotency guarantees:
+
+$$\text{Source Stock} + \text{Transit Stock} + \text{Destination Stock} + \text{Audited Loss} = \text{Initial Total Stock}$$
+
+```
+                          ┌──────────────┐
+                          │    DRAFT     │
+                          └──────┬───────┘
+                                 │ initiateTransfer(idempotencyKey)
+                                 ▼
+                          ┌──────────────┐
+                          │  IN_TRANSIT  │ (Source Stock Decremented;
+                          └──────┬───────┘  Transit Pool Incremented)
+                                 │
+         ┌───────────────────────┼───────────────────────┐
+         │                       │                       │
+         ▼ (receiveTransferFull) ▼ (receiveTransferPart) ▼ (rejectDamaged)
+┌─────────────────┐     ┌─────────────────┐     ┌─────────────────┐
+│  RECEIVED_FULL  │     │ RECEIVED_PARTIAL│     │ REJECTED_DAMAGED│
+└─────────────────┘     └─────────────────┘     └─────────────────┘
+Destination Stock += Q   Destination Stock += Qrec   Transit Pool -= Q
+Transit Pool -= Q        Transit Pool -= Q           Audited Loss += Q
+                         Audited Loss += (Q - Qrec)  (Expense Incurred)
+```
+
+#### Transfer State-Transition & Safety Rules:
+1. **Duplicate Request & Retry Safety:** Transfer initiation requires a client-generated `idempotencyKey`. Duplicate submissions return the existing transfer state without double-decrementing source inventory.
+2. **Transit Custody Lock:** Initiating a transfer atomically decrements `Source_Stock` and increments `Transit_Pool` for the specific batch.
+3. **Full Receipt:** Destination branch accepts shipment; `Transit_Pool` is decremented and `Destination_Stock` is incremented.
+4. **Partial Receipt:** Destination branch verifies physical count. If 80 of 100 units arrive undamaged, 80 units transition to `Destination_Stock`, 20 units transition to `Audited_Loss`, and `Transit_Pool` is decremented by 100.
+5. **Rejection & Damage Handling:** Damaged shipments are rejected with mandatory photo/notes evidence. The units are decremented from `Transit_Pool` and booked as an audited transit-loss expense (`miscellaneous` or `damaged_goods`).
+6. **Cancellation & Reversal:** Transfers in `in_transit` state can only be cancelled by authorized supervisors, returning stock atomically from `Transit_Pool` to `Source_Stock`.
+
+### 3.4 Supply Chain Forecasting Math & Edge Cases
+
+The forecasting engine computes replenishment indicators using 30-day historical data:
+
+* **Branch Sales Velocity ($V_s$):**
+  $$V_s = \frac{\sum \text{Completed Consumer \& B2B Units Sold (Last 30 Days)}}{30}$$
 * **Days of Stock (DOS):**
-  * $\text{DOS} = \frac{\text{Current Active Stock}}{V_s}$.
+  $$\text{DOS} = \begin{cases} \infty \text{ (or Safe Baseline)} & \text{if } V_s = 0 \\ \frac{\text{Current Active Available Stock}}{V_s} & \text{if } V_s > 0 \end{cases}$$
 * **Dynamic Reorder Point (ROP):**
-  * Evaluates when stock needs replenishment based on local transit lead times ($L_t$) and desired safety stock ($S_s$):
-    $$\text{ROP} = (V_s \times L_t) + S_s$$
-  * Automatic triggers notify branch managers when $\text{Current Active Stock} \le \text{ROP}$.
+  $$\text{ROP} = \lceil (V_s \times L_t) + S_s \rceil$$
 
-### 3.5 B2B Bulk Stockist Partner Portal
-* **Stockist Tiering & Volume Discounts:**
-  * **Bronze Stockist:** Minimum order of 50 bottles, 15% discount.
-  * **Silver Stockist:** Minimum order of 200 bottles, 25% discount.
-  * **Gold Stockist:** Minimum order of 500 bottles, 35% discount.
-* **Deposit-Backed Consignment Ledger:**
-  * Tracks bulk inventory dispatched on consignment.
-  * Monitors deposit balances, credit limits, outstanding balances, and aging accounts receivable (net-15 or net-30 credit terms) with automatic order lockouts upon credit breach.
+#### Explicit Edge-Case Handling Rules:
+1. **Zero Sales Velocity ($V_s = 0$):** When no units have been sold in 30 days, DOS is represented as `null` (or displayed as $\ge 90\text{ days}$), avoiding division-by-zero exceptions. ROP defaults to the minimum branch safety buffer ($S_s$).
+2. **Rounding Rule:** All reorder points and suggested order quantities must use integer ceiling ($\lceil \cdot \rceil$) to prevent under-replenishment.
+3. **Cancelled & Refunded Orders:** Strictly excluded from $V_s$ calculations to prevent artificial demand inflation.
+4. **Inter-Branch Stock Transfers:** Transfer shipments out of a branch must **not** be counted as consumer sales velocity for that branch, preventing circular demand distortion.
+5. **Stockout Periods:** If a branch experiences zero stock for $N$ days during the 30-day window, the effective velocity calculation adjusts the denominator to active in-stock days ($30 - N$) to prevent demand underestimation.
+6. **Safety Stock ($S_s$) Source:** Configured per SKU and branch (default: 14 days of average demand or minimum 20 units).
+7. **Transit Lead-Time ($L_t$) Source:** Derived from a branch-specific transit lead-time matrix (e.g., Daet Central Hub to Capalonga: 3 business days; Central Hub to Santa Elena: 4 business days).
+
+### 3.5 B2B Stockist Partner Portal & Consignment Specifications
+
+* **Wholesale Tier Pricing & Eligibility:**
+  * **Tier 1 (Stockist Partner):** Minimum order 50 units (15% discount on `hci-cmd-65ml` / `hci-cmd-30ml`).
+  * **Tier 2 (Municipal Distributor):** Minimum order 200 units (25% discount).
+  * **Tier 3 (Regional Stockist):** Minimum order 500 units (35% discount).
+* **Credit & Deposit Mechanics:**
+  * Consignment accounts require verified upfront security deposits.
+  * System enforces hard credit limits; orders exceeding available credit or past-due net-30 terms are automatically blocked from dispatch.
 
 ---
 
 ## 4. Privacy, Security & Threat Modeling (RA 10173 & IDOR Isolation)
 
-1. **Health Data Privacy Firewall (SPI Boundary):**
-   * Bulk stockists, delivery drivers, and warehouse coordinators have **ZERO** clinical clearance. 
-   * Inventory APIs, stock adjustments, batch records, and B2B portals must never call, import, or read from `/consultation_intakes` or related clinical tables.
+1. **Health Data Privacy Firewall (Zero Clinical Clearance):**
+   * Warehouse coordinators, B2B stockists, and delivery drivers have **ZERO** clinical clearance.
+   * Inventory APIs, batch logs, and transfer manifests must never query or access `/consultation_intakes`.
 2. **Cross-Branch Inventory IDOR Protection:**
-   * A branch manager assigned to `labo` must be strictly blocked from viewing or creating inventory adjustments for `daet` or `paracale`.
-   * Cross-branch adjustment queries return `HTTP 403 Forbidden` and log a high-priority security audit event.
-3. **Double-Allocation Prevention under Concurrent Loads:**
-   * High-volume B2B bulk orders must use Firestore transactional constraints (`db.runTransaction`) to guarantee that stock levels do not drop below zero when multiple stockists claim remaining stock concurrently.
+   * Branch managers are restricted to their assigned branch (`assignedBranchId`).
+   * Attempts to view, adjust, or receive inventory for an unassigned branch return `HTTP 403 Forbidden` and generate an ADR-009 security audit log.
+3. **Transactional Concurrency & Anti-Overselling:**
+   * Stock reservations and batch allocations must execute within Firestore transactions (`db.runTransaction`) with optimistic concurrency control (OCC).
+   * Prevents race conditions and guarantees stock never drops below zero during concurrent checkouts.
 
 ---
 
 ## 5. Proposed Schema Blueprint & Security Rules
 
-### 5.1 Proposed Firebase Blueprint Registry (`firebase-blueprint.json`)
+### 5.1 Proposed Firebase Blueprint Schema (`firebase-blueprint.json`)
 ```json
 {
   "collections": {
@@ -127,12 +188,12 @@ To prevent "ghost inventory" and transit loss, stock transfers follow a strict d
         "id": "branchId_skuId",
         "fields": {
           "branchId": "string",
-          "sku": "string",
+          "skuId": "string",
           "activeStock": "number",
           "reservedStock": "number",
           "transitStock": "number",
-          "reorderPoint": "number",
           "safetyStock": "number",
+          "reorderPoint": "number",
           "lastAdjustmentAt": "string"
         }
       }
@@ -142,12 +203,41 @@ To prevent "ghost inventory" and transit loss, stock transfers follow a strict d
         "id": "batchId",
         "fields": {
           "batchNumber": "string",
-          "sku": "string",
+          "skuId": "string",
           "manufactureDate": "string",
           "expiryDate": "string",
           "laboratoryCertificateUrl": "string",
           "qualityControlStatus": "string",
+          "totalManufacturedQuantity": "number",
           "procurementCostBasis": "number"
+        }
+      }
+    },
+    "branch_batch_inventory": {
+      "document": {
+        "id": "branchId_batchId",
+        "fields": {
+          "branchId": "string",
+          "batchId": "string",
+          "skuId": "string",
+          "availableQuantity": "number",
+          "reservedQuantity": "number",
+          "damagedQuantity": "number",
+          "expiryDate": "string"
+        }
+      }
+    },
+    "batch_allocations": {
+      "document": {
+        "id": "allocationId",
+        "fields": {
+          "orderId": "string",
+          "batchId": "string",
+          "skuId": "string",
+          "branchId": "string",
+          "customerUid": "string",
+          "allocatedQuantity": "number",
+          "allocatedAt": "string"
         }
       }
     },
@@ -158,9 +248,13 @@ To prevent "ghost inventory" and transit loss, stock transfers follow a strict d
           "id": "string",
           "sourceBranchId": "string",
           "destinationBranchId": "string",
-          "sku": "string",
-          "quantity": "number",
+          "batchId": "string",
+          "skuId": "string",
+          "requestedQuantity": "number",
+          "receivedQuantity": "number",
+          "damagedQuantity": "number",
           "status": "string",
+          "idempotencyKey": "string",
           "initiatedByUid": "string",
           "receivedByUid": "string",
           "initiatedAt": "string",
@@ -181,12 +275,31 @@ match /inventory/{itemId} {
     isSuperAdmin() || 
     (isBranchManager() && get(/databases/$(database)/documents/users/$(request.auth.uid)).data.assignedBranchId == resource.data.branchId)
   );
-  allow write: if false; // ADR-009: Strict Network-Only Writes via server-side logic
+  allow write: if false; // ADR-009: Strict Network-Only Writes via server.ts
 }
 
 match /product_batches/{batchId} {
   allow read: if isSignedIn() && (isBranchManager() || isRegionalDirector() || isSuperAdmin());
-  allow write: if false; // ADR-009: Managed exclusively via server.ts
+  allow write: if false; // ADR-009: Managed exclusively via server-side endpoints
+}
+
+match /branch_batch_inventory/{itemDocId} {
+  allow read: if isSignedIn() && (
+    isRegionalDirector() ||
+    isSuperAdmin() ||
+    (isBranchManager() && get(/databases/$(database)/documents/users/$(request.auth.uid)).data.assignedBranchId == resource.data.branchId)
+  );
+  allow write: if false;
+}
+
+match /batch_allocations/{allocationId} {
+  allow read: if isSignedIn() && (
+    isRegionalDirector() ||
+    isSuperAdmin() ||
+    (isBranchManager() && get(/databases/$(database)/documents/users/$(request.auth.uid)).data.assignedBranchId == resource.data.branchId) ||
+    (isOwner(resource.data.customerUid))
+  );
+  allow write: if false;
 }
 
 match /stock_transfers/{transferId} {
@@ -198,7 +311,7 @@ match /stock_transfers/{transferId} {
       get(/databases/$(database)/documents/users/$(request.auth.uid)).data.assignedBranchId == resource.data.destinationBranchId
     ))
   );
-  allow write: if false; // ADR-009: Managed via double-custody API handshakes
+  allow write: if false; // ADR-009: Managed via dual-custody API handshakes
 }
 ```
 
@@ -207,36 +320,48 @@ match /stock_transfers/{transferId} {
 ## 6. Regression & Zero-Impact Certification
 
 To ensure that the 333 passing regression assertions remain completely stable, Phase 7 establishes the following isolation guarantees:
-1. **Phase 6A (Clinical Intakes & appointments):** No clinical logic, KMS credentials, or private consultation routes are modified or imported.
+1. **Phase 6A (Clinical Intakes & Appointments):** No clinical logic, KMS credentials, or private consultation routes are modified or imported.
 2. **Phase 6B (Workshops & Dynamic QR Passes):** Symposia schedules, check-in signatures, and participant registration remain 100% independent of stock counts.
 3. **Phase 6C Milestones 1–3 (Redress, CRM, and Expenses):** 
-   * CRM cohort aggregation query remains operational.
+   * CRM cohort aggregation queries remain operational and unaffected.
    * Expense recording APIs are preserved; the proposed design plans a future read-only integration such that logging raw material procurement would populate corresponding `product_batches` cost bases without breaking existing test schemas.
 
 ---
 
-## 7. Preliminary Acceptance Criteria (Automated Testing Specifications)
+## 7. Expanded Phase 7 Acceptance Criteria (Automated Testing Specifications)
 
-When Phase 7 is authorized for development, the automated test harness (`scripts/testPhase7Inventory.ts`) will require:
+When Phase 7 is authorized for development, the automated test harness (`scripts/testPhase7Inventory.ts`) will require verification across eight (8) distinct operational domains:
 
-1. **Stock Reconciliation Integrity (20 Tests):**
-   * Validates active, reserved, and transit stock levels during mock checkouts.
-   * Asserts concurrent stock reserve requests are thread-safe and prevent double-allocations.
-2. **Dual-Custody Handshake Validation (25 Tests):**
-   * Asserts inventory is locked from source on transfer request.
-   * Asserts receiver confirmation successfully adds items to target branch and decrements transit pools.
-   * Asserts unauthorized branch managers trying to intercept cross-branch transfers are rejected with `HTTP 403`.
-3. **Quality Control & FEFO Expiry Routing (20 Tests):**
-   * Confirms early expiry batches are exhausted first.
-   * Confirms batches failing QC are skipped by the checkout engine.
-4. **Supply Chain Forecasting Accuracy (15 Tests):**
-   * Verifies mathematical precision of Days of Stock (DOS) calculations.
-   * Verifies reorder alerts trigger exactly at calculated Reorder Points (ROP).
+1. **Multi-Branch Inventory & Stock Reconciliation (20 Tests):**
+   * Validates active, reserved, and transit stock levels during simulated checkouts.
+   * Verifies symmetric adjustments (damage, physical audit, sample withdrawal).
+2. **FEFO Expiry Routing & QC Filtering (20 Tests):**
+   * Asserts batches with earliest expiration dates are allocated first.
+   * Asserts batches with `pending` or `failed` QC status are never allocated to customers or stockists.
+3. **Batch Provenance & Recall Traversal (15 Tests):**
+   * Asserts `/batch_allocations` correctly links orders and customers to specific batches.
+   * Validates recall orchestrator accurately identifies all affected order IDs and customer UIDs for a recalled batch.
+4. **Dual-Custody Stock Transfers & Conservation of Stock (25 Tests):**
+   * Asserts conservation of stock across initiation, transit, full receipt, partial receipt, rejection, and cancellation.
+   * Asserts duplicate transfer requests with identical `idempotencyKey` return identical responses without double-decrementing.
+5. **Supply Chain Forecasting & Edge Cases (15 Tests):**
+   * Asserts mathematical accuracy of Sales Velocity ($V_s$), Days of Stock (DOS), and Reorder Point (ROP).
+   * Validates edge cases: zero sales velocity ($V_s=0$), stockout period adjustments, integer ceiling rounding, and exclusion of transfers/cancelled orders.
+6. **B2B Bulk Stockist Portal & Credit Controls (15 Tests):**
+   * Validates tiered wholesale volume pricing and minimum order thresholds.
+   * Verifies consignment ledger, security deposit balances, credit limits, and automatic order lockout upon credit breach.
+7. **Security, IDOR Protection & Health Data Privacy (20 Tests):**
+   * Asserts branch manager cross-branch access attempts return `HTTP 403 Forbidden`.
+   * Asserts zero accesses to `/consultation_intakes` across all inventory and B2B endpoints.
+   * Asserts structured audit logs (ADR-009) are recorded for all stock adjustments, transfers, and QC status changes.
+8. **Concurrent Transaction Safety & Backward Compatibility (15 Tests):**
+   * Asserts concurrent checkouts via `db.runTransaction` prevent double-allocation and overselling.
+   * Validates IndexedDB schema upgrade (v3 $\rightarrow$ v4) with zero data loss on legacy offline stores.
 
 ---
 
 ## 8. Audit Conclusion & Final Recommendation
 
-Phase 7 represents a highly coherent, logically isolated, and business-critical progression for the platform, turning transactional actions into automated log entries, ensuring total product tracing (RA 11967/FDA), and protecting customer wellness records (RA 10173). 
+Phase 7 establishes a comprehensive, mathematically rigorous, and privacy-hardened architecture for multi-branch inventory management, FEFO quality assurance, stock transfers, and B2B distribution.
 
-**The architectural layout is robust, regression-safe, and fully ready for implementation upon separate executive authorization.**
+**Architecture under final pre-implementation review; implementation requires separate authorization after audit certification.**
