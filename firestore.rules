@@ -76,5 +76,30 @@ service cloud.firestore {
       );
       allow write: if false;
     }
+
+    match /booked_slots/{slotId} {
+      allow read: if isSignedIn();
+      allow write: if false;
+    }
+
+    match /workshops/{workshopId} {
+      allow read: if isSignedIn();
+      allow write: if false;
+    }
+
+    match /workshop_registrations/{regId} {
+      allow get: if isSignedIn() && (
+        isOwner(resource.data.userId) ||
+        isBranchManager() ||
+        isRegionalDirector() ||
+        isSuperAdmin()
+      );
+      allow list: if isSignedIn() && (
+        isBranchManager() ||
+        isRegionalDirector() ||
+        isSuperAdmin()
+      );
+      allow write: if false;
+    }
   }
 }

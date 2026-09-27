@@ -105,6 +105,42 @@
         "correlationId": { "type": "string" }
       },
       "required": ["id", "actorUid", "actorRole", "action", "targetResource", "timestamp", "success"]
+    },
+    "workshop": {
+      "title": "Workshop",
+      "description": "Branch-specific educational workshop or community wellness symposium.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "title": { "type": "string" },
+        "description": { "type": "string" },
+        "branchId": { "type": "string" },
+        "scheduledDate": { "type": "string" },
+        "scheduledTime": { "type": "string" },
+        "capacity": { "type": "number" },
+        "seatsAllocated": { "type": "number" },
+        "waitlistCount": { "type": "number" },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["id", "title", "branchId", "scheduledDate", "scheduledTime", "capacity", "seatsAllocated", "waitlistCount"]
+    },
+    "workshop_registration": {
+      "title": "WorkshopRegistration",
+      "description": "User registration for an educational workshop.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "userId": { "type": "string" },
+        "workshopId": { "type": "string" },
+        "customerName": { "type": "string" },
+        "customerEmail": { "type": "string" },
+        "customerPhone": { "type": "string" },
+        "status": { "type": "string", "enum": ["confirmed", "waitlisted", "cancelled", "attended"] },
+        "signature": { "type": "string" },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["id", "userId", "workshopId", "status", "signature"]
     }
   },
   "firestore": {
@@ -131,6 +167,14 @@
     "/audit_logs/{logId}": {
       "schema": "audit_log",
       "description": "Append-only structured audit logs."
+    },
+    "/workshops/{workshopId}": {
+      "schema": "workshop",
+      "description": "Workshop scheduled events."
+    },
+    "/workshop_registrations/{regId}": {
+      "schema": "workshop_registration",
+      "description": "User workshop registrations."
     }
   }
 }

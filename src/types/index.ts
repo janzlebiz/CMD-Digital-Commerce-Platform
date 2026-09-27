@@ -19,7 +19,8 @@ export type PageView =
   | 'checkout'
   | 'orders'
   | 'consultations'
-  | 'admin';
+  | 'admin'
+  | 'workshops';
 
 export type UserRole = 'customer' | 'practitioner' | 'branch_manager' | 'regional_director' | 'super_admin';
 
@@ -225,6 +226,32 @@ export interface ConsultationAppointment {
   status: 'scheduled' | 'intake_completed' | 'in_consultation' | 'completed' | 'cancelled';
   intakeId?: string;
   consentRecord?: InformedConsentRecord;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface Workshop {
+  id: string;
+  title: string;
+  description: string;
+  branchId: string;
+  scheduledDate: string;
+  scheduledTime: string;
+  capacity: number;
+  seatsAllocated: number;
+  waitlistCount: number;
+  createdAt: string;
+}
+
+export interface WorkshopRegistration {
+  id: string;
+  userId: string;
+  workshopId: string;
+  customerName: string;
+  customerEmail: string;
+  customerPhone: string;
+  status: 'confirmed' | 'waitlisted' | 'cancelled' | 'attended';
+  signature: string;
   createdAt: string;
   updatedAt: string;
 }

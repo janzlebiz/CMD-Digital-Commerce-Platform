@@ -27,6 +27,7 @@ import { CheckoutView } from './views/CheckoutView';
 import { OrdersView } from './views/OrdersView';
 import { AdminDashboardView } from './views/AdminDashboardView';
 import { ConsultationsView } from './views/ConsultationsView';
+import { WorkshopsView } from './views/WorkshopsView';
 import { useEcommerce } from './hooks/useEcommerce';
 import { AuthProvider } from './context/AuthContext';
 
@@ -62,6 +63,7 @@ function MainLayout() {
         'orders',
         'consultations',
         'admin',
+        'workshops',
       ];
       if (validViews.includes(hash)) {
         setCurrentView(hash);
@@ -143,6 +145,8 @@ function MainLayout() {
         );
       case 'consultations':
         return <ConsultationsView />;
+      case 'workshops':
+        return <WorkshopsView />;
       case 'admin':
         return <AdminDashboardView onNavigate={handleNavigate} />;
       default:

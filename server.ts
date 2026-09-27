@@ -113,6 +113,58 @@ export const PRACTITIONER_ROSTER: Record<string, {
   },
 };
 
+export const HMAC_SECRET = process.env.HMAC_SECRET || 'HCI_CMD_QR_SECRET_2026_CAMARINES_NORTE_HMAC';
+
+export const SEED_WORKSHOPS = [
+  {
+    id: 'wk-01-daet',
+    title: 'Daet Trace Mineral Science & Hydration Seminar',
+    description: 'Learn the molecular difference between tap water and mineral-rich ionic electrolytes. Interactive live dilution demos.',
+    branchId: 'daet',
+    scheduledDate: '2026-10-15',
+    scheduledTime: '14:00',
+    capacity: 3, // Set to low capacity to test waitlist transition cleanly
+    seatsAllocated: 0,
+    waitlistCount: 0,
+    createdAt: new Date().toISOString()
+  },
+  {
+    id: 'wk-02-labo',
+    title: 'Labo Community Wellness & Soil Mineral Depletion Workshop',
+    description: 'Why modern agricultural fruits and vegetables are missing vital trace minerals. Educational guide on CMD supplementation.',
+    branchId: 'labo',
+    scheduledDate: '2026-10-22',
+    scheduledTime: '10:00',
+    capacity: 25,
+    seatsAllocated: 0,
+    waitlistCount: 0,
+    createdAt: new Date().toISOString()
+  },
+  {
+    id: 'wk-03-capalonga',
+    title: 'Capalonga Coastal Electrolyte Balance Symposium',
+    description: 'Hydration wellness education specifically tailored for coastal, fishing, and high-exertion communities.',
+    branchId: 'capalonga',
+    scheduledDate: '2026-10-29',
+    scheduledTime: '13:00',
+    capacity: 30,
+    seatsAllocated: 0,
+    waitlistCount: 0,
+    createdAt: new Date().toISOString()
+  }
+];
+
+export function generateRegistrationSignature(registrationId: string, userId: string, workshopId: string, status: string): string {
+  const payload = `${registrationId}:${userId}:${workshopId}:${status}`;
+  return crypto.createHmac('sha256', HMAC_SECRET).update(payload).digest('hex');
+}
+
+export function verifyRegistrationSignature(registrationId: string, userId: string, workshopId: string, status: string, signature: string): boolean {
+  const expected = generateRegistrationSignature(registrationId, userId, workshopId, status);
+  if (signature.length !== expected.length) return false;
+  return crypto.timingSafeEqual(Buffer.from(signature, 'utf8'), Buffer.from(expected, 'utf8'));
+}
+
 export function getDailyConsultationSlots(dateStr: string, practitionerId: string) {
   const slotDefinitions = [
     { start: '09:00', end: '09:45' },
@@ -830,6 +882,233 @@ export function createExpressApp(deps: ServerDependencies = {}): Express {
 
       await logAuditEvent(user.uid, user.role, appt.branchId, 'consultation_appointment_cancelled', 'consultation_appointments', appointmentId, true, { reason }, req);
       res.json({ success: true, message: 'Cancelled successfully.' });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  // --- WORKSHOP & SYMPOSIUM ENDPOINTS (Phase 6B) ---
+  app.get('/api/workshops', async (req: Request, res: Response): Promise<void> => {
+    const user = await requireAuth(req, res);
+    if (!user) return;
+
+    try {
+      let snap = await db.collection('workshops').get();
+      
+      // Auto-seed workshops if none exist in Firestore
+      if (snap.empty) {
+        for (const ws of SEED_WORKSHOPS) {
+          await db.collection('workshops').doc(ws.id).set(ws);
+        }
+        snap = await db.collection('workshops').get();
+      }
+
+      const workshops: any[] = [];
+      snap.forEach((d: any) => workshops.push(d.data()));
+      res.json({ workshops });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  app.post('/api/workshops/register', async (req: Request, res: Response): Promise<void> => {
+    const user = await requireAuth(req, res);
+    if (!user) return;
+
+    const { workshopId, customerName, customerEmail, customerPhone } = req.body;
+    if (!workshopId) {
+      res.status(400).json({ error: 'workshopId is required.' });
+      return;
+    }
+    if (!customerName || !customerEmail || !customerPhone) {
+      res.status(400).json({ error: 'customerName, customerEmail, and customerPhone are required.' });
+      return;
+    }
+
+    try {
+      const result = await db.runTransaction(async (transaction: any) => {
+        const workshopRef = db.collection('workshops').doc(workshopId);
+        const workshopSnap = await transaction.get(workshopRef);
+        if (!workshopSnap.exists) {
+          throw new Error('WORKSHOP_NOT_FOUND');
+        }
+        const ws = workshopSnap.data();
+
+        // Check for duplicate registration for this active user/workshop
+        const regQuery = db.collection('workshop_registrations')
+          .where('userId', '==', user.uid)
+          .where('workshopId', '==', workshopId);
+        const regSnap = await transaction.get(regQuery);
+        let alreadyRegistered = false;
+        regSnap.forEach((docSnap: any) => {
+          if (docSnap.data().status !== 'cancelled') {
+            alreadyRegistered = true;
+          }
+        });
+
+        if (alreadyRegistered) {
+          throw new Error('ALREADY_REGISTERED');
+        }
+
+        let status = 'confirmed';
+        let seatsAllocated = ws.seatsAllocated || 0;
+        let waitlistCount = ws.waitlistCount || 0;
+
+        if (seatsAllocated < ws.capacity) {
+          seatsAllocated += 1;
+          status = 'confirmed';
+        } else {
+          waitlistCount += 1;
+          status = 'waitlisted';
+        }
+
+        const registrationId = `REG-${Date.now().toString().slice(-4)}-${crypto.randomInt(1000, 9999)}`;
+        const signature = generateRegistrationSignature(registrationId, user.uid, workshopId, status);
+
+        const regRecord = {
+          id: registrationId,
+          userId: user.uid,
+          workshopId,
+          customerName,
+          customerEmail,
+          customerPhone,
+          status,
+          signature,
+          createdAt: new Date().toISOString(),
+          updatedAt: new Date().toISOString()
+        };
+
+        transaction.update(workshopRef, { seatsAllocated, waitlistCount });
+        transaction.set(db.collection('workshop_registrations').doc(registrationId), regRecord);
+
+        return { registration: regRecord, workshop: { ...ws, seatsAllocated, waitlistCount } };
+      });
+
+      await logAuditEvent(user.uid, user.role, result.workshop.branchId, 'workshop_registered', 'workshop_registrations', result.registration.id, true, { status: result.registration.status }, req);
+      res.status(201).json({ success: true, registration: result.registration, workshop: result.workshop });
+    } catch (err: any) {
+      if (err.message === 'WORKSHOP_NOT_FOUND') {
+        res.status(404).json({ error: `Workshop not found: ${workshopId}` });
+        return;
+      }
+      if (err.message === 'ALREADY_REGISTERED') {
+        res.status(400).json({ error: 'You are already registered for this educational workshop.' });
+        return;
+      }
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  app.get('/api/workshops/my-registrations', async (req: Request, res: Response): Promise<void> => {
+    const user = await requireAuth(req, res);
+    if (!user) return;
+
+    try {
+      const snap = await db.collection('workshop_registrations').where('userId', '==', user.uid).get();
+      const registrations: any[] = [];
+      snap.forEach((d: any) => registrations.push(d.data()));
+      res.json({ registrations });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  app.get('/api/workshops/registration/:registrationId/pass', async (req: Request, res: Response): Promise<void> => {
+    const user = await requireAuth(req, res);
+    if (!user) return;
+
+    const { registrationId } = req.params;
+    try {
+      const regDoc = await db.collection('workshop_registrations').doc(registrationId).get();
+      if (!regDoc.exists) {
+        res.status(404).json({ error: `Registration not found: ${registrationId}` });
+        return;
+      }
+
+      const reg = regDoc.data();
+      const isOwner = reg.userId === user.uid;
+      const isStaff = user.role === 'branch_manager' || user.role === 'regional_director' || user.role === 'super_admin';
+
+      if (!isOwner && !isStaff) {
+        res.status(403).json({ error: 'Access Denied: You are not authorized to view this registration pass.' });
+        return;
+      }
+
+      res.json({ registration: reg });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  app.post('/api/workshops/check-in', async (req: Request, res: Response): Promise<void> => {
+    const user = await requireAuth(req, res);
+    if (!user) return;
+
+    // Strict staff role check for scanner capability
+    const isStaff = user.role === 'branch_manager' || user.role === 'regional_director' || user.role === 'super_admin';
+    if (!isStaff) {
+      res.status(403).json({ error: 'Access Denied: Authorized staff check-in privileges required.' });
+      return;
+    }
+
+    const { registrationId, signature } = req.body;
+    if (!registrationId || !signature) {
+      res.status(400).json({ error: 'registrationId and signature are required for attendance verification.' });
+      return;
+    }
+
+    try {
+      const regDoc = await db.collection('workshop_registrations').doc(registrationId).get();
+      if (!regDoc.exists) {
+        res.status(404).json({ error: `Registration record not found: ${registrationId}` });
+        return;
+      }
+
+      const reg = regDoc.data();
+
+      // Recalculate HMAC-SHA256 signature over original registration state to verify authenticity
+      const isValid = verifyRegistrationSignature(registrationId, reg.userId, reg.workshopId, reg.status, signature);
+      if (!isValid) {
+        res.status(400).json({ error: 'Cryptographic Signature Verification Failed: Tampered or forged registration pass.' });
+        return;
+      }
+
+      if (reg.status === 'attended') {
+        res.status(200).json({ success: true, message: 'Pass already scanned.', registration: reg });
+        return;
+      }
+
+      if (reg.status === 'waitlisted') {
+        res.status(400).json({ error: 'Check-in Blocked: Waitlisted participants are not confirmed for entry.' });
+        return;
+      }
+
+      if (reg.status === 'cancelled') {
+        res.status(400).json({ error: 'Check-in Blocked: This registration has been cancelled.' });
+        return;
+      }
+
+      // Transition registration state to attended and sign the updated state
+      const updatedStatus = 'attended';
+      const updatedSignature = generateRegistrationSignature(registrationId, reg.userId, reg.workshopId, updatedStatus);
+
+      await db.collection('workshop_registrations').doc(registrationId).update({
+        status: updatedStatus,
+        signature: updatedSignature,
+        updatedAt: new Date().toISOString()
+      });
+
+      await logAuditEvent(user.uid, user.role, user.assignedBranchId || 'central', 'workshop_attended', 'workshop_registrations', registrationId, true, { originalStatus: reg.status }, req);
+
+      res.status(200).json({
+        success: true,
+        message: 'Attendance verified and recorded successfully.',
+        registration: {
+          ...reg,
+          status: updatedStatus,
+          signature: updatedSignature
+        }
+      });
     } catch (err: any) {
       res.status(500).json({ error: err.message });
     }
