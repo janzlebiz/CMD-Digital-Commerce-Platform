@@ -3400,6 +3400,212 @@ export function createExpressApp(deps: ServerDependencies = {}): Express {
     }
   });
 
+  // --- PHASE 7 MILESTONE 2: FEFO Expiry Routing & QC Filtering Reservation Endpoint ---
+  app.post('/api/inventory/reservations', async (req: Request, res: Response): Promise<void> => {
+    const user = await requireAuth(req, res);
+    if (!user) return;
+
+    if (user.role !== 'branch_manager' && user.role !== 'regional_director' && user.role !== 'super_admin') {
+      await logAuditEvent(
+        user.uid,
+        user.role,
+        String(req.body?.branchId || 'daet').toLowerCase().trim(),
+        'inventory_reservation_unauthorized_role_blocked',
+        'inventory',
+        null,
+        false,
+        { userRole: user.role },
+        req
+      );
+      res.status(403).json({ error: 'Access Denied: Inventory reservation requires authorized staff role (branch_manager, regional_director, super_admin).' });
+      return;
+    }
+
+    const { branchId, skuId, requestedQuantity } = req.body;
+
+    if (!branchId || typeof branchId !== 'string') {
+      res.status(400).json({ error: 'Missing or invalid branchId.' });
+      return;
+    }
+
+    const normalizedBranch = branchId.toLowerCase().trim();
+    if (!SUPPORTED_BRANCH_IDS.includes(normalizedBranch as any)) {
+      res.status(400).json({ error: `Invalid branchId: '${branchId}'. Must be one of: ${SUPPORTED_BRANCH_IDS.join(', ')}` });
+      return;
+    }
+
+    if (user.role === 'branch_manager') {
+      const assigned = (user.assignedBranchId || 'daet').toLowerCase().trim();
+      if (normalizedBranch !== assigned) {
+        await logAuditEvent(
+          user.uid,
+          user.role,
+          normalizedBranch,
+          'inventory_reservation_unauthorized_branch_blocked',
+          'inventory',
+          null,
+          false,
+          { targetBranch: normalizedBranch, assignedBranch: assigned },
+          req
+        );
+        res.status(403).json({ error: 'Access Denied: Branch managers cannot reserve inventory for other branches.' });
+        return;
+      }
+    }
+
+    if (!skuId || !ACTIVE_CONSUMER_SKUS.includes(skuId as any)) {
+      res.status(400).json({ error: `Invalid skuId: '${skuId}'. Must be one of: ${ACTIVE_CONSUMER_SKUS.join(', ')}` });
+      return;
+    }
+
+    const reqQty = Number(requestedQuantity);
+    if (!Number.isInteger(reqQty) || reqQty <= 0) {
+      res.status(400).json({ error: 'requestedQuantity must be a positive integer greater than zero.' });
+      return;
+    }
+
+    try {
+      await ensureInventorySeeded();
+      const nowIso = new Date().toISOString();
+
+      let reservationResult: any;
+
+      await db.runTransaction(async (transaction: any) => {
+        const batchQuery = db.collection('branch_batch_inventory')
+          .where('branchId', '==', normalizedBranch)
+          .where('skuId', '==', skuId);
+        const batchSnap = await transaction.get(batchQuery);
+
+        const eligibleCandidates: Array<{ branchBatchDocRef: any; branchBatch: any; productBatch: any }> = [];
+
+        if (batchSnap && !batchSnap.empty) {
+          for (const docSnap of batchSnap.docs) {
+            const bData = docSnap.data();
+            const available = Number(bData.availableQuantity) || 0;
+            if (available <= 0) continue; // Skip zero-stock
+
+            const pbRef = db.collection('product_batches').doc(bData.batchId);
+            const pbSnap = await transaction.get(pbRef);
+
+            if (!pbSnap.exists) continue;
+            const pbData = pbSnap.data();
+
+            if (pbData.qualityControlStatus !== 'passed') continue; // Skip pending or failed QC
+            if (!pbData.expiryDate || pbData.expiryDate <= nowIso) continue; // Skip expired
+            if (pbData.skuId !== skuId) continue; // Skip wrong SKU
+
+            eligibleCandidates.push({
+              branchBatchDocRef: docSnap.ref,
+              branchBatch: bData,
+              productBatch: pbData,
+            });
+          }
+        }
+
+        // FEFO Ordering: sort by earliest valid expiryDate
+        eligibleCandidates.sort((a, b) => {
+          const expA = Date.parse(a.productBatch.expiryDate || a.branchBatch.expiryDate) || 0;
+          const expB = Date.parse(b.productBatch.expiryDate || b.branchBatch.expiryDate) || 0;
+          return expA - expB;
+        });
+
+        const totalEligibleAvailable = eligibleCandidates.reduce((sum, c) => sum + (Number(c.branchBatch.availableQuantity) || 0), 0);
+        if (totalEligibleAvailable < reqQty) {
+          throw new Error(`INSUFFICIENT_ELIGIBLE_STOCK: Requested ${reqQty} units, but only ${totalEligibleAvailable} eligible units available across passed & unexpired batches.`);
+        }
+
+        let remainingToAllocate = reqQty;
+        const allocations: Array<{ batchId: string; quantityReserved: number; expiryDate: string }> = [];
+        const updatedBatches: any[] = [];
+
+        for (const candidate of eligibleCandidates) {
+          if (remainingToAllocate <= 0) break;
+          const currentAvail = Number(candidate.branchBatch.availableQuantity) || 0;
+          const allocQty = Math.min(currentAvail, remainingToAllocate);
+
+          const newAvail = currentAvail - allocQty;
+          const newReserved = (Number(candidate.branchBatch.reservedQuantity) || 0) + allocQty;
+
+          const updatedBatch = {
+            ...candidate.branchBatch,
+            availableQuantity: newAvail,
+            reservedQuantity: newReserved,
+            updatedAt: nowIso,
+          };
+
+          transaction.set(candidate.branchBatchDocRef, updatedBatch);
+          updatedBatches.push(updatedBatch);
+
+          allocations.push({
+            batchId: candidate.branchBatch.batchId,
+            quantityReserved: allocQty,
+            expiryDate: candidate.productBatch.expiryDate || candidate.branchBatch.expiryDate,
+          });
+
+          remainingToAllocate -= allocQty;
+        }
+
+        const allBranchBatchesQuery = db.collection('branch_batch_inventory')
+          .where('branchId', '==', normalizedBranch)
+          .where('skuId', '==', skuId);
+        const allBatchesSnap = await transaction.get(allBranchBatchesQuery);
+        const allBatches: any[] = [];
+        if (allBatchesSnap && !allBatchesSnap.empty) {
+          allBatchesSnap.forEach((d: any) => {
+            const data = d.data();
+            const modified = updatedBatches.find((ub) => ub.id === data.id);
+            allBatches.push(modified || data);
+          });
+        }
+
+        const updatedAggregate = computeAggregateInventoryFromBatches({
+          branchBatches: allBatches,
+          branchId: normalizedBranch,
+          skuId,
+          lastAdjustmentAt: nowIso,
+        });
+
+        const aggDocRef = db.collection('inventory').doc(`${normalizedBranch}_${skuId}`);
+        transaction.set(aggDocRef, updatedAggregate);
+
+        reservationResult = {
+          skuId,
+          branchId: normalizedBranch,
+          requestedQuantity: reqQty,
+          totalReservedQuantity: reqQty,
+          allocations,
+          remainingAvailableQuantity: updatedAggregate.activeStock,
+          updatedAggregate,
+        };
+      });
+
+      await logAuditEvent(
+        user.uid,
+        user.role,
+        normalizedBranch,
+        'inventory_reservation_recorded',
+        'inventory',
+        `${normalizedBranch}_${skuId}`,
+        true,
+        {
+          skuId,
+          requestedQuantity: reqQty,
+          allocations: reservationResult.allocations,
+          remainingAvailable: reservationResult.remainingAvailableQuantity,
+        },
+        req
+      );
+
+      res.status(201).json(reservationResult);
+    } catch (err: any) {
+      if (err.message.startsWith('INSUFFICIENT_ELIGIBLE_STOCK:')) {
+        res.status(400).json({ error: err.message.replace(/^INSUFFICIENT_ELIGIBLE_STOCK:\s*/, '') });
+        return;
+      }
+      res.status(500).json({ error: err.message });
+    }
+  });
+
   return app;
 }
 
