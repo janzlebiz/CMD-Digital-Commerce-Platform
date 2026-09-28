@@ -11,6 +11,7 @@ import {
   DeliveryAdapterRegistry,
 } from '../server.ts';
 import http from 'http';
+import crypto from 'crypto';
 
 console.log('========================================================================');
 console.log('Running Priority B — Final Safety Remediation v2 Test Suite');
@@ -37,6 +38,7 @@ function createCommerceMockDb() {
     branch_batch_inventory: new Map(),
     idempotency_keys: new Map(),
     refund_intents: new Map(),
+    payment_compensations: new Map(),
     audit_logs: new Map(),
   };
 
@@ -75,6 +77,8 @@ function createCommerceMockDb() {
     updatedAt: new Date().toISOString(),
   };
   store.inventory.set('daet_hci-cmd-65ml', daetAgg);
+
+  const docVersions = new Map<string, number>();
 
   const mockDb: any = {
     collection: (colName: string) => {
@@ -164,32 +168,72 @@ function createCommerceMockDb() {
       };
     },
     runTransaction: async (updateFunction: any) => {
-      const transaction = {
-        get: async (ref: any) => {
-          const snap = await ref.get();
-          return {
-            ...snap,
-            ref: snap.ref || ref,
-          };
-        },
-        set: (ref: any, data: any, options?: any) => {
-          if (ref && ref.ref && typeof ref.ref.set === 'function') {
-            return ref.ref.set(data, options);
+      let retries = 5;
+      while (retries > 0) {
+        const readVersions = new Map<string, number>();
+        const pendingWrites: Array<{ ref: any; data: any; merge?: boolean; isUpdate?: boolean }> = [];
+
+        const transaction = {
+          get: async (ref: any) => {
+            const snap = await ref.get();
+            const refId = ref.id;
+            if (!docVersions.has(refId)) {
+              docVersions.set(refId, 1);
+            }
+            readVersions.set(refId, docVersions.get(refId)!);
+            return {
+              ...snap,
+              ref: snap.ref || ref,
+            };
+          },
+          set: (ref: any, data: any, options?: any) => {
+            pendingWrites.push({ ref, data, merge: !!(options && options.merge) });
+          },
+          update: (ref: any, data: any) => {
+            pendingWrites.push({ ref, data, isUpdate: true });
+          },
+        };
+
+        try {
+          const result = await updateFunction(transaction);
+
+          let hasConflict = false;
+          for (const [refId, readVer] of readVersions.entries()) {
+            const currentVer = docVersions.get(refId) || 1;
+            if (currentVer !== readVer) {
+              hasConflict = true;
+              break;
+            }
           }
-          if (ref && typeof ref.set === 'function') {
-            return ref.set(data, options);
+
+          if (hasConflict) {
+            retries--;
+            if (retries === 0) {
+              throw new Error('Transaction aborted due to too many contention conflicts.');
+            }
+            await new Promise((r) => setTimeout(r, Math.random() * 10 + 5));
+            continue;
           }
-        },
-        update: (ref: any, data: any) => {
-          if (ref && ref.ref && typeof ref.ref.update === 'function') {
-            return ref.ref.update(data);
+
+          for (const write of pendingWrites) {
+            const finalRef = write.ref && write.ref.ref ? write.ref.ref : write.ref;
+            if (write.isUpdate) {
+              await finalRef.update(write.data);
+            } else {
+              await finalRef.set(write.data, { merge: write.merge });
+            }
+            const refId = finalRef.id;
+            docVersions.set(refId, (docVersions.get(refId) || 1) + 1);
           }
-          if (ref && typeof ref.update === 'function') {
-            return ref.update(data);
+
+          return result;
+        } catch (err: any) {
+          if (err.message?.includes('contention conflicts')) {
+            throw err;
           }
-        },
-      };
-      return await updateFunction(transaction);
+          throw err;
+        }
+      }
     },
   };
 
@@ -641,6 +685,163 @@ async function runTests() {
 
     assert(deliveryFailRes.status === 500, '26. Checkout returns 500 when delivery provider fails');
     assert(spyPaymentAdapter.refundCount === 1, '27. Compensating refund invoked when delivery provider fails after payment creation');
+
+    // ------------------------------------------------------------------------
+    // SECTION 9: Priority B — Failed Checkout Replay and Compensation Recovery Tests
+    // ------------------------------------------------------------------------
+    console.log('Running SECTION 9: Failed Checkout Replay & Compensation Recovery...');
+
+    // Restore Standard Delivery Adapter behavior
+    const normalDeliveryAdapter = new StandardDeliveryAdapter();
+    spyDeliveryAdapter.createFulfillment = normalDeliveryAdapter.createFulfillment;
+
+    const normalPaymentAdapterCreate = new SimulatedPaymentAdapter('simulated_cod').createPaymentIntent;
+
+    // Test A: Failed checkout replay (Phase B transient failure)
+    let throwTransient = true;
+    spyPaymentAdapter.createPaymentIntent = async (orderId, amount, paymentMethod, metadata, idempotencyKey) => {
+      if (throwTransient) {
+        throwTransient = false;
+        throw new Error('Transient Payment Gateway Timeout');
+      }
+      return normalPaymentAdapterCreate(orderId, amount, paymentMethod, metadata, idempotencyKey);
+    };
+
+    spyPaymentAdapter.createCount = 0;
+    spyDeliveryAdapter.createCount = 0;
+
+    const replayKey = 'key_transient_failure_999';
+    const replayPayload = {
+      ...checkoutPayload,
+      paymentMethod: 'credit_card',
+      idempotencyKey: replayKey,
+    };
+
+    // First attempt fails due to transient payment gateway timeout
+    const firstAttemptRes = await fetch(`http://127.0.0.1:${port}/api/orders/checkout`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${customerToken}`,
+        'x-idempotency-key': replayKey,
+      },
+      body: JSON.stringify(replayPayload),
+    });
+
+    assert(firstAttemptRes.status === 500, '28. First attempt with transient failure returns HTTP 500');
+
+    // Retrieve order document state
+    const failedOrderId = `HCI-ORD-${crypto.createHash('sha256').update(`demo-customer-uid_${replayKey}`).digest('hex').substring(0, 8).toUpperCase()}`;
+    const orderAfterFail = store.orders.get(failedOrderId);
+    assert(orderAfterFail !== undefined, '29. Order document exists for failed checkout attempt');
+    assert(orderAfterFail.checkoutStatus === 'failed', '30. Order is marked failed initially');
+
+    // Clear counters and retry same key
+    spyPaymentAdapter.createCount = 0;
+    spyDeliveryAdapter.createCount = 0;
+    const initialReservedStock = store.branch_batch_inventory.get('daet_BAT-DAET-CMD65-01').reservedQuantity;
+
+    const retryAttemptRes = await fetch(`http://127.0.0.1:${port}/api/orders/checkout`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${customerToken}`,
+        'x-idempotency-key': replayKey,
+      },
+      body: JSON.stringify(replayPayload),
+    });
+
+    const retryData = await retryAttemptRes.json();
+    assert(retryAttemptRes.status === 200, '31. Retry same key K succeeds with HTTP 200 after transient payment gateway timeout resolved');
+    assert(retryData.orderId === failedOrderId, '32. Retried checkout uses the exact same order ID');
+
+    const finalReservedStock = store.branch_batch_inventory.get('daet_BAT-DAET-CMD65-01').reservedQuantity;
+    assert(finalReservedStock === initialReservedStock, '33. Retry does NOT run FEFO reservation again or double-reserve inventory');
+
+
+    // Test B & C: Failed compensation recovery and Successful replay
+    // Simulate: payment creation succeeds, delivery creation fails, payment compensation refund fails
+    spyPaymentAdapter.createPaymentIntent = normalPaymentAdapterCreate;
+    spyDeliveryAdapter.createFulfillment = async () => {
+      throw new Error('Fulfillment API Server Offline');
+    };
+    spyPaymentAdapter.processRefund = async () => {
+      throw new Error('Compensation Refund Gateway Blocked');
+    };
+
+    const compRecoveryKey = 'key_comp_recovery_888';
+    const compPayload = {
+      ...checkoutPayload,
+      paymentMethod: 'credit_card',
+      idempotencyKey: compRecoveryKey,
+    };
+
+    const compFirstAttemptRes = await fetch(`http://127.0.0.1:${port}/api/orders/checkout`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${customerToken}`,
+        'x-idempotency-key': compRecoveryKey,
+      },
+      body: JSON.stringify(compPayload),
+    });
+
+    assert(compFirstAttemptRes.status === 500, '34. Compensation failure checkout returns HTTP 500');
+
+    const compOrderId = `HCI-ORD-${crypto.createHash('sha256').update(`demo-customer-uid_${compRecoveryKey}`).digest('hex').substring(0, 8).toUpperCase()}`;
+    const compDoc = store.payment_compensations.get(compOrderId);
+    const compOrderDoc = store.orders.get(compOrderId);
+
+    assert(compDoc !== undefined, '35. Payment compensation intent document is persisted in database');
+    assert(compDoc.status === 'failed', '36. Payment compensation intent is marked failed');
+    assert(compOrderDoc.compensationStatus === 'failed', '37. Order document correctly records failed compensation state');
+
+    // Restore provider success and retry the same checkout key K
+    spyDeliveryAdapter.createFulfillment = normalDeliveryAdapter.createFulfillment;
+    spyPaymentAdapter.processRefund = originalProcessRefund;
+    spyPaymentAdapter.refundCount = 0;
+
+    const compRetryAttemptRes = await fetch(`http://127.0.0.1:${port}/api/orders/checkout`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${customerToken}`,
+        'x-idempotency-key': compRecoveryKey,
+      },
+      body: JSON.stringify(compPayload),
+    });
+
+    const compRetryData = await compRetryAttemptRes.json();
+    assert(compRetryAttemptRes.status === 200, '38. Retrying checkout with failed compensation succeeds with HTTP 200');
+    assert(compRetryData.compensationReconciled === true, '39. Response confirms that compensation was successfully reconciled');
+
+    const reconciledCompDoc = store.payment_compensations.get(compOrderId);
+    assert(reconciledCompDoc.status === 'completed', '40. Persistent compensation intent document is now updated to completed');
+
+    const reconciledOrderDoc = store.orders.get(compOrderId);
+    assert(reconciledOrderDoc.compensationStatus === 'completed', '41. Order document status is updated to completed');
+    assert(reconciledOrderDoc.paymentStatus === 'refunded', '42. Payment status has transitioned to refunded');
+
+    // Test C: Successful compensation replay
+    // Retry the same checkout key K again
+    spyPaymentAdapter.createCount = 0;
+    spyPaymentAdapter.refundCount = 0;
+
+    const compReplayAttemptRes = await fetch(`http://127.0.0.1:${port}/api/orders/checkout`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${customerToken}`,
+        'x-idempotency-key': compRecoveryKey,
+      },
+      body: JSON.stringify(compPayload),
+    });
+
+    const compReplayData = await compReplayAttemptRes.json();
+    assert(compReplayAttemptRes.status === 200, '43. Successful compensation replay returns HTTP 200');
+    assert(spyPaymentAdapter.createCount === 0, '44. Replay does NOT perform additional payment creation');
+    assert(spyPaymentAdapter.refundCount === 0, '45. Replay does NOT perform additional compensation refund');
+    assert(compReplayData.orderId === compOrderId, '46. Replay returns the same deterministic order ID');
 
   } finally {
     await new Promise<void>((resolve) => server.close(() => resolve()));

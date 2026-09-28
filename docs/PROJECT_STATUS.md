@@ -73,15 +73,17 @@ The canonical product roadmap comprises the following ten phases:
 * Safe centralized Express error handling and secret masking in production.
 * Production runtime baseline documentation (`PRODUCTION_RUNTIME_BASELINE.md` completed).
 
-### Priority B: E-Commerce & Order Lifecycle (COMPLETED / CERTIFIED REMEDIATED)
-* Authoritative customer checkout consolidated on `POST /api/orders/checkout` using a safe two-phase model (Phase A: pricing & FEFO inventory transaction with deterministic order ID, Phase B: provider calls outside transaction with deterministic keys, Phase C: finalize order transaction).
+### Priority B: E-Commerce & Order Lifecycle (REMEDIATION REQUIRED)
+* Safe two-phase checkout (`POST /api/orders/checkout`) with transactional Phase A (FEFO inventory reservation), external Phase B provider invocations, and Phase C checkout finalization.
+* Customer-scoped checkout key retry logic hardened to bypass redundant FEFO inventory reservation, reusing existing deterministic orders.
+* Persistent payment compensation state machine (`payment_compensations/${orderId}`) tracked before running external refund operations, fully retryable and recoverable on checkout retry.
 * Server-boundary authentication enforced in `requireAuth()`, rejecting `DEMO_TOKEN_*` when `NODE_ENV === 'production'`.
 * Refund safety architecture (`executeSafeRefund`) implemented with transactional refund intent reservation, external provider execution, and balance state updates on provider success.
 * Deterministic refund keys applied to cancellation (`cancel:<orderId>`), return approval (`return:<orderId>`), and manual refunds (`manual:<orderId>:<key>`).
 * Failure recovery verified for provider checkout failures, refund failures, cancellation failures, and return approval failures.
 * Authoritative branch inventory restoration enforced on `branch_batch_inventory` and aggregate `/inventory/{branchId_skuId}` documents with double-restoration protection.
 * Client-side React order state in `useEcommerce.ts` strictly advisory.
-* Spied regression suite (`scripts/testPriorityBCommerce.ts`) passing 25/25 safety assertions.
+* Spied regression suite (`scripts/testPriorityBCommerce.ts`) passing 50/50 safety assertions including failed-checkout replay, compensation recovery, and concurrent refund contention tests.
 
 ### Priority C: Automation & Analytics (Original Phase 7)
 * Operational dashboards and business intelligence views.

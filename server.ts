@@ -2199,6 +2199,7 @@ export function createExpressApp(deps: ServerDependencies = {}): Express {
 
     let orderRecord: any;
     let isReplay = false;
+    let isRetryOfFailed = false;
 
     try {
       await ensureInventorySeeded();
@@ -2210,14 +2211,28 @@ export function createExpressApp(deps: ServerDependencies = {}): Express {
 
         if (keySnap && keySnap.exists) {
           const existingData = typeof keySnap.data === 'function' ? keySnap.data() : keySnap.data;
-          orderRecord = existingData.orderRecord;
-          if (existingData.checkoutStatus === 'completed') {
+          const status = existingData.checkoutStatus;
+
+          if (status === 'completed') {
+            orderRecord = existingData.orderRecord;
             isReplay = true;
+            return;
+          }
+
+          if (status === 'failed' || status === 'pending_provider') {
+            const existingOrderRef = db.collection('orders').doc(existingData.orderId || orderId);
+            const existingOrderSnap = await transaction.get(existingOrderRef);
+            if (existingOrderSnap && existingOrderSnap.exists) {
+              orderRecord = typeof existingOrderSnap.data === 'function' ? existingOrderSnap.data() : existingOrderSnap.data;
+            } else {
+              orderRecord = existingData.orderRecord;
+            }
+            isRetryOfFailed = true;
             return;
           }
         }
 
-        const deliveryAdapter = new StandardDeliveryAdapter();
+        const deliveryAdapter = DeliveryAdapterRegistry.getAdapter(deliveryMethod || 'branch_pickup');
         const deliveryQuote = await deliveryAdapter.calculateShippingFee(deliveryMethod || 'branch_pickup', normalizedBranch, customer?.shippingAddress);
         const shippingFee = deliveryQuote.shippingFee;
 
@@ -2284,11 +2299,101 @@ export function createExpressApp(deps: ServerDependencies = {}): Express {
           orderRecord,
           checkoutStatus: 'pending_provider',
           createdAt: nowIso,
+          updatedAt: nowIso,
         });
       });
 
       if (isReplay) {
         res.status(200).json({ success: true, orderId: orderRecord.id, order: orderRecord, idempotentReplay: true });
+        return;
+      }
+
+      if (isRetryOfFailed) {
+        // Reconcile outstanding payment compensation if present
+        const compRef = db.collection('payment_compensations').doc(orderRecord.id || orderId);
+        const compSnap = await compRef.get();
+        const compData = compSnap.exists ? compSnap.data() : null;
+
+        const needsCompReconciliation = (compData && (compData.status === 'failed' || compData.status === 'processing')) || orderRecord.compensationStatus === 'failed';
+
+        if (needsCompReconciliation) {
+          const paymentAdapter = PaymentAdapterRegistry.getAdapter(orderRecord.paymentMethod || 'cash_on_delivery');
+          const compPaymentId = compData?.paymentId || orderRecord.paymentIntent?.paymentId || orderRecord.id || orderId;
+          const compAmount = Number(compData?.amount || orderRecord.grandTotal) || 0;
+          const compKey = compData?.providerIdempotencyKey || `comp_${orderRecord.id || orderId}`;
+
+          let retryCompSuccess = false;
+          let retryCompResult: any = null;
+          let retryCompError: string | null = null;
+
+          try {
+            retryCompResult = await paymentAdapter.processRefund(
+              compPaymentId,
+              compAmount,
+              'Reconciling compensating refund on checkout retry',
+              compKey
+            );
+            retryCompSuccess = true;
+          } catch (retryErr: any) {
+            retryCompError = retryErr?.message || String(retryErr);
+          }
+
+          if (retryCompSuccess) {
+            let updatedOrder: any;
+            await db.runTransaction(async (transaction: any) => {
+              const orderRef = db.collection('orders').doc(orderRecord.id || orderId);
+              const keyRef = db.collection('idempotency_keys').doc(keyDocId);
+
+              transaction.set(compRef, {
+                status: 'completed',
+                providerResult: retryCompResult,
+                updatedAt: new Date().toISOString(),
+              }, { merge: true });
+
+              updatedOrder = {
+                ...orderRecord,
+                compensationStatus: 'completed',
+                refundedAmount: compAmount,
+                remainingRefundableBalance: 0,
+                paymentStatus: 'refunded',
+                updatedAt: new Date().toISOString(),
+              };
+
+              transaction.set(orderRef, updatedOrder, { merge: true });
+              transaction.set(keyRef, {
+                userId: user.uid,
+                idempotencyKey,
+                orderId: orderRecord.id || orderId,
+                orderRecord: updatedOrder,
+                checkoutStatus: 'failed',
+                updatedAt: new Date().toISOString(),
+              }, { merge: true });
+            });
+
+            res.status(200).json({
+              success: true,
+              orderId: updatedOrder.id,
+              order: updatedOrder,
+              idempotentReplay: true,
+              compensationReconciled: true,
+            });
+            return;
+          } else {
+            res.status(500).json({
+              error: `Compensation reconciliation failed on checkout retry: ${retryCompError}`,
+              compensationStatus: 'failed',
+              orderId: orderRecord.id || orderId,
+            });
+            return;
+          }
+        }
+
+        res.status(200).json({
+          success: true,
+          orderId: orderRecord.id || orderId,
+          order: orderRecord,
+          idempotentReplay: true,
+        });
         return;
       }
 
@@ -2319,22 +2424,68 @@ export function createExpressApp(deps: ServerDependencies = {}): Express {
           deliveryIdempotencyKey
         );
       } catch (providerErr: any) {
+        let compensationStatus: string | undefined = undefined;
+        let compensationError: string | undefined = undefined;
+
         if (paymentIntent && (paymentIntent.status === 'paid' || paymentIntent.status === 'authorized')) {
+          const compRef = db.collection('payment_compensations').doc(orderId);
+          const compKey = `comp_${orderId}`;
+
+          await db.runTransaction(async (transaction: any) => {
+            transaction.set(compRef, {
+              status: 'processing',
+              orderId,
+              paymentId: paymentIntent!.paymentId,
+              amount: orderRecord.grandTotal,
+              providerIdempotencyKey: compKey,
+              reason: 'Compensating refund due to delivery fulfillment failure',
+              createdAt: nowIso,
+              updatedAt: nowIso,
+            });
+          });
+
+          let compSuccess = false;
+          let compResult: any = null;
+          let compErrMessage: string | null = null;
+
           try {
-            await paymentAdapter.processRefund(
+            compResult = await paymentAdapter.processRefund(
               paymentIntent.paymentId,
               orderRecord.grandTotal,
               'Compensating refund due to delivery fulfillment failure',
-              `comp_${orderId}`
+              compKey
             );
-          } catch (refundCompErr: any) {
-            console.error('Compensating refund failed:', refundCompErr?.message || refundCompErr);
+            compSuccess = true;
+          } catch (compErr: any) {
+            compErrMessage = compErr?.message || String(compErr);
+          }
+
+          if (compSuccess) {
+            compensationStatus = 'completed';
+            await db.runTransaction(async (transaction: any) => {
+              transaction.set(compRef, {
+                status: 'completed',
+                providerResult: compResult,
+                updatedAt: new Date().toISOString(),
+              }, { merge: true });
+            });
+          } else {
+            compensationStatus = 'failed';
+            compensationError = compErrMessage || 'Compensation refund failed';
+            await db.runTransaction(async (transaction: any) => {
+              transaction.set(compRef, {
+                status: 'failed',
+                lastError: compErrMessage,
+                updatedAt: new Date().toISOString(),
+              }, { merge: true });
+            });
           }
         }
 
-        // Recovery transaction: release reserved stock and mark order failed
+        // Recovery transaction: release reserved stock and mark order & key failed
         await db.runTransaction(async (transaction: any) => {
           const orderRef = db.collection('orders').doc(orderId);
+          const keyRef = db.collection('idempotency_keys').doc(keyDocId);
           const txOrderSnap = await transaction.get(orderRef);
           if (!txOrderSnap || !txOrderSnap.exists) return;
 
@@ -2392,12 +2543,30 @@ export function createExpressApp(deps: ServerDependencies = {}): Express {
             transaction.set(aggDocRef, updatedAggregate);
           }
 
-          transaction.update(orderRef, {
+          const failedOrderRecord = {
+            ...orderRecord,
             fulfillmentStatus: 'failed',
             checkoutStatus: 'failed',
             failureReason: providerErr.message,
+            compensationStatus: compensationStatus || orderRecord.compensationStatus,
+            compensationError: compensationError || orderRecord.compensationError,
+            refundedAmount: compensationStatus === 'completed' ? orderRecord.grandTotal : (orderRecord.refundedAmount || 0),
+            remainingRefundableBalance: compensationStatus === 'completed' ? 0 : (orderRecord.remainingRefundableBalance ?? orderRecord.grandTotal),
+            paymentStatus: compensationStatus === 'completed' ? 'refunded' : (paymentIntent ? paymentIntent.status : 'pending_payment'),
+            paymentIntent: paymentIntent || orderRecord.paymentIntent,
             updatedAt: nowIso,
-          });
+          };
+
+          transaction.set(orderRef, failedOrderRecord, { merge: true });
+          transaction.set(keyRef, {
+            userId: user.uid,
+            idempotencyKey,
+            orderId,
+            orderRecord: failedOrderRecord,
+            checkoutStatus: 'failed',
+            failureReason: providerErr.message,
+            updatedAt: nowIso,
+          }, { merge: true });
         });
 
         res.status(500).json({ error: `Checkout provider failed: ${providerErr.message}` });

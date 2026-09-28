@@ -31,6 +31,23 @@ To eliminate local client-state order creation risks and enforce strict price an
    - Sets `checkoutStatus = 'completed'`, `paymentStatus = paymentIntent.status`, `fulfillmentStatus = fulfillment.status`.
    - Concurrent duplicate requests deduplicate safely at the provider and database layers without creating multiple payment intents or inventory allocations.
 
+### Idempotency Key Failed Replays & Retries
+- **If `checkoutStatus = 'completed'`**: Returns the cached successful order directly with `idempotentReplay = true`.
+- **If `checkoutStatus = 'failed'` or `'pending_provider'`**:
+  - The retry **does NOT run FEFO inventory reservation again**, preventing duplicate reservations for a single checkout key.
+  - Reuses the existing deterministic order ID and loads the existing order state from the database.
+  - Retries only the failed provider / recovery portion using the same deterministic provider keys.
+- **Critical Invariant**: Exactly one order ID and exactly one inventory reservation lifecycle exists per authenticated customer + checkout idempotency key.
+
+### Persistent Payment Compensation State Machine
+- If Phase B payment creation succeeds (`status = 'paid'` or `'authorized'`) but delivery fulfillment creation fails:
+  - The server **persists a payment compensation intent** in a deterministic collection document: `payment_compensations/${orderId}` before executing the external compensating refund.
+  - The document records: `status = 'processing'`, `orderId`, `paymentId`, `amount`, `providerIdempotencyKey = 'comp_' + orderId`, and `reason`.
+  - The server attempts the external compensating refund:
+    - **On Provider Success**: Marks `payment_compensations/${orderId}` status as `'completed'`, sets the order's `paymentStatus` to `'refunded'` and `compensationStatus = 'completed'`.
+    - **On Provider Failure**: Marks `payment_compensations/${orderId}` status as `'failed'`, sets `compensationStatus = 'failed'` on the order doc, and raises a 500 error. The failed compensation remains persistently tracked and recoverable.
+  - **Checkout Retry Reconciliation**: When a checkout retry arrives for an order with `compensationStatus === 'failed'`, it detects the outstanding payment compensation, retries the refund with `comp_${orderId}`, and reconciles the compensation safely without duplicate side effects before resolving the request.
+
 ---
 
 ## 3. Production Authentication & Fail-Closed Boundary
