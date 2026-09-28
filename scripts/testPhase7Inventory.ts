@@ -780,6 +780,50 @@ async function runTestSuite() {
     assert(txnTestRes.status === 201, 'Transactional adjustment executed successfully with 201 Created');
     assert(txnTestRes.data.updatedBatch.availableQuantity === 100, 'Batch available quantity correctly updated inside transaction (80 + 20 = 100)');
 
+    // 10.6 Real concurrency regression test (two competing inventory adjustments)
+    const [concurrentRes1, concurrentRes2] = await Promise.all([
+      makeRequest(
+        server,
+        '/api/inventory/adjustments',
+        'POST',
+        {
+          branchId: 'daet',
+          skuId: 'hci-cmd-65ml',
+          batchId: 'batch-2026-09a',
+          adjustmentType: 'count_reconciliation',
+          quantityDelta: 10,
+          reason: 'Concurrent adjustment thread 1 verification.',
+        },
+        { Authorization: 'Bearer VALID_STAFF_DAET_MANAGER_TOKEN' }
+      ),
+      makeRequest(
+        server,
+        '/api/inventory/adjustments',
+        'POST',
+        {
+          branchId: 'daet',
+          skuId: 'hci-cmd-65ml',
+          batchId: 'batch-2026-09a',
+          adjustmentType: 'count_reconciliation',
+          quantityDelta: 15,
+          reason: 'Concurrent adjustment thread 2 verification.',
+        },
+        { Authorization: 'Bearer VALID_STAFF_DAET_MANAGER_TOKEN' }
+      ),
+    ]);
+    assert(concurrentRes1.status === 201 && concurrentRes2.status === 201, 'Both competing concurrent transactions commit successfully with 201 Created');
+    assert(concurrentRes2.data.updatedBatch.availableQuantity === 149, 'No lost update: initial 124 + 10 + 15 = 149');
+
+    const reconCheckRes = await makeRequest(server, '/api/inventory/reconciliation?branchId=daet', 'GET', undefined, {
+      Authorization: 'Bearer VALID_STAFF_DAET_MANAGER_TOKEN',
+    });
+    assert(reconCheckRes.status === 200, 'Reconciliation endpoint returns 200 OK after concurrent adjustments');
+    const daetItemCheck = reconCheckRes.data.reconciliation.reconciliationResults.find(
+      (r: any) => r.branchId === 'daet' && r.skuId === 'hci-cmd-65ml'
+    );
+    assert(daetItemCheck.isConsistent === true, 'Aggregate remains perfectly consistent after concurrent writes');
+    assert(daetItemCheck.divergenceDelta === 0, 'Divergence delta remains 0 under concurrent modifications');
+
   } finally {
     await new Promise<void>((resolve) => server.close(() => resolve()));
   }
