@@ -5068,6 +5068,29 @@ export function createExpressApp(deps: ServerDependencies = {}): Express {
       const stockist = stockistSnap.data() as B2BStockistProfile;
       const normalizedBranch = (stockist.branchId || 'daet').toLowerCase().trim();
 
+      if (user.role === 'customer') {
+        if (!stockist.authorizedCustomerUid || stockist.authorizedCustomerUid !== user.uid) {
+          await logAuditEvent(
+            user.uid,
+            user.role,
+            normalizedBranch,
+            'unauthorized_customer_b2b_stockist_view_blocked',
+            'b2b_stockists',
+            strStockistId,
+            false,
+            { authorizedCustomerUid: stockist.authorizedCustomerUid, requestUid: user.uid },
+            req
+          );
+          res.status(403).json({ error: 'Access Denied: Customer cannot view another stockist\'s B2B profile.' });
+          return;
+        }
+      }
+
+      if (user.role === 'practitioner') {
+        res.status(403).json({ error: 'Access Denied: Practitioners cannot access B2B stockist data.' });
+        return;
+      }
+
       if (user.role === 'branch_manager') {
         const assigned = (user.assignedBranchId || 'daet').toLowerCase().trim();
         if (normalizedBranch !== assigned) {
@@ -5637,6 +5660,18 @@ export function createExpressApp(deps: ServerDependencies = {}): Express {
 
       const stockist = stockistSnap.data() as B2BStockistProfile;
       const normalizedBranch = (stockist.branchId || 'daet').toLowerCase().trim();
+
+      if (user.role === 'customer') {
+        if (!stockist.authorizedCustomerUid || stockist.authorizedCustomerUid !== user.uid) {
+          res.status(403).json({ error: 'Access Denied: Customer cannot view another stockist\'s B2B ledger.' });
+          return;
+        }
+      }
+
+      if (user.role === 'practitioner') {
+        res.status(403).json({ error: 'Access Denied: Practitioners cannot access B2B ledger.' });
+        return;
+      }
 
       if (user.role === 'branch_manager') {
         const assigned = (user.assignedBranchId || 'daet').toLowerCase().trim();
