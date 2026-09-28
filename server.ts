@@ -4335,6 +4335,16 @@ export function createExpressApp(deps: ServerDependencies = {}): Express {
         const destBatchSnap = await transaction.get(destBatchRef);
         let destBatchData: any = null;
         if (!destBatchSnap.exists) {
+          const pbRef = db.collection('product_batches').doc(transfer.batchId);
+          const pbSnap = await transaction.get(pbRef);
+          if (!pbSnap || !pbSnap.exists) {
+            throw new Error(`PRODUCT_BATCH_NOT_FOUND: Authoritative product batch ${transfer.batchId} not found.`);
+          }
+          const pbData = pbSnap.data();
+          if (!pbData || !pbData.expiryDate || typeof pbData.expiryDate !== 'string') {
+            throw new Error(`INVALID_PRODUCT_BATCH_EXPIRY: Authoritative product batch ${transfer.batchId} has no valid expiryDate.`);
+          }
+
           destBatchData = {
             id: destBatchDocId,
             branchId: destBranch,
@@ -4343,7 +4353,7 @@ export function createExpressApp(deps: ServerDependencies = {}): Express {
             availableQuantity: receivedQty,
             reservedQuantity: 0,
             damagedQuantity: diff > 0 ? diff : 0,
-            expiryDate: '2028-12-31',
+            expiryDate: pbData.expiryDate,
             updatedAt: nowIso,
           };
         } else {
@@ -4412,6 +4422,10 @@ export function createExpressApp(deps: ServerDependencies = {}): Express {
     } catch (err: any) {
       if (err.message === 'TRANSFER_NOT_IN_TRANSIT') {
         res.status(400).json({ error: 'Transfer is no longer in transit.' });
+        return;
+      }
+      if (err.message.startsWith('PRODUCT_BATCH_NOT_FOUND:') || err.message.startsWith('INVALID_PRODUCT_BATCH_EXPIRY:')) {
+        res.status(400).json({ error: err.message.replace(/^(PRODUCT_BATCH_NOT_FOUND|INVALID_PRODUCT_BATCH_EXPIRY):\s*/, '') });
         return;
       }
       res.status(500).json({ error: `Transfer receipt failed: ${err.message}` });

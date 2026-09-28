@@ -648,6 +648,24 @@ async function runMilestone4TestSuite() {
       '21. Over-receipt exceeding shipped quantity is rejected with 400 Bad Request'
     );
 
+    // Verify receiving transfer into a branch with no existing batch record inherits exact product batch expiryDate
+    const validCapalongaReceive = await makeRequest(
+      server,
+      `/api/inventory/transfers/${authTrfId}/receive`,
+      'POST',
+      { receivedQuantity: 3 },
+      { Authorization: 'Bearer VALID_ADMIN_TOKEN' }
+    );
+    const capalongaBatch = bbStore.get('capalonga_batch-2026-09a');
+    const expectedExpiry = harness.productBatchesStore.get('batch-2026-09a')?.expiryDate;
+    assert(
+      validCapalongaReceive.status === 200 &&
+      capalongaBatch &&
+      capalongaBatch.expiryDate === expectedExpiry &&
+      capalongaBatch.expiryDate === '2028-09-30',
+      'Destination branch batch inherits authoritative product batch expiryDate when initialized'
+    );
+
     // 22. Source/destination/transit conservation-of-stock invariant holds
     const reconDaet = await makeRequest(
       server,
