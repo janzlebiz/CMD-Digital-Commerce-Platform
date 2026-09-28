@@ -35,6 +35,7 @@ function createTestHarness() {
   const batchAllocationsStore = new Map<string, any>();
   const auditLogsStore = new Map<string, any>();
   const consultationIntakesStore = new Map<string, any>();
+  const docVersions = new Map<string, number>();
 
   const mockDb: any = {
     _getStoreForCollection: (colName: string) => {
@@ -97,7 +98,9 @@ function createTestHarness() {
           };
         },
         doc: (docId: string) => {
-          return {
+          const docRef: any = {
+            _colName: colName,
+            _docId: docId,
             id: docId,
             get: async () => {
               const data = targetStore.get(docId);
@@ -105,7 +108,7 @@ function createTestHarness() {
                 exists: !!data,
                 id: docId,
                 data: () => (data ? { ...data } : undefined),
-                ref: { id: docId },
+                ref: docRef,
               };
             },
             set: async (data: any, setOptions?: any) => {
@@ -128,17 +131,135 @@ function createTestHarness() {
               return { writeTime: new Date() };
             },
           };
+          return docRef;
         },
       };
 
       return queryObj;
     },
-    runTransaction: async (cb: any) => {
-      const transaction = {
-        get: async (refOrQuery: any) => refOrQuery.get(),
-        set: (ref: any, data: any) => ref.set(data),
-      };
-      return cb(transaction);
+    runTransaction: async (updateFunction: (transaction: any) => Promise<any>, maxAttempts = 15) => {
+      let attempt = 0;
+      while (attempt < maxAttempts) {
+        attempt++;
+        const readVersions = new Map<string, number>();
+        const stagedWrites = [] as Array<{ docRef: any; data: any; options?: any }>;
+        const stagedDeletes = [] as Array<{ docRef: any }>;
+
+        const transaction = {
+          get: async (refOrQuery: any) => {
+            if (!refOrQuery) return null;
+
+            // Small asynchronous delay to simulate I/O concurrency and test version conflicts
+            await new Promise((resolve) => setTimeout(resolve, Math.floor(Math.random() * 8) + 2));
+
+            // Document reference with collection and id
+            if (refOrQuery._colName && (refOrQuery._docId || refOrQuery.id)) {
+              const col = refOrQuery._colName;
+              const docId = refOrQuery._docId || refOrQuery.id;
+              const path = `${col}/${docId}`;
+              const currentVer = docVersions.get(path) || 1;
+              readVersions.set(path, currentVer);
+              return await refOrQuery.get();
+            }
+
+            // General doc ref with id and get
+            if (refOrQuery.id && typeof refOrQuery.get === 'function') {
+              const col = refOrQuery._colName || 'default';
+              const path = `${col}/${refOrQuery.id}`;
+              const currentVer = docVersions.get(path) || 1;
+              readVersions.set(path, currentVer);
+              return await refOrQuery.get();
+            }
+
+            // Query
+            if (typeof refOrQuery.get === 'function') {
+              const snap = await refOrQuery.get();
+              if (snap && snap.docs) {
+                const col = refOrQuery._colName || 'default';
+                for (const d of snap.docs) {
+                  const path = `${col}/${d.id}`;
+                  const currentVer = docVersions.get(path) || 1;
+                  readVersions.set(path, currentVer);
+                }
+              }
+              return snap;
+            }
+
+            throw new Error('Invalid target passed to transaction.get');
+          },
+          set: (docRef: any, data: any, options?: any) => {
+            stagedWrites.push({ docRef, data, options });
+          },
+          update: (docRef: any, data: any) => {
+            stagedWrites.push({ docRef, data, options: { merge: true } });
+          },
+          delete: (docRef: any) => {
+            stagedDeletes.push({ docRef });
+          },
+        };
+
+        try {
+          const result = await updateFunction(transaction);
+
+          // Before commit, detect version conflicts
+          let hasConflict = false;
+          for (const [path, expectedVer] of readVersions.entries()) {
+            const actualVer = docVersions.get(path) || 1;
+            if (actualVer !== expectedVer) {
+              hasConflict = true;
+              break;
+            }
+          }
+
+          if (hasConflict) {
+            if (attempt >= maxAttempts) {
+              throw new Error('Transaction conflict: maximum retry attempts exceeded.');
+            }
+            await new Promise((r) => setTimeout(r, Math.floor(Math.random() * 15) + 5));
+            continue;
+          }
+
+          // Validation succeeded: Commit staged writes & increment versions
+          for (const write of stagedWrites) {
+            const col = write.docRef._colName || 'default';
+            const docId = write.docRef.id || write.docRef._docId;
+            if (typeof write.docRef.set === 'function') {
+              await write.docRef.set(write.data, write.options);
+            } else {
+              const store = mockDb._getStoreForCollection(col);
+              if (write.options && write.options.merge) {
+                store.set(docId, { ...(store.get(docId) || {}), ...write.data });
+              } else {
+                store.set(docId, { ...write.data });
+              }
+            }
+            const path = `${col}/${docId}`;
+            docVersions.set(path, (docVersions.get(path) || 1) + 1);
+          }
+
+          for (const del of stagedDeletes) {
+            const col = del.docRef._colName || 'default';
+            const docId = del.docRef.id || del.docRef._docId;
+            if (typeof del.docRef.delete === 'function') {
+              await del.docRef.delete();
+            } else {
+              const store = mockDb._getStoreForCollection(col);
+              store.delete(docId);
+            }
+            const path = `${col}/${docId}`;
+            docVersions.set(path, (docVersions.get(path) || 1) + 1);
+          }
+
+          return result;
+        } catch (err: any) {
+          if (err.message && err.message.includes('Transaction conflict') && attempt < maxAttempts) {
+            await new Promise((r) => setTimeout(r, Math.floor(Math.random() * 15) + 5));
+            continue;
+          }
+          throw err;
+        }
+      }
+      throw new Error('Transaction failed after maximum retries due to persistent OCC conflicts.');
     },
   };
 
@@ -640,6 +761,24 @@ async function runTests() {
       '16. Authorized customer successfully places B2B order for assigned stockist'
     );
 
+    // ------------------------------------------------------------------------
+    // Assertion 17: Prove zero mutation on unauthorized customer request
+    // ------------------------------------------------------------------------
+    const preOrderOrdersCount = harness.ordersStore.size;
+    const preAuthStockist = harness.b2bStockistsStore.get('STK-DAET-AUTH');
+    const preOutstanding = preAuthStockist?.outstandingBalance;
+    const preAvailableCredit = preAuthStockist?.availableCredit;
+    const preLedgerCount = harness.b2bLedgerStore.size;
+    const preBatchA = harness.branchBatchInventoryStore.get('daet_batch-2026-09a');
+    const preBatchAAvail = preBatchA?.availableQuantity;
+    const preBatchAReserved = preBatchA?.reservedQuantity;
+    const preBatchB = harness.branchBatchInventoryStore.get('daet_batch-2026-09b');
+    const preBatchBAvail = preBatchB?.availableQuantity;
+    const preBatchBReserved = preBatchB?.reservedQuantity;
+    const preInv = harness.inventoryStore.get(`daet_${sku}`);
+    const preInvActive = preInv?.activeStock;
+    const preInvReserved = preInv?.reservedStock;
+
     const unauthCustOrderRes = await makeRequest(
       server,
       '/api/b2b/orders',
@@ -651,10 +790,35 @@ async function runTests() {
       },
       { Authorization: 'Bearer VALID_UNAUTHORIZED_CUSTOMER_TOKEN' }
     );
+
+    const postAuthStockist = harness.b2bStockistsStore.get('STK-DAET-AUTH');
+    const postBatchA = harness.branchBatchInventoryStore.get('daet_batch-2026-09a');
+    const postBatchB = harness.branchBatchInventoryStore.get('daet_batch-2026-09b');
+    const postInv = harness.inventoryStore.get(`daet_${sku}`);
+
     assert(
-      unauthCustOrderRes.status === 403 && unauthCustOrderRes.data.error.includes('Access Denied'),
+      unauthCustOrderRes.status === 403 &&
+      unauthCustOrderRes.data.error.includes('Access Denied') &&
+      harness.ordersStore.size === preOrderOrdersCount &&
+      postAuthStockist?.outstandingBalance === preOutstanding &&
+      postAuthStockist?.availableCredit === preAvailableCredit &&
+      harness.b2bLedgerStore.size === preLedgerCount &&
+      postBatchA?.availableQuantity === preBatchAAvail &&
+      postBatchA?.reservedQuantity === preBatchAReserved &&
+      postBatchB?.availableQuantity === preBatchBAvail &&
+      postBatchB?.reservedQuantity === preBatchBReserved &&
+      postInv?.activeStock === preInvActive &&
+      postInv?.reservedStock === preInvReserved,
       '17. Unauthorized customer attempting B2B order receives 403 Forbidden with zero mutation'
     );
+
+    // ------------------------------------------------------------------------
+    // Assertion 18: Real transactional concurrency proof
+    // ------------------------------------------------------------------------
+    const preStockist18 = harness.b2bStockistsStore.get('STK-DAET-001');
+    const pre18Deposit = preStockist18.depositBalance;
+    const pre18Outstanding = preStockist18.outstandingBalance;
+    const pre18LedgerCount = harness.b2bLedgerStore.size;
 
     const concurrentPromises = [
       makeRequest(server, '/api/b2b/stockists/STK-DAET-001/deposits', 'POST', { amount: 5000 }, { Authorization: 'Bearer VALID_DAET_MANAGER_TOKEN' }),
@@ -662,9 +826,57 @@ async function runTests() {
       makeRequest(server, '/api/b2b/stockists/STK-DAET-001/payments', 'POST', { amount: 5000 }, { Authorization: 'Bearer VALID_DAET_MANAGER_TOKEN' }),
     ];
     const concurrentResults = await Promise.all(concurrentPromises);
-    const allConcurrentSuccess = concurrentResults.every(r => r.status === 200);
+    const allConcurrentSuccess = concurrentResults.every((r) => r.status === 200);
+
+    const finalStockist = harness.b2bStockistsStore.get('STK-DAET-001');
+    const expectedFinalDeposit = pre18Deposit + 5000 + 5000;
+    const expectedFinalOutstanding = pre18Outstanding - 5000;
+    const expectedFinalCreditLimit = expectedFinalDeposit * (finalStockist.creditMultiplier || 2.0);
+    const expectedAvailableCredit = expectedFinalCreditLimit - expectedFinalOutstanding;
+
+    const post18LedgerCount = harness.b2bLedgerStore.size;
+    const newLedgerEntriesCount = post18LedgerCount - pre18LedgerCount;
+
+    const stockistLedgerEntries = Array.from(harness.b2bLedgerStore.values())
+      .filter((e: any) => e.stockistId === 'STK-DAET-001');
+    const newStockistLedgerEntries = stockistLedgerEntries.filter((e: any) => {
+      return concurrentResults.some((r) => r.data?.ledgerEntry?.id === e.id);
+    });
+
+    let chainDeposit = pre18Deposit;
+    let chainOutstanding = pre18Outstanding;
+    const pool = [...newStockistLedgerEntries];
+    let continuousSequenceValid = true;
+
+    for (let step = 0; step < newStockistLedgerEntries.length; step++) {
+      const matchIdx = pool.findIndex(
+        (entry) => entry.previousDeposit === chainDeposit && entry.previousOutstanding === chainOutstanding
+      );
+      if (matchIdx === -1) {
+        continuousSequenceValid = false;
+        break;
+      }
+      const [matched] = pool.splice(matchIdx, 1);
+      chainDeposit = matched.depositAfter;
+      chainOutstanding = matched.outstandingAfter;
+    }
+
+    const noBalanceLostOrDuplicated =
+      chainDeposit === expectedFinalDeposit &&
+      chainOutstanding === expectedFinalOutstanding &&
+      pool.length === 0;
+
     assert(
-      allConcurrentSuccess,
+      allConcurrentSuccess &&
+      finalStockist.depositBalance === expectedFinalDeposit &&
+      finalStockist.outstandingBalance === expectedFinalOutstanding &&
+      finalStockist.creditLimit === expectedFinalCreditLimit &&
+      finalStockist.availableCredit === expectedAvailableCredit &&
+      finalStockist.availableCredit === finalStockist.creditLimit - finalStockist.outstandingBalance &&
+      newLedgerEntriesCount === 3 &&
+      newStockistLedgerEntries.length === 3 &&
+      continuousSequenceValid &&
+      noBalanceLostOrDuplicated,
       '18. Concurrent transactional financial mutations execute atomically without race conditions'
     );
 
