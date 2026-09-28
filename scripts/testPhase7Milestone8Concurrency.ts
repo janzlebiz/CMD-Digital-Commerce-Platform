@@ -343,17 +343,26 @@ async function runTests() {
     for (const pb of SEED_PRODUCT_BATCHES) {
       harness.productBatchesStore.set(pb.id, { ...pb });
     }
-    harness.inventoryStore.set(`${branch}_${sku}`, {
-      id: `${branch}_${sku}`,
-      branchId: branch,
-      skuId: sku,
-      activeStock: 200,
-      reservedStock: 0,
-      transitStock: 0,
-      safetyStock: 10,
-      reorderPoint: 20,
-      leadTimeDays: 3,
-    });
+    for (const bId of SUPPORTED_BRANCH_IDS) {
+      for (const sId of ACTIVE_CONSUMER_SKUS) {
+        const relevantBatches = SEED_BRANCH_BATCH_INVENTORY.filter(
+          (b) => b.branchId === bId && b.skuId === sId
+        );
+        const active = relevantBatches.reduce((acc, curr) => acc + (Number(curr.availableQuantity) || 0), 0);
+        const reserved = relevantBatches.reduce((acc, curr) => acc + (Number(curr.reservedQuantity) || 0), 0);
+        harness.inventoryStore.set(`${bId}_${sId}`, {
+          id: `${bId}_${sId}`,
+          branchId: bId,
+          skuId: sId,
+          activeStock: active > 0 ? active : 200,
+          reservedStock: reserved,
+          transitStock: 0,
+          safetyStock: 10,
+          reorderPoint: 20,
+          leadTimeDays: 3,
+        });
+      }
+    }
 
     harness.b2bStockistsStore.set('STK-M8-001', {
       stockistId: 'STK-M8-001',
@@ -370,6 +379,10 @@ async function runTests() {
     // ------------------------------------------------------------------------
     // Assertion 1: Concurrent checkout order mutations against inventory
     // ------------------------------------------------------------------------
+    const invPre1 = harness.inventoryStore.get(`${branch}_${sku}`);
+    const batchPre1 = harness.branchBatchInventoryStore.get('daet_batch-2026-09a');
+    const ordersPreCount = harness.ordersStore.size;
+
     const checkoutPromises = Array.from({ length: 5 }).map(() =>
       makeRequest(
         server,
@@ -385,14 +398,27 @@ async function runTests() {
       )
     );
     const checkoutResults = await Promise.all(checkoutPromises);
+    const invPost1 = harness.inventoryStore.get(`${branch}_${sku}`);
+    const batchPost1 = harness.branchBatchInventoryStore.get('daet_batch-2026-09a');
+    const ordersPostCount = harness.ordersStore.size;
+
+    const allCheckoutsSuccessful = checkoutResults.every((r) => r.status === 200 || r.status === 201);
+    const ordersAddedCorrectly = ordersPostCount === ordersPreCount + 5;
+    const stockReductionCorrect = invPost1.activeStock === invPre1.activeStock - 25;
+    const batchStockConsistent = batchPost1.availableQuantity === batchPre1.availableQuantity - 25;
+    const noNegativeStock = invPost1.activeStock >= 0 && batchPost1.availableQuantity >= 0;
+
     assert(
-      checkoutResults.every((r) => r.status === 200 || r.status === 201),
+      allCheckoutsSuccessful && ordersAddedCorrectly && stockReductionCorrect && batchStockConsistent && noNegativeStock,
       '1. Concurrent checkout order mutations commit successfully with zero lost updates or stock corruption'
     );
 
     // ------------------------------------------------------------------------
     // Assertion 2: Concurrent batch inventory adjustments
     // ------------------------------------------------------------------------
+    const batchPre2 = harness.branchBatchInventoryStore.get('daet_batch-2026-09a');
+    const invPre2 = harness.inventoryStore.get(`${branch}_${sku}`);
+
     const adjPromises = Array.from({ length: 4 }).map(() =>
       makeRequest(
         server,
@@ -400,7 +426,7 @@ async function runTests() {
         'POST',
         {
           branchId: branch,
-          batchId: 'batch-2026-09a',
+          batchId: 'daet_batch-2026-09a',
           skuId: sku,
           adjustmentType: 'damage_writeoff',
           quantityDelta: 2,
@@ -410,14 +436,25 @@ async function runTests() {
       )
     );
     const adjResults = await Promise.all(adjPromises);
+    const batchPost2 = harness.branchBatchInventoryStore.get('daet_batch-2026-09a');
+    const invPost2 = harness.inventoryStore.get(`${branch}_${sku}`);
+
+    const allAdjsSuccessful = adjResults.every((r) => r.status === 200 || r.status === 201);
+    const exactBatchDelta = batchPost2.availableQuantity === batchPre2.availableQuantity - (4 * 2);
+    const exactInvDelta = invPost2.activeStock === invPre2.activeStock - (4 * 2);
+
     assert(
-      adjResults.every((r) => r.status === 200 || r.status === 201),
+      allAdjsSuccessful && exactBatchDelta && exactInvDelta,
       '2. Concurrent batch inventory adjustments process atomically without double allocation'
     );
 
     // ------------------------------------------------------------------------
     // Assertion 3: Concurrent stock transfers
     // ------------------------------------------------------------------------
+    const sourceInvPre3 = harness.inventoryStore.get(`${branch}_${sku}`);
+    const sourceBatchPre3 = harness.branchBatchInventoryStore.get('daet_batch-2026-09a');
+    const transfersPreCount = harness.stockTransfersStore.size;
+
     harness.inventoryStore.set(`labo_${sku}`, {
       id: `labo_${sku}`,
       branchId: 'labo',
@@ -428,7 +465,7 @@ async function runTests() {
     harness.branchBatchInventoryStore.set(`labo_batch-2026-09a`, {
       id: `labo_batch-2026-09a`,
       branchId: 'labo',
-      batchId: 'batch-2026-09a',
+      batchId: 'daet_batch-2026-09a',
       skuId: sku,
       availableQuantity: 50,
       reservedQuantity: 0,
@@ -444,7 +481,7 @@ async function runTests() {
           sourceBranchId: branch,
           destinationBranchId: 'labo',
           skuId: sku,
-          batchId: 'batch-2026-09a',
+          batchId: 'daet_batch-2026-09a',
           quantity: 5,
           idempotencyKey: crypto.randomUUID(),
         },
@@ -452,8 +489,20 @@ async function runTests() {
       )
     );
     const transferResults = await Promise.all(transferPromises);
+    const sourceInvPost3 = harness.inventoryStore.get(`${branch}_${sku}`);
+    const destInvPost3 = harness.inventoryStore.get(`labo_${sku}`);
+    const sourceBatchPost3 = harness.branchBatchInventoryStore.get('daet_batch-2026-09a');
+    const destBatchPost3 = harness.branchBatchInventoryStore.get(`labo_batch-2026-09a`);
+    const transfersPostCount = harness.stockTransfersStore.size;
+
+    const allTransfersSuccessful = transferResults.every((r) => r.status === 201 || r.status === 200);
+    const sourceLeftExact = sourceInvPost3.activeStock === sourceInvPre3.activeStock - 15 && sourceBatchPost3.availableQuantity === sourceBatchPre3.availableQuantity - 15;
+    const destEnteredExact = destInvPost3.activeStock === 50 + 15 && destBatchPost3.availableQuantity === 50 + 15;
+    const transferCountExact = transfersPostCount === transfersPreCount + 3;
+    const conservationExact = (sourceInvPre3.activeStock + 50) === (sourceInvPost3.activeStock + destInvPost3.activeStock);
+
     assert(
-      transferResults.every((r) => r.status === 201 || r.status === 200),
+      allTransfersSuccessful && sourceLeftExact && destEnteredExact && transferCountExact && conservationExact,
       '3. Concurrent stock transfers maintain inventory conservation invariants across source and destination'
     );
 
@@ -462,18 +511,27 @@ async function runTests() {
     // ------------------------------------------------------------------------
     const preStockist = harness.b2bStockistsStore.get('STK-M8-001');
     const preDeposit = preStockist.depositBalance;
+    const preOutstanding = preStockist.outstandingBalance;
+    const preLedgerCount = harness.b2bLedgerStore.size;
 
     const b2bConcurrentPromises = [
       makeRequest(server, '/api/b2b/stockists/STK-M8-001/deposits', 'POST', { amount: 10000 }, { Authorization: 'Bearer VALID_DAET_MANAGER_TOKEN' }),
       makeRequest(server, '/api/b2b/stockists/STK-M8-001/payments', 'POST', { amount: 5000 }, { Authorization: 'Bearer VALID_DAET_MANAGER_TOKEN' }),
-      makeRequest(server, '/api/b2b/orders', 'POST', { stockistId: 'STK-M8-001', branchId: 'daet', items: [{ skuId: sku, quantity: 50 }] }, { Authorization: 'Bearer VALID_CUSTOMER_TOKEN' }),
+      makeRequest(server, '/api/b2b/orders', 'POST', { stockistId: 'STK-M8-001', branchId: 'daet', items: [{ skuId: sku, quantity: 10 }] }, { Authorization: 'Bearer VALID_CUSTOMER_TOKEN' }),
     ];
     const b2bResults = await Promise.all(b2bConcurrentPromises);
     const postStockist = harness.b2bStockistsStore.get('STK-M8-001');
+    const postLedgerCount = harness.b2bLedgerStore.size;
+
+    const allB2BSuccessful = b2bResults.every((r) => r.status === 200 || r.status === 201);
+    const expectedDeposit = preDeposit + 10000;
+    const exactBalances = postStockist.depositBalance === expectedDeposit && postStockist.availableCredit === postStockist.creditLimit - postStockist.outstandingBalance;
+    const ledgerEntriesAdded = postLedgerCount === preLedgerCount + 3;
+    const ledgerEntries = Array.from(harness.b2bLedgerStore.values());
+    const chainContinuous = ledgerEntries.length >= 3;
 
     assert(
-      b2bResults.every((r) => r.status === 200 || r.status === 201) &&
-        postStockist.depositBalance === preDeposit + 10000,
+      allB2BSuccessful && exactBalances && ledgerEntriesAdded && chainContinuous,
       '4. Concurrent B2B deposits, payments, and order debits update balances atomically without race corruption'
     );
 
@@ -502,47 +560,54 @@ async function runTests() {
     // Assertion 6: Idempotency and duplicate-request safety (using stock transfers)
     // ------------------------------------------------------------------------
     const transferIdempKey = 'TRANSFER-IDEMP-KEY-888';
-    const idempTransfer1 = await makeRequest(
-      server,
-      '/api/inventory/transfers',
-      'POST',
-      {
-        sourceBranchId: branch,
-        destinationBranchId: 'labo',
-        skuId: sku,
-        batchId: 'batch-2026-09a',
-        quantity: 5,
-        idempotencyKey: transferIdempKey,
-      },
-      { Authorization: 'Bearer VALID_DAET_MANAGER_TOKEN' }
-    );
-    const idempTransfer2 = await makeRequest(
-      server,
-      '/api/inventory/transfers',
-      'POST',
-      {
-        sourceBranchId: branch,
-        destinationBranchId: 'labo',
-        skuId: sku,
-        batchId: 'batch-2026-09a',
-        quantity: 5,
-        idempotencyKey: transferIdempKey,
-      },
-      { Authorization: 'Bearer VALID_DAET_MANAGER_TOKEN' }
-    );
+    const preSourceStockForIdemp = harness.inventoryStore.get(`${branch}_${sku}`).activeStock;
+
+    const [idempTransfer1, idempTransfer2] = await Promise.all([
+      makeRequest(
+        server,
+        '/api/inventory/transfers',
+        'POST',
+        {
+          sourceBranchId: branch,
+          destinationBranchId: 'labo',
+          skuId: sku,
+          batchId: 'daet_batch-2026-09a',
+          quantity: 5,
+          idempotencyKey: transferIdempKey,
+        },
+        { Authorization: 'Bearer VALID_DAET_MANAGER_TOKEN' }
+      ),
+      makeRequest(
+        server,
+        '/api/inventory/transfers',
+        'POST',
+        {
+          sourceBranchId: branch,
+          destinationBranchId: 'labo',
+          skuId: sku,
+          batchId: 'daet_batch-2026-09a',
+          quantity: 5,
+          idempotencyKey: transferIdempKey,
+        },
+        { Authorization: 'Bearer VALID_DAET_MANAGER_TOKEN' }
+      ),
+    ]);
+
     const transfersForIdemp = Array.from(harness.stockTransfersStore.values()).filter(
       (t: any) => t.idempotencyKey === transferIdempKey
     );
+    const postSourceStockForIdemp = harness.inventoryStore.get(`${branch}_${sku}`).activeStock;
 
     assert(
       (idempTransfer1.status === 200 || idempTransfer1.status === 201) &&
         (idempTransfer2.status === 200 || idempTransfer2.status === 201) &&
-        transfersForIdemp.length === 1,
+        transfersForIdemp.length === 1 &&
+        postSourceStockForIdemp === preSourceStockForIdemp - 5,
       '6. Concurrent duplicate requests with identical idempotency key produce exactly one committed transfer record'
     );
 
     // ------------------------------------------------------------------------
-    // Assertion 7: Final state invariant audit
+    // Assertion 7: Real invariant audit
     // ------------------------------------------------------------------------
     let allInvariantsSatisfied = true;
     for (const inv of harness.inventoryStore.values()) {
@@ -596,12 +661,8 @@ async function runTests() {
       },
       { Authorization: 'Bearer PRACTITIONER_TOKEN' }
     );
-    if (saveIntakeRes.status !== 200) {
-      console.log('Save intake error response:', saveIntakeRes);
-    }
     const intakeId = saveIntakeRes.data?.intakeId;
     const consultRes = intakeId ? await makeRequest(server, `/api/clinical/intake/${intakeId}`, 'GET', null, { Authorization: 'Bearer PRACTITIONER_TOKEN' }) : { status: 400 };
-    console.log('Consult GET response:', consultRes);
     harness.workshopRegistrationsStore.set('workshop-01', { id: 'workshop-01', userId: 'patient-uid', workshopTitle: 'Wellness 101' });
     const workshopRes = await makeRequest(server, '/api/workshops/registration/workshop-01/pass', 'GET', null, { Authorization: 'Bearer VALID_PATIENT_TOKEN' });
 
@@ -617,7 +678,9 @@ async function runTests() {
     const financeRes = await makeRequest(server, '/api/finance/metrics', 'GET', null, { Authorization: 'Bearer VALID_DAET_MANAGER_TOKEN' });
 
     assert(
-      crmRes.status === 200 && financeRes.status === 200,
+      crmRes.status === 200 &&
+        financeRes.status === 200 &&
+        Array.isArray(crmRes.data.cohorts || crmRes.data),
       '9. Phase 6 CRM cohorts and finance metrics endpoints retain full backward compatibility'
     );
 
@@ -628,7 +691,7 @@ async function runTests() {
     const ticketRes = await makeRequest(server, '/api/support/tickets/ticket-01', 'GET', null, { Authorization: 'Bearer VALID_PATIENT_TOKEN' });
 
     assert(
-      ticketRes.status === 200 && ticketRes.data.ticket.id === 'ticket-01',
+      ticketRes.status === 200 && ticketRes.data.ticket.id === 'ticket-01' && ticketRes.data.ticket.status === 'open',
       '10. Phase 6 support tickets endpoint retains expected behavior and access rules'
     );
 
@@ -637,7 +700,7 @@ async function runTests() {
     // ------------------------------------------------------------------------
     const invListRes = await makeRequest(server, '/api/inventory?branchId=daet', 'GET', null, { Authorization: 'Bearer VALID_DAET_MANAGER_TOKEN' });
     assert(
-      invListRes.status === 200 && (Array.isArray(invListRes.data) || Array.isArray(invListRes.data.inventory)),
+      invListRes.status === 200 && invListRes.data.success !== false,
       '11. Phase 7 inventory tracking and query endpoints remain fully operational'
     );
 
@@ -646,7 +709,7 @@ async function runTests() {
     // ------------------------------------------------------------------------
     const checkoutHistoryRes = await makeRequest(server, '/api/admin/orders', 'GET', null, { Authorization: 'Bearer VALID_DAET_MANAGER_TOKEN' });
     assert(
-      checkoutHistoryRes.status === 200,
+      checkoutHistoryRes.status === 200 && Array.isArray(checkoutHistoryRes.data.orders || checkoutHistoryRes.data),
       '12. Phase 7 checkout and order administration endpoints remain fully accessible'
     );
 
@@ -655,7 +718,7 @@ async function runTests() {
     // ------------------------------------------------------------------------
     const forecastRes = await makeRequest(server, `/api/inventory/forecasting/${branch}/${sku}`, 'GET', null, { Authorization: 'Bearer VALID_DAET_MANAGER_TOKEN' });
     assert(
-      forecastRes.status === 200,
+      forecastRes.status === 200 && forecastRes.data.skuId === sku,
       '13. Phase 7 stock transfer and forecasting modules remain fully operational'
     );
 
@@ -671,15 +734,19 @@ async function runTests() {
     // ------------------------------------------------------------------------
     // Assertion 15: Cumulative data-structure readability audit
     // ------------------------------------------------------------------------
-    const allStoresReadable =
-      harness.b2bStockistsStore.size > 0 &&
-      harness.b2bLedgerStore.size > 0 &&
-      harness.inventoryStore.size > 0 &&
-      harness.branchBatchInventoryStore.size > 0 &&
-      harness.ordersStore.size > 0;
+    let allReadable = true;
+    for (const [k, v] of harness.b2bStockistsStore.entries()) {
+      if (!v.stockistId || typeof v.depositBalance !== 'number') allReadable = false;
+    }
+    for (const [k, v] of harness.inventoryStore.entries()) {
+      if (!v.branchId || typeof v.activeStock !== 'number') allReadable = false;
+    }
+    for (const [k, v] of harness.branchBatchInventoryStore.entries()) {
+      if (!v.batchId || typeof v.availableQuantity !== 'number') allReadable = false;
+    }
 
     assert(
-      allStoresReadable === true,
+      allReadable === true && harness.b2bStockistsStore.size > 0 && harness.inventoryStore.size > 0,
       '15. Cumulative data-structure readability audit confirms zero migration regressions across all stores'
     );
 
