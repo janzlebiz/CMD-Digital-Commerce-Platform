@@ -96,6 +96,20 @@ function createTestHarness(options: {
   };
 
   const mockDb: any = {
+    runTransaction: async (updateFunction: any) => {
+      const transaction = {
+        get: async (refOrQuery: any) => {
+          if (typeof refOrQuery.get === 'function') {
+            return await refOrQuery.get();
+          }
+          throw new Error('Invalid transaction.get target');
+        },
+        set: async (docRef: any, data: any, options?: any) => {
+          return await docRef.set(data, options);
+        },
+      };
+      return await updateFunction(transaction);
+    },
     _getStoreForCollection: (colName: string) => {
       if (colName === 'users') return usersStore;
       if (colName === 'inventory') return inventoryStore;
@@ -718,6 +732,53 @@ async function runTestSuite() {
     assert(historyRes.status === 200, 'GET /api/inventory/adjustments returns 200 OK');
     assert(historyRes.data.adjustments.length === 5, 'Returns all 5 recorded adjustment records for Daet branch');
     assert(historyRes.data.adjustments[0].branchId === 'daet', 'All returned adjustments match Daet branch scope');
+
+    // -------------------------------------------------------------------------
+    // Test Suite 10: Legacy Adapter Security & Transactional Integrity Regression
+    // -------------------------------------------------------------------------
+    console.log('\n--- Test Suite 10: Legacy Adapter Security & Transactional Integrity ---');
+
+    // 10.1 Customer blocked from legacy adapter (403)
+    const legacyCustomerRes = await makeRequest(server, '/api/branch-inventory/daet', 'GET', undefined, {
+      Authorization: 'Bearer VALID_CUSTOMER_TOKEN',
+    });
+    assert(legacyCustomerRes.status === 403, 'Customer blocked from legacy adapter with 403 Forbidden');
+
+    // 10.2 Practitioner blocked from legacy adapter (403)
+    const legacyPractitionerRes = await makeRequest(server, '/api/branch-inventory/daet', 'GET', undefined, {
+      Authorization: 'Bearer VALID_PRACTITIONER_TOKEN',
+    });
+    assert(legacyPractitionerRes.status === 403, 'Practitioner blocked from legacy adapter with 403 Forbidden');
+
+    // 10.3 Daet Manager blocked from Labo legacy adapter (403)
+    const legacyCrossBranchRes = await makeRequest(server, '/api/branch-inventory/labo', 'GET', undefined, {
+      Authorization: 'Bearer VALID_STAFF_DAET_MANAGER_TOKEN',
+    });
+    assert(legacyCrossBranchRes.status === 403, 'Daet Manager blocked from Labo legacy adapter with 403 Forbidden');
+
+    // 10.4 Authorized Regional Director accessing legacy adapter (200)
+    const legacyDirectorRes = await makeRequest(server, '/api/branch-inventory/labo', 'GET', undefined, {
+      Authorization: 'Bearer VALID_STAFF_REGIONAL_DIRECTOR_TOKEN',
+    });
+    assert(legacyDirectorRes.status === 200, 'Regional Director successfully accesses legacy adapter with 200 OK');
+
+    // 10.5 Transactional adjustment atomic check & no lost update
+    const txnTestRes = await makeRequest(
+      server,
+      '/api/inventory/adjustments',
+      'POST',
+      {
+        branchId: 'daet',
+        skuId: 'hci-cmd-65ml',
+        batchId: 'batch-2026-09b',
+        adjustmentType: 'count_reconciliation',
+        quantityDelta: 20,
+        reason: 'Transactional concurrency safety check verification.',
+      },
+      { Authorization: 'Bearer VALID_STAFF_DAET_MANAGER_TOKEN' }
+    );
+    assert(txnTestRes.status === 201, 'Transactional adjustment executed successfully with 201 Created');
+    assert(txnTestRes.data.updatedBatch.availableQuantity === 100, 'Batch available quantity correctly updated inside transaction (80 + 20 = 100)');
 
   } finally {
     await new Promise<void>((resolve) => server.close(() => resolve()));

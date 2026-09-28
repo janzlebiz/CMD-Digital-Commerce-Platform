@@ -3026,7 +3026,7 @@ export function createExpressApp(deps: ServerDependencies = {}): Express {
     }
   });
 
-  // 3. POST /api/inventory/adjustments - Record audited stock adjustment & maintain invariant
+  // 3. POST /api/inventory/adjustments - Record audited stock adjustment inside Firestore Transaction
   app.post('/api/inventory/adjustments', async (req: Request, res: Response): Promise<void> => {
     const user = await requireAuth(req, res);
     if (!user) return;
@@ -3099,110 +3099,110 @@ export function createExpressApp(deps: ServerDependencies = {}): Express {
 
       const batchDocId = `${normalizedBranch}_${batchId.trim()}`;
       const batchDocRef = db.collection('branch_batch_inventory').doc(batchDocId);
-      const batchSnap = await batchDocRef.get();
-
-      let batchData: BranchBatchInventoryRecord;
-
-      if (!batchSnap.exists) {
-        const seedMatch = SEED_BRANCH_BATCH_INVENTORY.find((b) => b.id === batchDocId);
-        if (seedMatch) {
-          batchData = { ...seedMatch };
-        } else {
-          batchData = {
-            id: batchDocId,
-            branchId: normalizedBranch,
-            batchId: batchId.trim(),
-            skuId,
-            availableQuantity: 0,
-            reservedQuantity: 0,
-            damagedQuantity: 0,
-            expiryDate: '2028-12-31',
-            updatedAt: new Date().toISOString(),
-          };
-        }
-      } else {
-        batchData = batchSnap.data();
-      }
-
-      let newAvailable = Number(batchData.availableQuantity) || 0;
-      let newDamaged = Number(batchData.damagedQuantity) || 0;
-
-      if (adjustmentType === 'count_reconciliation') {
-        newAvailable += delta;
-      } else if (adjustmentType === 'damage_writeoff') {
-        if (delta <= 0) {
-          res.status(400).json({ error: 'damage_writeoff quantityDelta must be positive representing damaged unit count.' });
-          return;
-        }
-        newAvailable -= delta;
-        newDamaged += delta;
-      } else if (adjustmentType === 'sample_withdrawal' || adjustmentType === 'shrinkage_loss') {
-        if (delta <= 0) {
-          res.status(400).json({ error: `${adjustmentType} quantityDelta must be positive representing reduction count.` });
-          return;
-        }
-        newAvailable -= delta;
-      } else if (adjustmentType === 'qc_quarantine') {
-        if (delta <= 0) {
-          res.status(400).json({ error: 'qc_quarantine quantityDelta must be positive representing quarantined count.' });
-          return;
-        }
-        newAvailable -= delta;
-        newDamaged += delta;
-      }
-
-      if (newAvailable < 0) {
-        res.status(400).json({
-          error: `Insufficient available stock for adjustment. Current available: ${batchData.availableQuantity}, requested reduction: ${Math.abs(delta)}.`,
-        });
-        return;
-      }
-
-      const updatedBatch: BranchBatchInventoryRecord = {
-        ...batchData,
-        availableQuantity: newAvailable,
-        damagedQuantity: newDamaged,
-        updatedAt: new Date().toISOString(),
-      };
-
-      await batchDocRef.set(updatedBatch);
-
-      const allBranchBatchesSnap = await db.collection('branch_batch_inventory').get();
-      const allBranchBatches: BranchBatchInventoryRecord[] = [];
-      if (allBranchBatchesSnap && !allBranchBatchesSnap.empty) {
-        allBranchBatchesSnap.forEach((d: any) => allBranchBatches.push(d.data()));
-      }
-      const idx = allBranchBatches.findIndex((b) => b.id === updatedBatch.id);
-      if (idx >= 0) {
-        allBranchBatches[idx] = updatedBatch;
-      } else {
-        allBranchBatches.push(updatedBatch);
-      }
-
-      const updatedAggregate = computeAggregateInventoryFromBatches({
-        branchBatches: allBranchBatches,
-        branchId: normalizedBranch,
-        skuId,
-        lastAdjustmentAt: new Date().toISOString(),
-      });
-
-      await db.collection('inventory').doc(updatedAggregate.id).set(updatedAggregate);
-
+      const aggDocRef = db.collection('inventory').doc(`${normalizedBranch}_${skuId}`);
       const adjId = `ADJ-${new Date().toISOString().slice(0, 10).replace(/-/g, '')}-${crypto.randomBytes(3).toString('hex').toUpperCase()}`;
-      const adjustmentRecord: InventoryAdjustmentRecord = {
-        id: adjId,
-        branchId: normalizedBranch,
-        skuId,
-        batchId: batchId.trim(),
-        adjustmentType,
-        quantityDelta: delta,
-        reason: reason.trim(),
-        performedByUid: user.uid,
-        performedByName: user.email || user.uid,
-        timestamp: new Date().toISOString(),
-      };
+      const adjDocRef = db.collection('inventory_adjustments').doc(adjId);
 
-      await db.collection('inventory_adjustments').doc(adjId).set(adjustmentRecord);
+      let adjustmentResult: any;
+
+      await db.runTransaction(async (transaction: any) => {
+        const batchSnap = await transaction.get(batchDocRef);
+        let batchData: BranchBatchInventoryRecord;
+
+        if (!batchSnap.exists) {
+          const seedMatch = SEED_BRANCH_BATCH_INVENTORY.find((b) => b.id === batchDocId);
+          if (seedMatch) {
+            batchData = { ...seedMatch };
+          } else {
+            batchData = {
+              id: batchDocId,
+              branchId: normalizedBranch,
+              batchId: batchId.trim(),
+              skuId,
+              availableQuantity: 0,
+              reservedQuantity: 0,
+              damagedQuantity: 0,
+              expiryDate: '2028-12-31',
+              updatedAt: new Date().toISOString(),
+            };
+          }
+        } else {
+          batchData = batchSnap.data();
+        }
+
+        let newAvailable = Number(batchData.availableQuantity) || 0;
+        let newDamaged = Number(batchData.damagedQuantity) || 0;
+
+        if (adjustmentType === 'count_reconciliation') {
+          newAvailable += delta;
+        } else if (adjustmentType === 'damage_writeoff') {
+          if (delta <= 0) {
+            throw new Error('INVALID_DELTA: damage_writeoff quantityDelta must be positive representing damaged unit count.');
+          }
+          newAvailable -= delta;
+          newDamaged += delta;
+        } else if (adjustmentType === 'sample_withdrawal' || adjustmentType === 'shrinkage_loss') {
+          if (delta <= 0) {
+            throw new Error(`INVALID_DELTA: ${adjustmentType} quantityDelta must be positive representing reduction count.`);
+          }
+          newAvailable -= delta;
+        } else if (adjustmentType === 'qc_quarantine') {
+          if (delta <= 0) {
+            throw new Error('INVALID_DELTA: qc_quarantine quantityDelta must be positive representing quarantined count.');
+          }
+          newAvailable -= delta;
+          newDamaged += delta;
+        }
+
+        if (newAvailable < 0) {
+          throw new Error(`INSUFFICIENT_STOCK: Current available: ${batchData.availableQuantity}, requested reduction: ${Math.abs(delta)}.`);
+        }
+
+        const updatedBatch: BranchBatchInventoryRecord = {
+          ...batchData,
+          availableQuantity: newAvailable,
+          damagedQuantity: newDamaged,
+          updatedAt: new Date().toISOString(),
+        };
+
+        const branchBatchesQuery = db.collection('branch_batch_inventory').where('branchId', '==', normalizedBranch).where('skuId', '==', skuId);
+        const branchBatchesSnap = await transaction.get(branchBatchesQuery);
+        const branchBatches: BranchBatchInventoryRecord[] = [];
+        if (branchBatchesSnap && !branchBatchesSnap.empty) {
+          branchBatchesSnap.forEach((d: any) => {
+            if (d.id !== batchDocId) {
+              branchBatches.push(d.data());
+            }
+          });
+        }
+        branchBatches.push(updatedBatch);
+
+        const updatedAggregate = computeAggregateInventoryFromBatches({
+          branchBatches,
+          branchId: normalizedBranch,
+          skuId,
+          lastAdjustmentAt: new Date().toISOString(),
+        });
+
+        const adjustmentRecord: InventoryAdjustmentRecord = {
+          id: adjId,
+          branchId: normalizedBranch,
+          skuId,
+          batchId: batchId.trim(),
+          adjustmentType,
+          quantityDelta: delta,
+          reason: reason.trim(),
+          performedByUid: user.uid,
+          performedByName: user.email || user.uid,
+          timestamp: new Date().toISOString(),
+        };
+
+        transaction.set(batchDocRef, updatedBatch);
+        transaction.set(aggDocRef, updatedAggregate);
+        transaction.set(adjDocRef, adjustmentRecord);
+
+        adjustmentResult = { adjustmentRecord, updatedBatch, updatedAggregate };
+      });
 
       await logAuditEvent(
         user.uid,
@@ -3217,19 +3217,23 @@ export function createExpressApp(deps: ServerDependencies = {}): Express {
           batchId: batchId.trim(),
           adjustmentType,
           quantityDelta: delta,
-          newAvailableStock: updatedAggregate.activeStock,
-          newReservedStock: updatedAggregate.reservedStock,
+          newAvailableStock: adjustmentResult.updatedAggregate.activeStock,
+          newReservedStock: adjustmentResult.updatedAggregate.reservedStock,
           reason: reason.trim(),
         },
         req
       );
 
       res.status(201).json({
-        adjustment: adjustmentRecord,
-        updatedBatch,
-        updatedAggregate,
+        adjustment: adjustmentResult.adjustmentRecord,
+        updatedBatch: adjustmentResult.updatedBatch,
+        updatedAggregate: adjustmentResult.updatedAggregate,
       });
     } catch (err: any) {
+      if (err.message.startsWith('INVALID_DELTA:') || err.message.startsWith('INSUFFICIENT_STOCK:')) {
+        res.status(400).json({ error: err.message.replace(/^(INVALID_DELTA|INSUFFICIENT_STOCK):\s*/, '') });
+        return;
+      }
       res.status(500).json({ error: err.message });
     }
   });
@@ -3340,7 +3344,43 @@ export function createExpressApp(deps: ServerDependencies = {}): Express {
     const user = await requireAuth(req, res);
     if (!user) return;
 
+    if (user.role !== 'branch_manager' && user.role !== 'regional_director' && user.role !== 'super_admin') {
+      await logAuditEvent(
+        user.uid,
+        user.role,
+        String(req.params.branchId || 'daet').toLowerCase().trim(),
+        'unauthorized_legacy_inventory_access_blocked',
+        'branch_inventory',
+        null,
+        false,
+        { requestedBranch: req.params.branchId, userRole: user.role },
+        req
+      );
+      res.status(403).json({ error: 'Access Denied: Legacy inventory adapter requires authorized staff role.' });
+      return;
+    }
+
     const branchId = String(req.params.branchId || '').toLowerCase().trim();
+
+    if (user.role === 'branch_manager') {
+      const assigned = (user.assignedBranchId || 'daet').toLowerCase().trim();
+      if (branchId && branchId !== assigned) {
+        await logAuditEvent(
+          user.uid,
+          user.role,
+          branchId,
+          'unauthorized_cross_branch_legacy_inventory_access_blocked',
+          'branch_inventory',
+          null,
+          false,
+          { requestedBranch: branchId, assignedBranch: assigned },
+          req
+        );
+        res.status(403).json({ error: 'Access Denied: Branch managers cannot access inventory of other branches.' });
+        return;
+      }
+    }
+
     res.setHeader('X-Deprecated', 'Superseded by /api/inventory in Phase 7');
 
     try {
