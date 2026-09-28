@@ -78,6 +78,7 @@ function createTestHarness() {
       const targetStore = mockDb._getStoreForCollection(colName);
 
       const queryObj: any = {
+        _colName: colName,
         _filters: [] as Array<{ field: string; op: string; value: any }>,
         where: (field: string, op: string, value: any) => {
           queryObj._filters.push({ field, op, value });
@@ -176,125 +177,112 @@ function createTestHarness() {
 
       return queryObj;
     },
-    runTransaction: async (updateFunction: (transaction: any) => Promise<any>, maxAttempts = 20) => {
-      if (!(mockDb as any)._txQueue) {
-        (mockDb as any)._txQueue = Promise.resolve();
-      }
-      let release: any;
-      const nextTx = new Promise((res) => { release = res; });
-      const prevTx = (mockDb as any)._txQueue;
-      (mockDb as any)._txQueue = nextTx;
+    runTransaction: async (updateFunction: (transaction: any) => Promise<any>, maxAttempts = 100) => {
+      let attempt = 0;
+      while (attempt < maxAttempts) {
+        attempt++;
+        const readVersions = new Map<string, number>();
+        const stagedWrites = [] as Array<{ docRef: any; data: any; options?: any }>;
+        const stagedDeletes = [] as Array<{ docRef: any }>;
 
-      await prevTx;
-      try {
-        let attempt = 0;
-        while (attempt < maxAttempts) {
-          attempt++;
-          const readVersions = new Map<string, number>();
-          const stagedWrites = [] as Array<{ docRef: any; data: any; options?: any }>;
-          const stagedDeletes = [] as Array<{ docRef: any }>;
-
-          const transaction = {
-            get: async (refOrQuery: any) => {
-              if (!refOrQuery) return null;
-              await new Promise((resolve) => setTimeout(resolve, Math.floor(Math.random() * 3) + 1));
-              if (refOrQuery._colName && (refOrQuery._docId || refOrQuery.id)) {
-                const col = refOrQuery._colName;
-                const docId = refOrQuery._docId || refOrQuery.id;
-                const path = `${col}/${docId}`;
-                const currentVer = docVersions.get(path) || 1;
-                readVersions.set(path, currentVer);
-                return await refOrQuery.get();
-              }
-              if (refOrQuery.id && typeof refOrQuery.get === 'function') {
-                const col = refOrQuery._colName || 'default';
-                const path = `${col}/${refOrQuery.id}`;
-                const currentVer = docVersions.get(path) || 1;
-                readVersions.set(path, currentVer);
-                return await refOrQuery.get();
-              }
-              if (typeof refOrQuery.get === 'function') {
-                const snap = await refOrQuery.get();
-                if (snap && snap.docs) {
-                  const col = refOrQuery._colName || 'default';
-                  for (const d of snap.docs) {
-                    const path = `${col}/${d.id}`;
-                    const currentVer = docVersions.get(path) || 1;
-                    readVersions.set(path, currentVer);
-                  }
-                }
-                return snap;
-              }
-              throw new Error('Invalid target passed to transaction.get');
-            },
-            set: (docRef: any, data: any, options?: any) => {
-              stagedWrites.push({ docRef, data, options });
-            },
-            update: (docRef: any, data: any) => {
-              stagedWrites.push({ docRef, data, options: { merge: true } });
-            },
-            delete: (docRef: any) => {
-              stagedDeletes.push({ docRef });
-            },
-          };
-
-          try {
-            const result = await updateFunction(transaction);
-
-            let conflictDetected = false;
-            for (const [path, readVer] of readVersions.entries()) {
+        const transaction = {
+          get: async (refOrQuery: any) => {
+            if (!refOrQuery) return null;
+            if (refOrQuery._colName && (refOrQuery._docId || refOrQuery.id)) {
+              const col = refOrQuery._colName;
+              const docId = refOrQuery._docId || refOrQuery.id;
+              const path = `${col}/${docId}`;
               const currentVer = docVersions.get(path) || 1;
-              if (currentVer !== readVer) {
-                conflictDetected = true;
-                break;
-              }
+              readVersions.set(path, currentVer);
+              return await refOrQuery.get();
             }
-
-            if (conflictDetected) {
-              if (attempt >= maxAttempts) {
-                throw new Error('Maximum transaction retry attempts reached due to contention');
-              }
-              await new Promise((resolve) => setTimeout(resolve, attempt * 5 + Math.random() * 10));
-              continue;
+            if (refOrQuery.id && typeof refOrQuery.get === 'function') {
+              const col = refOrQuery._colName || 'default';
+              const path = `${col}/${refOrQuery.id}`;
+              const currentVer = docVersions.get(path) || 1;
+              readVersions.set(path, currentVer);
+              return await refOrQuery.get();
             }
-
-            for (const w of stagedWrites) {
-              const col = w.docRef._colName;
-              const docId = w.docRef._docId || w.docRef.id;
-              const targetStore = mockDb._getStoreForCollection(col);
-              let writtenData: any;
-              if (w.options && w.options.merge) {
-                const existing = targetStore.get(docId) || {};
-                writtenData = { ...existing, ...w.data };
-                targetStore.set(docId, writtenData);
-              } else {
-                writtenData = { ...w.data };
-                targetStore.set(docId, writtenData);
+            if (typeof refOrQuery.get === 'function') {
+              const snap = await refOrQuery.get();
+              if (snap && snap.docs) {
+                const col = refOrQuery._colName || 'default';
+                for (const d of snap.docs) {
+                  const path = `${col}/${d.id}`;
+                  const currentVer = docVersions.get(path) || 1;
+                  readVersions.set(path, currentVer);
+                }
               }
-              const path = `${col}/${docId}`;
-              docVersions.set(path, (docVersions.get(path) || 1) + 1);
-              if (col === 'branch_batch_inventory') {
-                updateInventoryAggregate(writtenData.branchId, writtenData.skuId);
-              }
+              return snap;
             }
+            throw new Error('Invalid target passed to transaction.get');
+          },
+          set: (docRef: any, data: any, options?: any) => {
+            stagedWrites.push({ docRef, data, options });
+          },
+          update: (docRef: any, data: any) => {
+            stagedWrites.push({ docRef, data, options: { merge: true } });
+          },
+          delete: (docRef: any) => {
+            stagedDeletes.push({ docRef });
+          },
+        };
 
-            for (const d of stagedDeletes) {
-              const col = d.docRef._colName;
-              const docId = d.docRef._docId || d.docRef.id;
-              const targetStore = mockDb._getStoreForCollection(col);
-              targetStore.delete(docId);
-              const path = `${col}/${docId}`;
-              docVersions.set(path, (docVersions.get(path) || 1) + 1);
+        try {
+          const result = await updateFunction(transaction);
+
+          let conflictDetected = false;
+          for (const [path, readVer] of readVersions.entries()) {
+            const currentVer = docVersions.get(path) || 1;
+            if (currentVer !== readVer) {
+              conflictDetected = true;
+              break;
             }
-
-            return result;
-          } catch (err: any) {
-            if (attempt >= maxAttempts) throw err;
-            await new Promise((resolve) => setTimeout(resolve, attempt * 5 + Math.random() * 10));
           }
+
+          if (conflictDetected) {
+            if (attempt >= maxAttempts) {
+              throw new Error('Maximum transaction retry attempts reached due to contention');
+            }
+            await new Promise((resolve) => setTimeout(resolve, attempt * 10 + Math.random() * 20));
+            continue;
+          }
+
+          for (const w of stagedWrites) {
+            const col = w.docRef._colName;
+            const docId = w.docRef._docId || w.docRef.id;
+            const targetStore = mockDb._getStoreForCollection(col);
+            let writtenData: any;
+            if (w.options && w.options.merge) {
+              const existing = targetStore.get(docId) || {};
+              writtenData = { ...existing, ...w.data };
+              targetStore.set(docId, writtenData);
+            } else {
+              writtenData = { ...w.data };
+              targetStore.set(docId, writtenData);
+            }
+            const path = `${col}/${docId}`;
+            docVersions.set(path, (docVersions.get(path) || 1) + 1);
+            if (col === 'branch_batch_inventory') {
+              updateInventoryAggregate(writtenData.branchId, writtenData.skuId);
+            }
+          }
+
+          for (const d of stagedDeletes) {
+            const col = d.docRef._colName;
+            const docId = d.docRef._docId || d.docRef.id;
+            const targetStore = mockDb._getStoreForCollection(col);
+            targetStore.delete(docId);
+            const path = `${col}/${docId}`;
+            docVersions.set(path, (docVersions.get(path) || 1) + 1);
+          }
+
+          return result;
+        } catch (err: any) {
+          console.error('TX CATCH ERROR attempt:', attempt, err.message);
+          if (attempt >= maxAttempts) throw err;
+          await new Promise((resolve) => setTimeout(resolve, attempt * 10 + Math.random() * 20));
         }
-      } finally {
-        release();
       }
     },
   };
