@@ -97,18 +97,65 @@ function createTestHarness(options: {
 
   const mockDb: any = {
     runTransaction: async (updateFunction: any) => {
-      const transaction = {
-        get: async (refOrQuery: any) => {
-          if (typeof refOrQuery.get === 'function') {
-            return await refOrQuery.get();
+      if (!(mockDb as any)._docVersions) {
+        (mockDb as any)._docVersions = new Map<string, number>();
+      }
+      const versions = (mockDb as any)._docVersions;
+
+      let maxRetries = 15;
+      let attempt = 0;
+
+      while (attempt < maxRetries) {
+        attempt++;
+        const readSnapshots = new Map<string, { version: number; data: any }>();
+        const stagedWrites = [] as Array<{ docRef: any; data: any; options: any }>;
+
+        const transaction = {
+          get: async (refOrQuery: any) => {
+            if (typeof refOrQuery.get === 'function') {
+              const res = await refOrQuery.get();
+              if (res && typeof res.data === 'function') {
+                const docId = res.id;
+                const currentVer = versions.get(docId) || 0;
+                readSnapshots.set(docId, { version: currentVer, data: res.data() });
+              }
+              return res;
+            }
+            throw new Error('Invalid transaction.get target');
+          },
+          set: async (docRef: any, data: any, options?: any) => {
+            stagedWrites.push({ docRef, data, options });
+          },
+        };
+
+        try {
+          const result = await updateFunction(transaction);
+
+          // Validate OCC before committing staged writes
+          for (const [docId, snapshot] of readSnapshots.entries()) {
+            const currentVer = versions.get(docId) || 0;
+            if (currentVer !== snapshot.version) {
+              throw new Error('TRANSACTION_CONFLICT');
+            }
           }
-          throw new Error('Invalid transaction.get target');
-        },
-        set: async (docRef: any, data: any, options?: any) => {
-          return await docRef.set(data, options);
-        },
-      };
-      return await updateFunction(transaction);
+
+          // Commit staged writes & increment versions
+          for (const write of stagedWrites) {
+            await write.docRef.set(write.data, write.options);
+            const docId = write.docRef.id;
+            const nextVer = (versions.get(docId) || 0) + 1;
+            versions.set(docId, nextVer);
+          }
+
+          return result;
+        } catch (err: any) {
+          if (err.message === 'TRANSACTION_CONFLICT' && attempt < maxRetries) {
+            continue;
+          }
+          throw err;
+        }
+      }
+      throw new Error('Transaction failed after maximum retries due to persistent OCC conflicts.');
     },
     _getStoreForCollection: (colName: string) => {
       if (colName === 'users') return usersStore;
