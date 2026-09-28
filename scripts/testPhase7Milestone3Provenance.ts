@@ -391,34 +391,55 @@ async function runMilestone3ProvenanceTestSuite() {
       '7. Duplicate fulfillment is idempotent and creates zero duplicate allocations'
     );
 
-    // 8. Insufficient/mismatched reservation cannot create provenance (test order without allocations)
-    const checkoutZeroAlloc = await makeRequest(
+    // 8. Mismatched/insufficient reserved stock during fulfillment fails atomically
+    const checkoutMismatched = await makeRequest(
       server,
       '/api/orders/checkout',
       'POST',
       {
-        branchId: 'labo',
-        items: [{ skuId: 'hci-cmd-30ml', quantity: 5 }],
+        branchId: 'daet',
+        items: [{ skuId: 'hci-cmd-65ml', quantity: 10 }],
         deliveryMethod: 'branch_pickup',
       },
       { Authorization: 'Bearer VALID_CUSTOMER_TOKEN' }
     );
-    // Artificially clear batchAllocations on this new order to test validation error
-    const zeroAllocOrderId = checkoutZeroAlloc.data.orderId;
-    const zeroAllocOrder = harness.ordersStore.get(zeroAllocOrderId);
-    zeroAllocOrder.batchAllocations = {};
-    harness.ordersStore.set(zeroAllocOrderId, zeroAllocOrder);
+    const mismatchedOrderId = checkoutMismatched.data.orderId;
+    const mismatchedBatchId = checkoutMismatched.data.order.batchAllocations['hci-cmd-65ml'][0].batchId;
+    const batchRefBeforeMismatched = bbStore.get(`daet_${mismatchedBatchId}`);
+    const reservedBeforeMismatched = batchRefBeforeMismatched.reservedQuantity;
+    const allocsCountBefore = allocStore.size;
 
-    const fulfillInvalid = await makeRequest(
+    // Tamper order allocations to exceed batch reservedQuantity
+    const mismatchedOrder = harness.ordersStore.get(mismatchedOrderId);
+    mismatchedOrder.batchAllocations['hci-cmd-65ml'][0].quantityReserved = reservedBeforeMismatched + 500;
+    mismatchedOrder.batchAllocations['hci-cmd-65ml'][0].allocatedQuantity = reservedBeforeMismatched + 500;
+    harness.ordersStore.set(mismatchedOrderId, mismatchedOrder);
+
+    const fulfillMismatched = await makeRequest(
       server,
-      `/api/orders/${zeroAllocOrderId}/fulfill`,
+      `/api/orders/${mismatchedOrderId}/fulfill`,
       'POST',
       undefined,
-      { Authorization: 'Bearer VALID_LABO_MANAGER_TOKEN' }
+      { Authorization: 'Bearer VALID_DAET_MANAGER_TOKEN' }
     );
+    const batchRefAfterMismatched = bbStore.get(`daet_${mismatchedBatchId}`);
+    const orderAfterMismatched = harness.ordersStore.get(mismatchedOrderId);
+    const reconMismatched = await makeRequest(
+      server,
+      '/api/inventory/reconciliation?branchId=daet',
+      'GET',
+      undefined,
+      { Authorization: 'Bearer VALID_ADMIN_TOKEN' }
+    );
+
     assert(
-      fulfillInvalid.status === 400 && fulfillInvalid.data.error.includes('no reserved batch allocations'),
-      '8. Order without batch allocations cannot be fulfilled and returns 400'
+      fulfillMismatched.status >= 400 &&
+      fulfillMismatched.data.error.includes('INSUFFICIENT_RESERVED_STOCK') &&
+      batchRefAfterMismatched.reservedQuantity === reservedBeforeMismatched &&
+      allocStore.size === allocsCountBefore &&
+      orderAfterMismatched.fulfillmentStatus !== 'fulfilled' &&
+      reconMismatched.status === 200 && reconMismatched.data.reconciliation.allConsistent === true,
+      '8. Mismatched/insufficient reserved stock fulfillment fails atomically with zero stock/provenance/status mutation'
     );
 
     // 9. Recall by batch ID returns all affected orders

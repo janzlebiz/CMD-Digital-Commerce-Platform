@@ -3777,7 +3777,10 @@ export function createExpressApp(deps: ServerDependencies = {}): Express {
             }
             const bData = batchSnap.data();
             const currentReserved = Number(bData.reservedQuantity) || 0;
-            const newReserved = Math.max(0, currentReserved - qtyReserved);
+            if (currentReserved < qtyReserved) {
+              throw new Error(`INSUFFICIENT_RESERVED_STOCK: Batch ${branchBatchDocId} has reserved quantity ${currentReserved}, but fulfillment requires ${qtyReserved}.`);
+            }
+            const newReserved = currentReserved - qtyReserved;
 
             const updatedBatch = {
               ...bData,
