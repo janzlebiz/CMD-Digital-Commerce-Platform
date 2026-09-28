@@ -1281,7 +1281,7 @@ export class SimulatedPaymentAdapter implements PaymentProvider {
 
     this.createCount++;
 
-    const isCod = paymentMethod === 'cash_on_delivery' || paymentMethod === 'cash_on_pickup' || this.providerType === 'simulated_cod';
+    const isCod = paymentMethod === 'cash_on_delivery' || paymentMethod === 'cash_on_pickup';
     const status: PaymentStatus = isCod ? 'pending_payment' : 'paid';
     const refPrefix = isCod ? 'COD' : paymentMethod === 'gcash' || paymentMethod === 'maya' ? 'WAL' : 'CARD';
     const nowIso = new Date().toISOString();
@@ -1494,6 +1494,30 @@ export class StandardDeliveryAdapter implements DeliveryProvider {
       shippingFee: isDoorToDoor ? 150 : 0,
       updatedAt: new Date().toISOString(),
     };
+  }
+}
+
+export class DeliveryAdapterRegistry {
+  private static adapters: Map<string, DeliveryProvider> = new Map();
+  private static defaultAdapter = new StandardDeliveryAdapter();
+
+  static registerAdapter(type: string, adapter: DeliveryProvider) {
+    this.adapters.set(type, adapter);
+  }
+
+  static getAdapter(deliveryMethod: string): DeliveryProvider {
+    if (this.adapters.has(deliveryMethod)) {
+      return this.adapters.get(deliveryMethod)!;
+    }
+    if (this.adapters.has('default')) {
+      return this.adapters.get('default')!;
+    }
+    return this.defaultAdapter;
+  }
+
+  static clear() {
+    this.adapters.clear();
+    this.defaultAdapter = new StandardDeliveryAdapter();
   }
 }
 
@@ -1974,15 +1998,25 @@ export function createExpressApp(deps: ServerDependencies = {}): Express {
         }
 
         const currentRefunded = Number(orderData.refundedAmount) || 0;
-        const remainingBalance = Number(orderData.remainingRefundableBalance ?? (Number(orderData.grandTotal) - currentRefunded));
+        const currentReserved = Number(orderData.reservedRefundAmount) || 0;
+        const grandTotal = Number(orderData.grandTotal) || 0;
+        const remainingBalance = Number(orderData.remainingRefundableBalance ?? (grandTotal - currentRefunded));
+        const availableRefundBalance = remainingBalance - currentReserved;
 
         if (remainingBalance <= 0 || orderData.paymentStatus === 'refunded') {
           throw new Error('Order is already fully refunded.');
         }
 
-        if (refundAmount > remainingBalance) {
-          throw new Error(`Refund amount PHP ${refundAmount} exceeds remaining refundable balance PHP ${remainingBalance}.`);
+        if (refundAmount > availableRefundBalance) {
+          throw new Error(`Refund amount PHP ${refundAmount} exceeds available refundable balance PHP ${availableRefundBalance}.`);
         }
+
+        // Atomically reserve refund amount on order document to cause transactional contention
+        const newReserved = currentReserved + refundAmount;
+        transaction.update(orderRef, {
+          reservedRefundAmount: newReserved,
+          updatedAt: nowIso,
+        });
 
         transaction.set(intentRef, {
           orderId,
@@ -2010,7 +2044,16 @@ export function createExpressApp(deps: ServerDependencies = {}): Express {
     try {
       refundRes = await paymentAdapter.processRefund(paymentId, refundAmount, reason, providerIdempotencyKey);
     } catch (providerErr: any) {
+      // Release reserved refund amount on provider failure
       await db.runTransaction(async (transaction: any) => {
+        const orderSnap = await transaction.get(orderRef);
+        if (orderSnap && orderSnap.exists) {
+          const txOrderData = typeof orderSnap.data === 'function' ? orderSnap.data() : orderSnap.data;
+          const currentReserved = Number(txOrderData.reservedRefundAmount) || 0;
+          const newReserved = Math.max(0, currentReserved - refundAmount);
+          transaction.update(orderRef, { reservedRefundAmount: newReserved, updatedAt: new Date().toISOString() });
+        }
+
         transaction.set(intentRef, {
           orderId,
           refundAmount,
@@ -2030,6 +2073,9 @@ export function createExpressApp(deps: ServerDependencies = {}): Express {
     await db.runTransaction(async (transaction: any) => {
       const txOrderSnap = await transaction.get(orderRef);
       const txOrderData = typeof txOrderSnap.data === 'function' ? txOrderSnap.data() : txOrderSnap.data;
+
+      const currentReserved = Number(txOrderData.reservedRefundAmount) || 0;
+      const newReserved = Math.max(0, currentReserved - refundAmount);
 
       const currentRefunded = Number(txOrderData.refundedAmount) || 0;
       const currentRemaining = Number(txOrderData.remainingRefundableBalance ?? (Number(txOrderData.grandTotal) - currentRefunded));
@@ -2052,6 +2098,7 @@ export function createExpressApp(deps: ServerDependencies = {}): Express {
 
       finalOrder = {
         ...txOrderData,
+        reservedRefundAmount: newReserved,
         paymentStatus: newPaymentStatus,
         refundedAmount: newRefunded,
         remainingRefundableBalance: newRemaining,
@@ -2059,6 +2106,7 @@ export function createExpressApp(deps: ServerDependencies = {}): Express {
       };
 
       transaction.update(orderRef, {
+        reservedRefundAmount: newReserved,
         paymentStatus: newPaymentStatus,
         refundedAmount: newRefunded,
         remainingRefundableBalance: newRemaining,
@@ -2246,13 +2294,13 @@ export function createExpressApp(deps: ServerDependencies = {}): Express {
 
       // PHASE B: External provider side effects (outside transaction)
       const paymentAdapter = PaymentAdapterRegistry.getAdapter(orderRecord.paymentMethod || 'cash_on_delivery');
-      const deliveryAdapter = new StandardDeliveryAdapter();
+      const deliveryAdapter = DeliveryAdapterRegistry.getAdapter(orderRecord.deliveryMethod || 'door_to_door');
 
       const paymentIdempotencyKey = `pay_chk_${user.uid}_${orderId}_${idempotencyKey}`;
       const deliveryIdempotencyKey = `del_chk_${orderId}`;
 
-      let paymentIntent: PaymentIntent;
-      let fulfillment: DeliveryFulfillment;
+      let paymentIntent: PaymentIntent | undefined = undefined;
+      let fulfillment: DeliveryFulfillment | undefined = undefined;
 
       try {
         paymentIntent = await paymentAdapter.createPaymentIntent(
@@ -2271,6 +2319,19 @@ export function createExpressApp(deps: ServerDependencies = {}): Express {
           deliveryIdempotencyKey
         );
       } catch (providerErr: any) {
+        if (paymentIntent && (paymentIntent.status === 'paid' || paymentIntent.status === 'authorized')) {
+          try {
+            await paymentAdapter.processRefund(
+              paymentIntent.paymentId,
+              orderRecord.grandTotal,
+              'Compensating refund due to delivery fulfillment failure',
+              `comp_${orderId}`
+            );
+          } catch (refundCompErr: any) {
+            console.error('Compensating refund failed:', refundCompErr?.message || refundCompErr);
+          }
+        }
+
         // Recovery transaction: release reserved stock and mark order failed
         await db.runTransaction(async (transaction: any) => {
           const orderRef = db.collection('orders').doc(orderId);
@@ -2350,10 +2411,10 @@ export function createExpressApp(deps: ServerDependencies = {}): Express {
 
         orderRecord = {
           ...orderRecord,
-          paymentStatus: paymentIntent.status,
-          paymentIntent,
-          fulfillmentStatus: fulfillment.status,
-          fulfillment,
+          paymentStatus: paymentIntent!.status,
+          paymentIntent: paymentIntent!,
+          fulfillmentStatus: fulfillment!.status,
+          fulfillment: fulfillment!,
           checkoutStatus: 'completed',
           updatedAt: nowIso,
         };
@@ -2916,7 +2977,7 @@ export function createExpressApp(deps: ServerDependencies = {}): Express {
       );
 
       if (!refundResult.success) {
-        if (refundResult.error?.includes('exceeds remaining') || refundResult.error?.includes('already fully refunded') || refundResult.error?.includes('greater than 0')) {
+        if (refundResult.error?.includes('exceeds') || refundResult.error?.includes('already fully refunded') || refundResult.error?.includes('greater than 0')) {
           res.status(400).json({ error: refundResult.error });
           return;
         }

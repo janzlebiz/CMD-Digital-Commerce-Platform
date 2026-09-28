@@ -8,6 +8,7 @@ import {
   SimulatedPaymentAdapter,
   StandardDeliveryAdapter,
   PaymentAdapterRegistry,
+  DeliveryAdapterRegistry,
 } from '../server.ts';
 import http from 'http';
 
@@ -207,10 +208,17 @@ async function runTests() {
   const customerBobToken = 'DEMO_TOKEN_customer_bob';
   const managerToken = 'DEMO_TOKEN_branch_manager';
 
-  // Inject Spied Payment Adapter
+  // Inject Spied Payment Adapter & Delivery Adapter
   const spyPaymentAdapter = new SimulatedPaymentAdapter('simulated_cod');
   PaymentAdapterRegistry.registerAdapter('cash_on_delivery', spyPaymentAdapter);
   PaymentAdapterRegistry.registerAdapter('simulated_cod', spyPaymentAdapter);
+  PaymentAdapterRegistry.registerAdapter('credit_card', spyPaymentAdapter);
+  PaymentAdapterRegistry.registerAdapter('simulated_card', spyPaymentAdapter);
+
+  const spyDeliveryAdapter = new StandardDeliveryAdapter();
+  DeliveryAdapterRegistry.registerAdapter('default', spyDeliveryAdapter);
+  DeliveryAdapterRegistry.registerAdapter('door_to_door', spyDeliveryAdapter);
+  DeliveryAdapterRegistry.registerAdapter('branch_pickup', spyDeliveryAdapter);
 
   try {
     // ------------------------------------------------------------------------
@@ -267,6 +275,7 @@ async function runTests() {
     // SECTION 2: Mandatory Spied Assertion 1, 2, 4, 5 — Concurrent Checkout Invocations & Deterministic Keys
     // ------------------------------------------------------------------------
     spyPaymentAdapter.createCount = 0;
+    spyDeliveryAdapter.createCount = 0;
     const concurrentKey = 'key_spied_concurrent_777';
     const concurrentPayload = {
       ...checkoutPayload,
@@ -308,6 +317,12 @@ async function runTests() {
     assert(
       spyPaymentAdapter.lastPaymentKey === `pay_chk_demo-customer-uid_${concData1.orderId}_${concurrentKey}`,
       '9. MANDATORY: Payment adapter receives deterministic idempotency key'
+    );
+
+    assert(spyDeliveryAdapter.createCount === 1, '9b. MANDATORY: Delivery adapter invoked exactly ONCE for concurrent checkout');
+    assert(
+      spyDeliveryAdapter.lastDeliveryKey === `del_chk_${concData1.orderId}`,
+      '9c. MANDATORY: Delivery adapter receives del_chk_<orderId> idempotency key'
     );
 
     // ------------------------------------------------------------------------
@@ -462,6 +477,33 @@ async function runTests() {
     assert(endOrderDoc.refundedAmount <= 2550, '21. MANDATORY: Two concurrent different refund keys cannot refund more than remaining balance');
 
     // ------------------------------------------------------------------------
+    // SECTION 6B: Partial Refund & Second Full Refund Rejection
+    // ------------------------------------------------------------------------
+    // Refund remaining balance on rfndOrderId (2550 - 1000 - 1200 = 350)
+    const remainingRefundRes = await fetch(`http://127.0.0.1:${port}/api/orders/${rfndOrderId}/refund`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${managerToken}`,
+        'x-idempotency-key': 'rfnd_key_remaining_350',
+      },
+      body: JSON.stringify({ amount: 350, reason: 'Final remaining balance refund' }),
+    });
+    assert(remainingRefundRes.status === 200, '21a. Remaining balance refund succeeds with HTTP 200');
+
+    // Attempt second refund when fully refunded
+    const overRefundRes = await fetch(`http://127.0.0.1:${port}/api/orders/${rfndOrderId}/refund`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${managerToken}`,
+        'x-idempotency-key': 'rfnd_key_over_refund',
+      },
+      body: JSON.stringify({ amount: 100, reason: 'Extra refund on fully refunded order' }),
+    });
+    assert(overRefundRes.status === 400, '21b. Refund on fully refunded order is rejected with HTTP 400');
+
+    // ------------------------------------------------------------------------
     // SECTION 7: Mandatory Assertions 11 & 12 — Cancellation & Return Refund Failure Recovery
     // ------------------------------------------------------------------------
     // Create new order for cancellation test
@@ -574,6 +616,31 @@ async function runTests() {
     });
 
     assert(retryReturnRefundRes.status === 200, '25. MANDATORY: Return-approval refund failure remains recoverable via retry');
+
+    // ------------------------------------------------------------------------
+    // SECTION 8: Partial Delivery Failure Compensating Action Test
+    // ------------------------------------------------------------------------
+    spyPaymentAdapter.refundCount = 0;
+    spyDeliveryAdapter.createFulfillment = async () => {
+      throw new Error('Simulated Delivery Provider Connection Failed');
+    };
+
+    const deliveryFailRes = await fetch(`http://127.0.0.1:${port}/api/orders/checkout`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${customerToken}`,
+        'x-idempotency-key': 'key_del_fail_comp_test',
+      },
+      body: JSON.stringify({
+        ...checkoutPayload,
+        paymentMethod: 'credit_card',
+        idempotencyKey: 'key_del_fail_comp_test',
+      }),
+    });
+
+    assert(deliveryFailRes.status === 500, '26. Checkout returns 500 when delivery provider fails');
+    assert(spyPaymentAdapter.refundCount === 1, '27. Compensating refund invoked when delivery provider fails after payment creation');
 
   } finally {
     await new Promise<void>((resolve) => server.close(() => resolve()));
