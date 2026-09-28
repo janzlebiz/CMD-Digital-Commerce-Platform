@@ -65,7 +65,7 @@ The canonical product roadmap comprises the following ten phases:
 
 ## 6. Open Critical Work
 
-### Priority A: Foundation & Observability (COMPLETED FOUNDATION BASELINE)
+### Priority A: Foundation & Observability (COMPLETED)
 * Architecture reconciliation documentation (`ARCHITECTURE_RECONCILIATION.md` completed).
 * Reproducible production build (`npm run build`), start (`npm start`), and deployment validation (`dist-server/server.js` artifact generation verified).
 * Production observability, structured JSON logging, and request correlation (`X-Request-Id` / `x-correlation-id`).

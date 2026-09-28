@@ -36,11 +36,13 @@ Executes `node dist-server/server.js` to launch the standalone production server
 
 ## 3. Generated Build Artifacts
 
-| Artifact Path | Description | Consumption |
-| :--- | :--- | :--- |
-| `dist/index.html` | Entry point HTML for Vite React 19 SPA | Served statically by Express in production mode |
-| `dist/assets/*` | Bundled JavaScript, CSS, and image assets | Served with static cache headers by Express |
-| `dist-server/server.js` | Compiled standalone Node.js Express server bundle | Executed directly by `npm start` (`node dist-server/server.js`) |
+| Artifact Path | Description | Consumption | Source Control |
+| :--- | :--- | :--- | :--- |
+| `dist/index.html` | Entry point HTML for Vite React 19 SPA | Served statically by Express in production mode | Ignored via `.gitignore` |
+| `dist/assets/*` | Bundled JavaScript, CSS, and image assets | Served with static cache headers by Express | Ignored via `.gitignore` |
+| `dist-server/server.js` | Compiled standalone Node.js Express server bundle | Executed directly by `npm start` (`node dist-server/server.js`) | Ignored via `.gitignore` |
+
+> **NOTE**: Generated build output directories (`dist/` and `dist-server/`) are built locally during `npm run build` and are strictly excluded from git tracking. Clean production verification deletes existing build directories prior to running `npm run build`. Live production startup is verified by spawning `npm start` with `NODE_ENV=production` and querying `GET /healthz`.
 
 ---
 
@@ -146,7 +148,8 @@ An Express 4-arity error handling middleware catches unhandled exceptions across
 | `NODE_ENV` | Yes | `development` | Set to `production` for production builds and runtime. |
 | `PORT` | No | `3000` | HTTP listening port. |
 | `HMAC_SECRET` | Yes (in prod) | None | Fail-closed secret key for generating and verifying cryptographic hashes. |
-| `FIREBASE_PROJECT_ID` | Yes | `ai-studio-cmddigitalcommer-8d70f45b-1636-42ba-9e2d-f063a7b0e086` | Firebase project identifier. |
+
+> **NOTE**: The Firebase project ID (`ai-studio-cmddigitalcommer-8d70f45b-1636-42ba-9e2d-f063a7b0e086`) is hard-coded in `server.ts` initialization per the current project architecture; `FIREBASE_PROJECT_ID` is not consumed as an environment variable.
 
 ---
 
