@@ -722,6 +722,7 @@ export interface InventoryItemRecord {
   transitStock: number;
   safetyStock: number;
   reorderPoint: number;
+  leadTimeDays: number;
   lastAdjustmentAt?: string;
   updatedAt: string;
 }
@@ -856,6 +857,7 @@ export function computeAggregateInventoryFromBatches(params: {
   transitStock?: number;
   safetyStock?: number;
   reorderPoint?: number;
+  leadTimeDays?: number;
   lastAdjustmentAt?: string;
 }): InventoryItemRecord {
   const {
@@ -865,6 +867,7 @@ export function computeAggregateInventoryFromBatches(params: {
     transitStock = 0,
     safetyStock = 20,
     reorderPoint = 30,
+    leadTimeDays = 3,
     lastAdjustmentAt,
   } = params;
 
@@ -889,6 +892,7 @@ export function computeAggregateInventoryFromBatches(params: {
     transitStock,
     safetyStock,
     reorderPoint,
+    leadTimeDays,
     lastAdjustmentAt: lastAdjustmentAt || new Date().toISOString(),
     updatedAt: new Date().toISOString(),
   };
@@ -4554,6 +4558,155 @@ export function createExpressApp(deps: ServerDependencies = {}): Express {
         return;
       }
       res.status(500).json({ error: `Transfer cancellation failed: ${err.message}` });
+    }
+  });
+
+  // --- PHASE 7 MILESTONE 5: Supply Chain Forecasting & Edge Cases ---
+
+  /**
+   * GET /api/inventory/forecasting/:branchId/:skuId
+   * Computes sales velocity, Days of Stock (DOS), and Reorder Point (ROP).
+   */
+  app.get('/api/inventory/forecasting/:branchId/:skuId', async (req: Request, res: Response): Promise<void> => {
+    const user = await requireAuth(req, res);
+    if (!user) return;
+
+    const { branchId, skuId } = req.params;
+    const normalizedBranch = (String(branchId) || '').toLowerCase().trim();
+
+    // RBAC check
+    if (user.role !== 'branch_manager' && user.role !== 'regional_director' && user.role !== 'super_admin') {
+      res.status(403).json({ error: 'Access Denied: Forecasting requires authorized staff role.' });
+      return;
+    }
+
+    if (user.role === 'branch_manager' && (String(user.assignedBranchId || '')).toLowerCase().trim() !== normalizedBranch) {
+      res.status(403).json({ error: 'Access Denied: Branch managers can only view forecasting for their assigned branch.' });
+      return;
+    }
+
+    try {
+      const now = new Date();
+      const thirtyDaysAgo = new Date(now.getTime() - 30 * 24 * 60 * 60 * 1000);
+      const thirtyDaysAgoIso = thirtyDaysAgo.toISOString();
+
+      // 1. Fetch current inventory aggregate
+      const invRef = db.collection('inventory').doc(`${normalizedBranch}_${skuId}`);
+      const invSnap = await invRef.get();
+      if (!invSnap.exists) {
+        res.status(404).json({ error: `Inventory record not found for branch ${normalizedBranch} and SKU ${skuId}.` });
+        return;
+      }
+      const invData = invSnap.data() as InventoryItemRecord;
+
+      // 2. Calculate Sales Velocity (Vs) from completed/fulfilled orders
+      const ordersSnap = await db.collection('orders')
+        .where('branchId', '==', normalizedBranch)
+        .where('fulfillmentStatus', '==', 'fulfilled')
+        .where('fulfilledAt', '>=', thirtyDaysAgoIso)
+        .get();
+
+      let totalUnitsSold = 0;
+      if (!ordersSnap.empty) {
+        ordersSnap.forEach((doc: any) => {
+          const order = doc.data();
+          // Exclude cancelled/refunded
+          if (order.status === 'cancelled' || order.status === 'refunded') return;
+
+          const items = order.items || [];
+          for (const item of items) {
+            if (item.skuId === skuId) {
+              totalUnitsSold += Number(item.quantity) || 0;
+            }
+          }
+        });
+      }
+
+      // 3. Stockout adjustment
+      // Deriving stockout days from audit logs by checking periods where stock was 0
+      const logsSnap = await db.collection('audit_logs')
+        .where('branchId', '==', normalizedBranch)
+        .where('targetResource', '==', 'inventory')
+        .get();
+
+      let stockoutDays = 0;
+      const relevantLogs = logsSnap.docs
+        .map((d: any) => d.data())
+        .filter((l: any) => {
+          const meta = typeof l.metadata === 'string' ? JSON.parse(l.metadata) : (l.metadata || {});
+          return meta.skuId === skuId && l.timestamp >= thirtyDaysAgoIso;
+        })
+        .sort((a: any, b: any) => a.timestamp.localeCompare(b.timestamp));
+
+      if (relevantLogs.length > 0) {
+        let lastTimestamp = thirtyDaysAgo;
+        let lastStock = -1; // Unknown initial state within window
+
+        for (const log of relevantLogs) {
+          const meta = typeof log.metadata === 'string' ? JSON.parse(log.metadata) : (log.metadata || {});
+          const currentLogTime = new Date(log.timestamp);
+          const currentStock = Number(meta.newAvailableStock);
+
+          if (lastStock === 0) {
+            const diffMs = currentLogTime.getTime() - lastTimestamp.getTime();
+            stockoutDays += diffMs / (1000 * 60 * 60 * 24);
+          }
+          lastTimestamp = currentLogTime;
+          lastStock = currentStock;
+        }
+
+        // If current state is 0, add remaining time
+        if (lastStock === 0) {
+          const diffMs = now.getTime() - lastTimestamp.getTime();
+          stockoutDays += diffMs / (1000 * 60 * 60 * 24);
+        }
+      } else if (invData.activeStock === 0) {
+        // No logs but currently 0, assume it was 0 for the whole window if it's never been stocked
+        stockoutDays = 30;
+      }
+
+      stockoutDays = Math.min(29, Math.max(0, stockoutDays)); // Max 29 to keep denominator at least 1
+      const velocityDenominator = 30 - stockoutDays;
+      const salesVelocity = totalUnitsSold / velocityDenominator;
+
+      // 4. Days of Stock (DOS)
+      const daysOfStock = salesVelocity > 0 ? invData.activeStock / salesVelocity : null;
+
+      // 5. Dynamic Reorder Point (ROP)
+      // ROP = ceil((Vs * LeadTimeDays) + SafetyStock)
+      const leadTime = invData.leadTimeDays || 3;
+      const safetyStock = invData.safetyStock || 20;
+      const reorderPoint = Math.ceil((salesVelocity * leadTime) + safetyStock);
+
+      const forecast = {
+        branchId: normalizedBranch,
+        skuId,
+        currentStock: invData.activeStock,
+        salesVelocity: Number(salesVelocity.toFixed(4)),
+        totalUnitsSold,
+        stockoutDays: Number(stockoutDays.toFixed(2)),
+        daysOfStock: daysOfStock !== null ? Number(daysOfStock.toFixed(2)) : null,
+        reorderPoint,
+        leadTimeDays: leadTime,
+        safetyStock: safetyStock,
+        generatedAt: now.toISOString(),
+      };
+
+      await logAuditEvent(
+        user.uid,
+        user.role,
+        normalizedBranch,
+        'forecasting_generated',
+        'inventory',
+        `${normalizedBranch}_${skuId}`,
+        true,
+        forecast,
+        req
+      );
+
+      res.status(200).json({ success: true, forecast });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
     }
   });
 
