@@ -379,8 +379,17 @@ async function runMilestone25TestSuite() {
 
     // 4. Insufficient stock creates no order and no stock mutation
     const orderCountBeforeInsuff = ordersStore.size;
-    const targetBatchRef = bbStore.get('daet_batch-2026-09b');
-    const availBeforeInsuff = targetBatchRef ? targetBatchRef.availableQuantity : 0;
+
+    const capturedBatches: Array<{ id: string; availableQuantity: number; reservedQuantity: number }> = [];
+    for (const [key, val] of bbStore.entries()) {
+      if (val.branchId === 'daet' && val.skuId === 'hci-cmd-65ml') {
+        capturedBatches.push({
+          id: val.id || key,
+          availableQuantity: Number(val.availableQuantity) || 0,
+          reservedQuantity: Number(val.reservedQuantity) || 0,
+        });
+      }
+    }
 
     const checkoutInsuff = await makeRequest(
       server,
@@ -395,12 +404,32 @@ async function runMilestone25TestSuite() {
     );
 
     const orderCountAfterInsuff = ordersStore.size;
-    const availAfterInsuff = targetBatchRef ? targetBatchRef.availableQuantity : 0;
+
+    let batchesUnchanged = true;
+    let noNegativeStock = true;
+
+    for (const cap of capturedBatches) {
+      const current = bbStore.get(cap.id);
+      if (!current) {
+        batchesUnchanged = false;
+        break;
+      }
+      const currAvail = Number(current.availableQuantity) || 0;
+      const currRes = Number(current.reservedQuantity) || 0;
+
+      if (currAvail !== cap.availableQuantity || currRes !== cap.reservedQuantity) {
+        batchesUnchanged = false;
+      }
+      if (currAvail < 0 || currRes < 0) {
+        noNegativeStock = false;
+      }
+    }
 
     assert(
       checkoutInsuff.status === 400 &&
       orderCountAfterInsuff === orderCountBeforeInsuff &&
-      availAfterInsuff === availBeforeInsuff,
+      batchesUnchanged &&
+      noNegativeStock,
       '4. Insufficient stock creates no order and causes zero stock mutation'
     );
 
