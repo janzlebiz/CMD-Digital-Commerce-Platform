@@ -310,6 +310,7 @@
         "creditLimit": { "type": "number", "minimum": 0 },
         "outstandingBalance": { "type": "number", "minimum": 0 },
         "availableCredit": { "type": "number", "minimum": 0 },
+        "authorizedCustomerUid": { "type": "string" },
         "createdAt": { "type": "string", "format": "date-time" },
         "updatedAt": { "type": "string", "format": "date-time" }
       },

@@ -798,6 +798,7 @@ export interface B2BStockistProfile {
   creditLimit: number;
   outstandingBalance: number;
   availableCredit: number;
+  authorizedCustomerUid?: string;
   createdAt: string;
   updatedAt: string;
 }
@@ -4929,6 +4930,7 @@ export function createExpressApp(deps: ServerDependencies = {}): Express {
       depositAmount = 0,
       creditMultiplier = 2.0,
       customCreditLimit,
+      authorizedCustomerUid,
     } = req.body;
 
     if (!businessName || typeof businessName !== 'string') {
@@ -4974,46 +4976,56 @@ export function createExpressApp(deps: ServerDependencies = {}): Express {
     const strStockistId = stockistId || `STK-${normalizedBranch.toUpperCase()}-${crypto.randomBytes(3).toString('hex').toUpperCase()}`;
     const nowIso = new Date().toISOString();
 
-    const stockistProfile: B2BStockistProfile = {
-      id: strStockistId,
-      businessName: businessName.trim(),
-      contactEmail: (contactEmail || '').trim(),
-      contactPhone: (contactPhone || '').trim(),
-      branchId: normalizedBranch,
-      tier: assignedTier,
-      status: 'active',
-      depositBalance: creditCalculations.depositBalance,
-      creditMultiplier: creditCalculations.creditMultiplier,
-      creditLimit: creditCalculations.creditLimit,
-      outstandingBalance: 0,
-      availableCredit: creditCalculations.availableCredit,
-      createdAt: nowIso,
-      updatedAt: nowIso,
-    };
+    const stockistRef = db.collection('b2b_stockists').doc(strStockistId);
+    let stockistProfile: B2BStockistProfile = {} as any;
+    let initialLedgerEntry: B2BConsignmentLedgerEntry | null = null;
 
     try {
-      const stockistRef = db.collection('b2b_stockists').doc(strStockistId);
-      await stockistRef.set(stockistProfile);
+      await db.runTransaction(async (transaction: any) => {
+        const existingSnap = await transaction.get(stockistRef);
+        if (existingSnap.exists) {
+          throw new Error(`Stockist ${strStockistId} already exists.`);
+        }
 
-      let initialLedgerEntry: B2BConsignmentLedgerEntry | null = null;
-      if (numDeposit > 0) {
-        const ledgerId = `LEDGER-DEP-${Date.now()}-${crypto.randomBytes(2).toString('hex').toUpperCase()}`;
-        initialLedgerEntry = {
-          id: ledgerId,
-          stockistId: strStockistId,
+        stockistProfile = {
+          id: strStockistId,
+          businessName: businessName.trim(),
+          contactEmail: (contactEmail || '').trim(),
+          contactPhone: (contactPhone || '').trim(),
           branchId: normalizedBranch,
-          type: 'deposit',
-          amount: numDeposit,
-          previousDeposit: 0,
-          depositAfter: numDeposit,
-          previousOutstanding: 0,
-          outstandingAfter: 0,
-          notes: 'Initial security deposit on registration',
-          timestamp: nowIso,
-          performedBy: user.uid,
+          tier: assignedTier,
+          status: 'active',
+          depositBalance: creditCalculations.depositBalance,
+          creditMultiplier: creditCalculations.creditMultiplier,
+          creditLimit: creditCalculations.creditLimit,
+          outstandingBalance: 0,
+          availableCredit: creditCalculations.availableCredit,
+          authorizedCustomerUid: authorizedCustomerUid ? authorizedCustomerUid.trim() : undefined,
+          createdAt: nowIso,
+          updatedAt: nowIso,
         };
-        await db.collection('b2b_ledger').doc(ledgerId).set(initialLedgerEntry);
-      }
+        transaction.set(stockistRef, stockistProfile);
+
+        if (numDeposit > 0) {
+          const ledgerId = `LEDGER-DEP-${Date.now()}-${crypto.randomBytes(2).toString('hex').toUpperCase()}`;
+          initialLedgerEntry = {
+            id: ledgerId,
+            stockistId: strStockistId,
+            branchId: normalizedBranch,
+            type: 'deposit',
+            amount: numDeposit,
+            previousDeposit: 0,
+            depositAfter: numDeposit,
+            previousOutstanding: 0,
+            outstandingAfter: 0,
+            notes: 'Initial security deposit on registration',
+            timestamp: nowIso,
+            performedBy: user.uid,
+          };
+          const ledgerRef = db.collection('b2b_ledger').doc(ledgerId);
+          transaction.set(ledgerRef, initialLedgerEntry);
+        }
+      });
 
       await logAuditEvent(
         user.uid,
@@ -5101,70 +5113,63 @@ export function createExpressApp(deps: ServerDependencies = {}): Express {
       return;
     }
 
+    const stockistRef = db.collection('b2b_stockists').doc(strStockistId);
+    let updatedProfile: B2BStockistProfile = {} as any;
+    let ledgerEntry: B2BConsignmentLedgerEntry = {} as any;
+    let normalizedBranch = '';
+
     try {
-      const stockistRef = db.collection('b2b_stockists').doc(strStockistId);
-      const stockistSnap = await stockistRef.get();
-      if (!stockistSnap.exists) {
-        res.status(404).json({ error: `Stockist not found: ${strStockistId}` });
-        return;
-      }
-
-      const stockist = stockistSnap.data() as B2BStockistProfile;
-      const normalizedBranch = (stockist.branchId || 'daet').toLowerCase().trim();
-
-      if (user.role === 'branch_manager') {
-        const assigned = (user.assignedBranchId || 'daet').toLowerCase().trim();
-        if (normalizedBranch !== assigned) {
-          await logAuditEvent(
-            user.uid,
-            user.role,
-            normalizedBranch,
-            'unauthorized_cross_branch_b2b_access_blocked',
-            'b2b_stockists',
-            strStockistId,
-            false,
-            { targetBranch: normalizedBranch, assignedBranch: assigned },
-            req
-          );
-          res.status(403).json({ error: 'Access Denied: Branch managers cannot update deposits for other branches.' });
-          return;
+      await db.runTransaction(async (transaction: any) => {
+        const stockistSnap = await transaction.get(stockistRef);
+        if (!stockistSnap.exists) {
+          throw new Error(`Stockist not found: ${strStockistId}`);
         }
-      }
 
-      const nowIso = new Date().toISOString();
-      const prevDeposit = Number(stockist.depositBalance) || 0;
-      const newDeposit = prevDeposit + numAmount;
-      const mult = Number(stockist.creditMultiplier) || 2.0;
-      const newCreditLimit = newDeposit * mult;
-      const currentOutstanding = Number(stockist.outstandingBalance) || 0;
-      const newAvailableCredit = Math.max(0, newCreditLimit - currentOutstanding);
+        const stockist = stockistSnap.data() as B2BStockistProfile;
+        normalizedBranch = (stockist.branchId || 'daet').toLowerCase().trim();
 
-      const updatedProfile: B2BStockistProfile = {
-        ...stockist,
-        depositBalance: newDeposit,
-        creditLimit: newCreditLimit,
-        availableCredit: newAvailableCredit,
-        updatedAt: nowIso,
-      };
+        if (user.role === 'branch_manager') {
+          const assigned = (user.assignedBranchId || 'daet').toLowerCase().trim();
+          if (normalizedBranch !== assigned) {
+            throw new Error('Access Denied: Branch managers cannot update deposits for other branches.');
+          }
+        }
 
-      await stockistRef.set(updatedProfile);
+        const nowIso = new Date().toISOString();
+        const prevDeposit = Number(stockist.depositBalance) || 0;
+        const newDeposit = prevDeposit + numAmount;
+        const mult = Number(stockist.creditMultiplier) || 2.0;
+        const newCreditLimit = newDeposit * mult;
+        const currentOutstanding = Number(stockist.outstandingBalance) || 0;
+        const newAvailableCredit = Math.max(0, newCreditLimit - currentOutstanding);
 
-      const ledgerId = `LEDGER-DEP-${Date.now()}-${crypto.randomBytes(2).toString('hex').toUpperCase()}`;
-      const ledgerEntry: B2BConsignmentLedgerEntry = {
-        id: ledgerId,
-        stockistId: strStockistId,
-        branchId: normalizedBranch,
-        type: 'deposit',
-        amount: numAmount,
-        previousDeposit: prevDeposit,
-        depositAfter: newDeposit,
-        previousOutstanding: currentOutstanding,
-        outstandingAfter: currentOutstanding,
-        notes: notes || 'Security deposit balance addition',
-        timestamp: nowIso,
-        performedBy: user.uid,
-      };
-      await db.collection('b2b_ledger').doc(ledgerId).set(ledgerEntry);
+        updatedProfile = {
+          ...stockist,
+          depositBalance: newDeposit,
+          creditLimit: newCreditLimit,
+          availableCredit: newAvailableCredit,
+          updatedAt: nowIso,
+        };
+        transaction.set(stockistRef, updatedProfile);
+
+        const ledgerId = `LEDGER-DEP-${Date.now()}-${crypto.randomBytes(2).toString('hex').toUpperCase()}`;
+        ledgerEntry = {
+          id: ledgerId,
+          stockistId: strStockistId,
+          branchId: normalizedBranch,
+          type: 'deposit',
+          amount: numAmount,
+          previousDeposit: prevDeposit,
+          depositAfter: newDeposit,
+          previousOutstanding: currentOutstanding,
+          outstandingAfter: currentOutstanding,
+          notes: notes || 'Security deposit balance addition',
+          timestamp: nowIso,
+          performedBy: user.uid,
+        };
+        const ledgerRef = db.collection('b2b_ledger').doc(ledgerId);
+        transaction.set(ledgerRef, ledgerEntry);
+      });
 
       await logAuditEvent(
         user.uid,
@@ -5174,7 +5179,7 @@ export function createExpressApp(deps: ServerDependencies = {}): Express {
         'b2b_stockists',
         strStockistId,
         true,
-        { amount: numAmount, newDeposit, newCreditLimit },
+        { amount: numAmount, newDeposit: updatedProfile.depositBalance, newCreditLimit: updatedProfile.creditLimit },
         req
       );
 
@@ -5204,63 +5209,67 @@ export function createExpressApp(deps: ServerDependencies = {}): Express {
       return;
     }
 
+    const stockistRef = db.collection('b2b_stockists').doc(strStockistId);
+    let updatedProfile: B2BStockistProfile = {} as any;
+    let ledgerEntry: B2BConsignmentLedgerEntry = {} as any;
+    let normalizedBranch = '';
+
     try {
-      const stockistRef = db.collection('b2b_stockists').doc(strStockistId);
-      const stockistSnap = await stockistRef.get();
-      if (!stockistSnap.exists) {
-        res.status(404).json({ error: `Stockist not found: ${strStockistId}` });
-        return;
-      }
-
-      const stockist = stockistSnap.data() as B2BStockistProfile;
-      const normalizedBranch = (stockist.branchId || 'daet').toLowerCase().trim();
-
-      if (user.role === 'branch_manager') {
-        const assigned = (user.assignedBranchId || 'daet').toLowerCase().trim();
-        if (normalizedBranch !== assigned) {
-          res.status(403).json({ error: 'Access Denied: Branch managers cannot record payments for other branches.' });
-          return;
+      await db.runTransaction(async (transaction: any) => {
+        const stockistSnap = await transaction.get(stockistRef);
+        if (!stockistSnap.exists) {
+          throw new Error(`Stockist not found: ${strStockistId}`);
         }
-      }
 
-      const nowIso = new Date().toISOString();
-      const prevOutstanding = Number(stockist.outstandingBalance) || 0;
-      const newOutstanding = Math.max(0, prevOutstanding - numAmount);
-      const creditLimit = Number(stockist.creditLimit) || 0;
-      const newAvailableCredit = Math.max(0, creditLimit - newOutstanding);
+        const stockist = stockistSnap.data() as B2BStockistProfile;
+        normalizedBranch = (stockist.branchId || 'daet').toLowerCase().trim();
 
-      // Auto-unlock if outstanding is back under credit limit and was locked
-      let newStatus = stockist.status;
-      if (newStatus === 'locked' && newOutstanding <= creditLimit) {
-        newStatus = 'active';
-      }
+        if (user.role === 'branch_manager') {
+          const assigned = (user.assignedBranchId || 'daet').toLowerCase().trim();
+          if (normalizedBranch !== assigned) {
+            throw new Error('Access Denied: Branch managers cannot record payments for other branches.');
+          }
+        }
 
-      const updatedProfile: B2BStockistProfile = {
-        ...stockist,
-        outstandingBalance: newOutstanding,
-        availableCredit: newAvailableCredit,
-        status: newStatus,
-        updatedAt: nowIso,
-      };
+        const nowIso = new Date().toISOString();
+        const prevOutstanding = Number(stockist.outstandingBalance) || 0;
+        const newOutstanding = Math.max(0, prevOutstanding - numAmount);
+        const creditLimit = Number(stockist.creditLimit) || 0;
+        const newAvailableCredit = Math.max(0, creditLimit - newOutstanding);
 
-      await stockistRef.set(updatedProfile);
+        // Auto-unlock if outstanding is back under credit limit and was locked
+        let newStatus = stockist.status;
+        if (newStatus === 'locked' && newOutstanding <= creditLimit) {
+          newStatus = 'active';
+        }
 
-      const ledgerId = `LEDGER-PMT-${Date.now()}-${crypto.randomBytes(2).toString('hex').toUpperCase()}`;
-      const ledgerEntry: B2BConsignmentLedgerEntry = {
-        id: ledgerId,
-        stockistId: strStockistId,
-        branchId: normalizedBranch,
-        type: 'payment_credit',
-        amount: numAmount,
-        previousDeposit: stockist.depositBalance,
-        depositAfter: stockist.depositBalance,
-        previousOutstanding: prevOutstanding,
-        outstandingAfter: newOutstanding,
-        notes: notes || 'Consignment payment credit',
-        timestamp: nowIso,
-        performedBy: user.uid,
-      };
-      await db.collection('b2b_ledger').doc(ledgerId).set(ledgerEntry);
+        updatedProfile = {
+          ...stockist,
+          outstandingBalance: newOutstanding,
+          availableCredit: newAvailableCredit,
+          status: newStatus,
+          updatedAt: nowIso,
+        };
+        transaction.set(stockistRef, updatedProfile);
+
+        const ledgerId = `LEDGER-PMT-${Date.now()}-${crypto.randomBytes(2).toString('hex').toUpperCase()}`;
+        ledgerEntry = {
+          id: ledgerId,
+          stockistId: strStockistId,
+          branchId: normalizedBranch,
+          type: 'payment_credit',
+          amount: numAmount,
+          previousDeposit: stockist.depositBalance,
+          depositAfter: stockist.depositBalance,
+          previousOutstanding: prevOutstanding,
+          outstandingAfter: newOutstanding,
+          notes: notes || 'Consignment payment credit',
+          timestamp: nowIso,
+          performedBy: user.uid,
+        };
+        const ledgerRef = db.collection('b2b_ledger').doc(ledgerId);
+        transaction.set(ledgerRef, ledgerEntry);
+      });
 
       await logAuditEvent(
         user.uid,
@@ -5270,7 +5279,7 @@ export function createExpressApp(deps: ServerDependencies = {}): Express {
         'b2b_stockists',
         strStockistId,
         true,
-        { amount: numAmount, prevOutstanding, newOutstanding },
+        { amount: numAmount, newOutstanding: updatedProfile.outstandingBalance },
         req
       );
 
@@ -5403,6 +5412,24 @@ export function createExpressApp(deps: ServerDependencies = {}): Express {
             req
           );
           res.status(403).json({ error: 'Access Denied: Branch managers cannot place orders for other branches.' });
+          return;
+        }
+      }
+
+      if (user.role === 'customer') {
+        if (!stockist.authorizedCustomerUid || stockist.authorizedCustomerUid !== user.uid) {
+          await logAuditEvent(
+            user.uid,
+            user.role,
+            normalizedBranch,
+            'b2b_order_unauthorized_customer_blocked',
+            'b2b_stockists',
+            strStockistId,
+            false,
+            { authorizedCustomerUid: stockist.authorizedCustomerUid, requestUid: user.uid },
+            req
+          );
+          res.status(403).json({ error: 'Access Denied: Customer is not authorized for this stockist profile.' });
           return;
         }
       }

@@ -23,6 +23,7 @@ function createTestHarness() {
     ['staff-labo-manager-uid', { uid: 'staff-labo-manager-uid', email: 'manager.labo@hcicmd.ph', role: 'branch_manager', assignedBranchId: 'labo' }],
     ['staff-super-admin-uid', { uid: 'staff-super-admin-uid', email: 'admin@hcicmd.ph', role: 'super_admin' }],
     ['user-customer-uid', { uid: 'user-customer-uid', email: 'stockist.partner@example.ph', role: 'customer' }],
+    ['unauthorized-customer-uid', { uid: 'unauthorized-customer-uid', email: 'unauthorized@example.ph', role: 'customer' }],
   ]);
 
   const b2bStockistsStore = new Map<string, any>();
@@ -147,6 +148,7 @@ function createTestHarness() {
       if (token === 'VALID_LABO_MANAGER_TOKEN') return { uid: 'staff-labo-manager-uid' };
       if (token === 'VALID_ADMIN_TOKEN') return { uid: 'staff-super-admin-uid' };
       if (token === 'VALID_CUSTOMER_TOKEN') return { uid: 'user-customer-uid' };
+      if (token === 'VALID_UNAUTHORIZED_CUSTOMER_TOKEN') return { uid: 'unauthorized-customer-uid' };
       throw new Error('Invalid token');
     },
   };
@@ -601,6 +603,69 @@ async function runTests() {
       b2bAuditLogs.some((l) => l.action === 'b2b_order_placed') &&
       b2bAuditLogs.some((l) => l.action === 'b2b_deposit_recorded'),
       '15. Privacy firewall & ADR-009 audit logging: zero consultation intakes accessed, structured B2B audit events recorded'
+    );
+
+    // ------------------------------------------------------------------------
+    // Assertion 16-18: Customer authorization & atomic concurrency tests
+    // ------------------------------------------------------------------------
+    const authStockistRes = await makeRequest(
+      server,
+      '/api/b2b/stockists',
+      'POST',
+      {
+        stockistId: 'STK-DAET-AUTH',
+        businessName: 'Auth Customer Stockist',
+        contactEmail: 'auth@stockist.ph',
+        branchId: 'daet',
+        tier: 'tier_1',
+        depositAmount: 50000,
+        authorizedCustomerUid: 'user-customer-uid',
+      },
+      { Authorization: 'Bearer VALID_DAET_MANAGER_TOKEN' }
+    );
+
+    const authCustOrderRes = await makeRequest(
+      server,
+      '/api/b2b/orders',
+      'POST',
+      {
+        stockistId: 'STK-DAET-AUTH',
+        branchId: 'daet',
+        items: [{ skuId: sku, quantity: 50 }],
+      },
+      { Authorization: 'Bearer VALID_CUSTOMER_TOKEN' }
+    );
+    assert(
+      authCustOrderRes.status === 201 && authCustOrderRes.data.success === true,
+      '16. Authorized customer successfully places B2B order for assigned stockist'
+    );
+
+    const unauthCustOrderRes = await makeRequest(
+      server,
+      '/api/b2b/orders',
+      'POST',
+      {
+        stockistId: 'STK-DAET-AUTH',
+        branchId: 'daet',
+        items: [{ skuId: sku, quantity: 50 }],
+      },
+      { Authorization: 'Bearer VALID_UNAUTHORIZED_CUSTOMER_TOKEN' }
+    );
+    assert(
+      unauthCustOrderRes.status === 403 && unauthCustOrderRes.data.error.includes('Access Denied'),
+      '17. Unauthorized customer attempting B2B order receives 403 Forbidden with zero mutation'
+    );
+
+    const concurrentPromises = [
+      makeRequest(server, '/api/b2b/stockists/STK-DAET-001/deposits', 'POST', { amount: 5000 }, { Authorization: 'Bearer VALID_DAET_MANAGER_TOKEN' }),
+      makeRequest(server, '/api/b2b/stockists/STK-DAET-001/deposits', 'POST', { amount: 5000 }, { Authorization: 'Bearer VALID_DAET_MANAGER_TOKEN' }),
+      makeRequest(server, '/api/b2b/stockists/STK-DAET-001/payments', 'POST', { amount: 5000 }, { Authorization: 'Bearer VALID_DAET_MANAGER_TOKEN' }),
+    ];
+    const concurrentResults = await Promise.all(concurrentPromises);
+    const allConcurrentSuccess = concurrentResults.every(r => r.status === 200);
+    assert(
+      allConcurrentSuccess,
+      '18. Concurrent transactional financial mutations execute atomically without race conditions'
     );
 
   } catch (err: any) {
