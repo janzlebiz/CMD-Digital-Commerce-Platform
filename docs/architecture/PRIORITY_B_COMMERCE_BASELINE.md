@@ -6,7 +6,7 @@ This document defines the authoritative e-commerce, checkout architecture, provi
 
 ---
 
-## 2. Authoritative Server-Side Checkout Flow
+## 2. Authoritative Server-Side Checkout Flow & Idempotency
 
 To eliminate local client-state order creation risks and enforce strict price and inventory integrity, customer order placement is consolidated on the authoritative server endpoint:
 
@@ -21,15 +21,34 @@ To eliminate local client-state order creation risks and enforce strict price an
    - Detection and reservation occur atomically inside a Firestore transaction.
    - Retries or concurrent duplicate submissions return the original order payload without creating duplicate order documents or reserving stock twice.
 3. **Delivery Fee Calculation**: Shipping fees are generated via the `DeliveryProvider` abstraction (PHP 0 for `branch_pickup`, PHP 150 for `door_to_door`).
-4. **FEFO Inventory Reservation**: Atomic batch stock allocation and FEFO reservation are executed inside a Firestore database transaction on `branch_batch_inventory`.
-5. **Payment Intent Creation**: Generates a server-side `PaymentIntent` via the `PaymentProvider` abstraction.
+4. **Transaction Boundary & Side-Effect Separation**:
+   - External payment intent creation (`paymentAdapter.createPaymentIntent`) and delivery quote/fulfillment creation are executed outside/prior to the Firestore transaction using deterministic idempotency references.
+   - Inside `db.runTransaction()`, FEFO inventory reservation on `branch_batch_inventory` and atomic order document creation occur.
+   - If the transaction retries or a duplicate request occurs, no duplicate external payment intents or inventory allocations are created.
+5. **FEFO Inventory Reservation**: Atomic batch stock allocation and FEFO reservation are executed inside a Firestore database transaction on `branch_batch_inventory`.
 6. **Fulfillment Record Creation**: Generates a server-side `DeliveryFulfillment` record with tracking reference.
 
 ---
 
-## 3. Payment Provider Abstraction Layer
+## 3. Production Authentication & Fail-Closed Rules
+
+Production customer operations must require a valid Firebase ID token acquired via `user.getIdToken()`:
+
+1. **Production Token Requirement**:
+   - In production environments (`PROD`), customer operations (checkout, order cancellation, viewing my orders) require a valid Firebase ID token.
+   - If no authenticated user exists or token acquisition fails, the client hook (`useEcommerce`) rejects the operation immediately.
+2. **Demo Authentication Isolation**:
+   - Demo token authentication (`DEMO_TOKEN_customer`) is strictly isolated behind development/test/preview flags (`NODE_ENV !== 'production'`) and cannot activate in production.
+   - Unauthenticated production client requests fail closed and cannot access customer commerce endpoints.
+
+---
+
+## 4. Payment Provider Abstraction Layer & Side-Effect Boundary
 
 The platform defines a provider-neutral payment abstraction interface so that production payment gateways (e.g. Stripe, PayMongo, GCash) can be plugged in without changing domain or order logic.
+
+### Side-Effect Boundary Rule
+No payment provider methods that create external side effects (e.g. `createPaymentIntent` or `processRefund`) are called inside a retryable `db.runTransaction()`. Firestore transactions establish the authoritative order and payment state, and provider calls execute with provider-safe, deterministic idempotency references (`idempotencyKey` / `orderId`).
 
 ### Abstraction Interfaces & Types
 ```ts
@@ -64,19 +83,32 @@ export interface PaymentIntent {
 
 export interface PaymentProvider {
   providerType: PaymentProviderType;
-  createPaymentIntent(orderId: string, amount: number, paymentMethod: string, metadata?: Record<string, any>): Promise<PaymentIntent>;
+  createPaymentIntent(orderId: string, amount: number, paymentMethod: string, metadata?: Record<string, any>, idempotencyKey?: string): Promise<PaymentIntent>;
   confirmPayment(paymentId: string, externalReference?: string): Promise<PaymentIntent>;
-  processRefund(paymentId: string, amount: number, reason: string): Promise<PaymentRefundResult>;
+  processRefund(paymentId: string, amount: number, reason: string, idempotencyKey?: string): Promise<PaymentRefundResult>;
 }
 ```
 
-### Adapters & Registry
-* **`SimulatedPaymentAdapter`**: Handles `cash_on_delivery` (`pending_payment`) and simulated digital wallets/cards (`paid`) without requiring external credentials.
-* **`PaymentAdapterRegistry`**: Factory pattern resolving the appropriate `PaymentProvider` adapter based on payment method.
+---
+
+## 5. Refund Operations & Balance Validation
+
+Order refunds (`POST /api/orders/:orderId/refund`) are hardened with transactional protection and strict balance validation:
+
+1. **Required Idempotency**: Requires a client-supplied or server-generated `idempotencyKey` (`x-idempotency-key` header or body). Duplicate refund submissions with the same key return the original refund result without issuing duplicate refunds (`idempotentReplay: true`).
+2. **Amount Validation**:
+   - Rejects refund amounts `<= 0` (`HTTP 400 Bad Request`).
+   - Rejects refund amounts exceeding the remaining refundable balance (`HTTP 400 Bad Request`).
+   - Rejects refund attempts on already fully refunded orders.
+3. **Authoritative Balance Tracking**:
+   - Order document maintains authoritative `refundedAmount` and `remainingRefundableBalance`.
+   - Partial refunds update `paymentStatus = 'partially_refunded'` and reduce `remainingRefundableBalance`.
+   - Full refunds update `paymentStatus = 'refunded'` and reduce `remainingRefundableBalance` to `0`.
+4. **Audit Logging**: Every refund event records structured audit details including `refundAmount`, `reason`, `idempotencyKey`, and `refundedBy`.
 
 ---
 
-## 4. Delivery & Shipping Abstraction Layer
+## 6. Delivery & Shipping Abstraction Layer
 
 The platform defines a provider-neutral delivery abstraction covering current Camarines Norte business delivery methods (`branch_pickup` and `door_to_door`).
 
@@ -118,12 +150,9 @@ export interface DeliveryProvider {
 }
 ```
 
-### Adapters
-* **`StandardDeliveryAdapter`**: Implements Camarines Norte regional pricing (PHP 0 for branch pickup, PHP 150 for local door-to-door delivery) and generates tracking references (`PICKUP-<orderId>` or `TRK-<orderId>`).
-
 ---
 
-## 5. Refund, Return, and Cancellation State Model
+## 7. Inventory Restoration Invariants & State Model
 
 Order lifecycle state transitions are enforced server-side with RBAC authorization and FEFO inventory conservation:
 
@@ -153,12 +182,13 @@ Order lifecycle state transitions are enforced server-side with RBAC authorizati
                              └────────────────┘
 ```
 
-### Endpoints & Workflow
+### Endpoints & Inventory Restoration Invariants
 1. **Order Cancellation (`POST /api/orders/:orderId/cancel`)**:
    - **Allowed States**: `pending_processing`, `ready_for_pickup`.
    - **Authorization**: Customer owner (if `pending_processing`), assigned branch manager, regional director, super admin.
-   - **Exact Inventory Restoration Invariant**: Decrements `reservedQuantity` and increments `availableQuantity` on the exact `branch_batch_inventory` records associated with the order's FEFO batch allocations. Recomputes aggregate `/inventory/{branchId_skuId}` (`activeStock = sum(availableQuantity)`). Transaction state check prevents duplicate inventory restoration on repeated cancellation attempts.
-   - **Action**: Issues refund via `PaymentProvider`, sets `fulfillmentStatus = 'cancelled'`, `paymentStatus = 'refunded'`.
+   - **Authoritative Inventory Model**: Restores inventory by decrementing `reservedQuantity` and incrementing `availableQuantity` on the specific `branch_batch_inventory` documents corresponding to the order's FEFO batch allocations. `product_batches.activeStock` is NOT used as authoritative branch stock.
+   - **Aggregate Invariant**: Recomputes aggregate `/inventory/{branchId_skuId}` where `activeStock = availableStock + reservedStock`.
+   - **Double-Restoration Protection**: Transactional state checks ensure that repeated cancellation requests on an already cancelled order are rejected (`HTTP 400 INVALID_ORDER_STATE_TRANSITION`) and cannot restore stock twice.
 2. **Return Request (`POST /api/orders/:orderId/return-request`)**:
    - **Allowed States**: `completed`. (Fails with HTTP 400 `INVALID_ORDER_STATE_TRANSITION` on uncompleted orders).
    - **Authorization**: Customer owner or admin roles.
@@ -166,23 +196,20 @@ Order lifecycle state transitions are enforced server-side with RBAC authorizati
 3. **Return Processing (`POST /api/orders/:orderId/return-process`)**:
    - **Allowed States**: `return_requested`.
    - **Authorization**: Staff roles (`branch_manager`, `regional_director`, `super_admin`).
-   - **Exact Inventory Restoration Invariant**: When `decision === 'approve'` and `restockInventory === true`, increments `availableQuantity` on the exact `branch_batch_inventory` records. Recomputes aggregate `/inventory/{branchId_skuId}`. Transaction state check prevents duplicate inventory restoration on repeated return processing attempts.
-   - **Action**: Decision `approve` sets `fulfillmentStatus = 'returned'`, `paymentStatus = 'refunded'`. Decision `reject` reverts status to `completed`.
-4. **Order Refund (`POST /api/orders/:orderId/refund`)**:
-   - **Allowed States**: `cancelled`, `returned`, `return_requested`.
-   - **Authorization**: Staff roles.
-   - **Action**: Processes refund through `PaymentProvider` and updates `paymentStatus = 'refunded'`.
+   - **Exact Inventory Restoration Invariant**: When `decision === 'approve'` and `restockInventory === true`, increments `availableQuantity` on the exact `branch_batch_inventory` records. Recomputes aggregate `/inventory/{branchId_skuId}`.
+   - **Double-Restoration Protection**: Transactional state checks ensure that repeated return processing attempts on an already returned order are rejected (`HTTP 400 INVALID_ORDER_STATE_TRANSITION`) and cannot restore stock twice.
 
 ### Client-Side State Model
 - Client-side React state in `useEcommerce` is strictly **advisory**.
 - Local state MUST NOT convert an order to `cancelled` or modify order state when server mutations fail.
-- All order mutations require valid Firebase ID tokens (or authenticated demo tokens in preview mode) and propagate server responses to caller hooks and UI.
+- On server failure, current order state is preserved, and error is raised to the UI.
 
 ---
 
-## 6. Future Third-Party Integrations (Out of Scope for Priority B)
+## 8. Future Third-Party Integrations (Out of Scope for Priority B)
 
 The following real third-party integrations are explicitly documented as **future work**:
 * Live Stripe / PayMongo / GCash gateway credentials and webhook receivers.
 * Live 3PL carrier logistics APIs (Lalamove, NinjaVan, J&T Express) for real-time tracking and dispatch.
 * Automated SMS / Email customer notification triggers for order state updates.
+

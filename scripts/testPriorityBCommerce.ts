@@ -504,6 +504,122 @@ async function runTests() {
     const branchBatchAfterDoubleReturn = store.branch_batch_inventory.get('daet_BAT-DAET-CMD65-01');
     assert(branchBatchAfterDoubleReturn.availableQuantity === branchBatchAfterReturn.availableQuantity, '48. Repeated return processing does NOT restore inventory twice');
 
+    // 15. Hardened Refund Operations & Balance Validation
+    // Create a new order3, fulfill it, and mark completed
+    const order3Res = await fetch(`http://127.0.0.1:${port}/api/orders/checkout`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${customerToken}`,
+        'x-idempotency-key': 'key_test_order3_303'
+      },
+      body: JSON.stringify({
+        ...checkoutPayload,
+        idempotencyKey: 'key_test_order3_303'
+      })
+    });
+    const order3Data: any = await order3Res.json();
+    const order3Id = order3Data.orderId;
+
+    await fetch(`http://127.0.0.1:${port}/api/orders/${order3Id}/fulfill`, {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${managerToken}` }
+    });
+    store.orders.get(order3Id).fulfillmentStatus = 'completed';
+
+    // 15a. Refund request missing idempotencyKey rejected with HTTP 400
+    const missingRefundKeyRes = await fetch(`http://127.0.0.1:${port}/api/orders/${order3Id}/refund`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${managerToken}`
+      },
+      body: JSON.stringify({ amount: 1000, reason: 'Partial refund' })
+    });
+    assert(missingRefundKeyRes.status === 400, '49. Refund request missing idempotencyKey rejected with HTTP 400 Bad Request');
+
+    // 15b. Invalid refund amount <= 0 rejected with HTTP 400
+    const invalidAmountRefundRes = await fetch(`http://127.0.0.1:${port}/api/orders/${order3Id}/refund`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${managerToken}`,
+        'x-idempotency-key': 'rfnd_key_invalid_0'
+      },
+      body: JSON.stringify({ amount: 0, reason: 'Zero refund' })
+    });
+    assert(invalidAmountRefundRes.status === 400, '50. Refund amount <= 0 rejected with HTTP 400 Bad Request');
+
+    // 15c. Partial refund (PHP 1,000 of PHP 2,550 order) succeeds and sets paymentStatus to partially_refunded
+    const partialRefundRes = await fetch(`http://127.0.0.1:${port}/api/orders/${order3Id}/refund`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${managerToken}`,
+        'x-idempotency-key': 'rfnd_key_partial_1'
+      },
+      body: JSON.stringify({ amount: 1000, reason: 'Partial damage compensation' })
+    });
+    const partialRefundData: any = await partialRefundRes.json();
+    assert(partialRefundRes.status === 200, '51. Authorized staff issues partial refund (HTTP 200)');
+    assert(partialRefundData.order.paymentStatus === 'partially_refunded', '52. Partial refund transitions paymentStatus to partially_refunded');
+    assert(partialRefundData.order.refundedAmount === 1000, '53. Order maintains authoritative refundedAmount (PHP 1,000)');
+    assert(partialRefundData.order.remainingRefundableBalance === 1550, '54. Order maintains authoritative remainingRefundableBalance (PHP 1,550)');
+
+    // 15d. Duplicate partial refund request with same idempotencyKey returns original result
+    const dupPartialRefundRes = await fetch(`http://127.0.0.1:${port}/api/orders/${order3Id}/refund`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${managerToken}`,
+        'x-idempotency-key': 'rfnd_key_partial_1'
+      },
+      body: JSON.stringify({ amount: 1000, reason: 'Partial damage compensation' })
+    });
+    const dupPartialData: any = await dupPartialRefundRes.json();
+    assert(dupPartialRefundRes.status === 200, '55. Duplicate refund request returns HTTP 200 OK');
+    assert(dupPartialData.idempotentReplay === true, '56. Duplicate refund request returns idempotentReplay indicator');
+    assert(dupPartialData.refund.refundId === partialRefundData.refund.refundId, '57. Duplicate refund request returns identical refundId (zero duplicate refunds)');
+
+    // 15e. Refund exceeding remaining balance (PHP 2,000 > PHP 1,550) is rejected with HTTP 400
+    const excessRefundRes = await fetch(`http://127.0.0.1:${port}/api/orders/${order3Id}/refund`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${managerToken}`,
+        'x-idempotency-key': 'rfnd_key_excess'
+      },
+      body: JSON.stringify({ amount: 2000, reason: 'Excessive refund' })
+    });
+    assert(excessRefundRes.status === 400, '58. Refund exceeding remaining refundable balance rejected with HTTP 400 Bad Request');
+
+    // 15f. Remaining balance refund (PHP 1,550) succeeds and sets paymentStatus to refunded
+    const remainingRefundRes = await fetch(`http://127.0.0.1:${port}/api/orders/${order3Id}/refund`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${managerToken}`,
+        'x-idempotency-key': 'rfnd_key_remaining_2'
+      },
+      body: JSON.stringify({ amount: 1550, reason: 'Full remaining refund' })
+    });
+    const remainingRefundData: any = await remainingRefundRes.json();
+    assert(remainingRefundRes.status === 200, '59. Remaining balance refund succeeds (HTTP 200)');
+    assert(remainingRefundData.order.paymentStatus === 'refunded', '60. Full balance refund transitions paymentStatus to refunded');
+    assert(remainingRefundData.order.remainingRefundableBalance === 0, '61. Remaining refundable balance reaches 0');
+
+    // 15g. Additional refund on fully refunded order rejected with HTTP 400
+    const fullyRefundedRes = await fetch(`http://127.0.0.1:${port}/api/orders/${order3Id}/refund`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${managerToken}`,
+        'x-idempotency-key': 'rfnd_key_after_full'
+      },
+      body: JSON.stringify({ amount: 100, reason: 'Attempt after full refund' })
+    });
+    assert(fullyRefundedRes.status === 400, '62. Refund attempt on fully refunded order rejected with HTTP 400 Bad Request');
+
   } finally {
     await new Promise<void>((resolve) => server.close(() => resolve()));
   }

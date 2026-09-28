@@ -47,11 +47,19 @@ export function useEcommerce() {
       try {
         const idToken = await user.getIdToken();
         if (idToken) return idToken;
-      } catch {
-        // Fall back if token refresh fails in preview
+      } catch (err: any) {
+        throw new Error(`Authentication token acquisition failed: ${err.message || 'Token error'}`);
       }
     }
-    return localStorage.getItem('demo_token') || 'DEMO_TOKEN_customer';
+
+    const isProduction = (import.meta as any).env?.PROD || process.env.NODE_ENV === 'production';
+    if (isProduction || !user) {
+      throw new Error('Authentication required: Unauthenticated requests are rejected.');
+    }
+
+    const demoToken = localStorage.getItem('demo_token');
+    if (demoToken) return demoToken;
+    return 'DEMO_TOKEN_customer';
   };
 
   const addToCart = (skuId: string, quantity: number = 1) => {

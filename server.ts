@@ -1923,6 +1923,29 @@ export function createExpressApp(deps: ServerDependencies = {}): Express {
       const deliveryQuote = await deliveryAdapter.calculateShippingFee(deliveryMethod || 'branch_pickup', normalizedBranch, customer?.shippingAddress);
       const shippingFee = deliveryQuote.shippingFee;
 
+      let subtotal = 0;
+      const computedItems: any[] = [];
+      for (const item of normalizedItems) {
+        const prod = PRODUCTS_CATALOG[item.skuId];
+        const qty = item.quantity;
+        const itemTotal = prod.price * qty;
+        subtotal += itemTotal;
+
+        computedItems.push({
+          skuId: item.skuId,
+          quantity: qty,
+          unitPrice: prod.price,
+          totalPrice: itemTotal,
+          productName: prod.name,
+        });
+      }
+      const grandTotal = subtotal + shippingFee;
+
+      // External payment & delivery provider side effects executed OUTSIDE Firestore transaction
+      const paymentAdapter = PaymentAdapterRegistry.getAdapter(paymentMethod || 'cash_on_delivery');
+      const paymentIntent = await paymentAdapter.createPaymentIntent(orderId, grandTotal, paymentMethod || 'cash_on_delivery', { customerEmail: customer?.email });
+      const fulfillment = await deliveryAdapter.createFulfillment(orderId, deliveryMethod || 'branch_pickup', normalizedBranch, customer?.shippingAddress);
+
       await db.runTransaction(async (transaction: any) => {
         const keyRef = db.collection('idempotency_keys').doc(keyDocId);
         const keySnap = await transaction.get(keyRef);
@@ -1935,39 +1958,19 @@ export function createExpressApp(deps: ServerDependencies = {}): Express {
           return;
         }
 
-        let subtotal = 0;
-        const computedItems = [];
         const batchAllocations: Record<string, any[]> = {};
 
         for (const item of normalizedItems) {
-          const prod = PRODUCTS_CATALOG[item.skuId];
-          const qty = item.quantity;
-          const itemTotal = prod.price * qty;
-          subtotal += itemTotal;
-
-          computedItems.push({
-            skuId: item.skuId,
-            quantity: qty,
-            unitPrice: prod.price,
-            totalPrice: itemTotal,
-            productName: prod.name,
-          });
-
           const reservationRes = await performFefoReservationInternal(
             transaction,
             normalizedBranch,
             item.skuId,
-            qty,
+            item.quantity,
             nowIso
           );
 
           batchAllocations[item.skuId] = reservationRes.allocations;
         }
-
-        const grandTotal = subtotal + shippingFee;
-        const paymentAdapter = PaymentAdapterRegistry.getAdapter(paymentMethod || 'cash_on_delivery');
-        const paymentIntent = await paymentAdapter.createPaymentIntent(orderId, grandTotal, paymentMethod || 'cash_on_delivery', { customerEmail: customer?.email });
-        const fulfillment = await deliveryAdapter.createFulfillment(orderId, deliveryMethod || 'branch_pickup', normalizedBranch, customer?.shippingAddress);
 
         orderRecord = {
           id: orderId,
@@ -1986,6 +1989,8 @@ export function createExpressApp(deps: ServerDependencies = {}): Express {
           shippingFee,
           taxAmount: 0,
           grandTotal,
+          refundedAmount: 0,
+          remainingRefundableBalance: grandTotal,
           idempotencyKey,
           placedAt: nowIso,
           updatedAt: nowIso,
@@ -2202,24 +2207,27 @@ export function createExpressApp(deps: ServerDependencies = {}): Express {
           transaction.set(aggDocRef, updatedAggregate);
         }
 
-        const paymentAdapter = PaymentAdapterRegistry.getAdapter(txOrderData.paymentMethod || 'cash_on_delivery');
-        const refundRes = await paymentAdapter.processRefund(
-          txOrderData.paymentIntent?.paymentId || strOrderId,
-          txOrderData.grandTotal,
-          reason || 'Customer cancellation'
-        );
-
         transaction.update(orderRef, {
           fulfillmentStatus: 'cancelled',
           paymentStatus: 'refunded',
+          refundedAmount: Number(txOrderData.grandTotal) || 0,
+          remainingRefundableBalance: 0,
           cancellationReason: reason || 'Order cancelled by user or staff',
-          refundDetails: refundRes,
           updatedAt: nowIso
         });
       });
 
       const updatedSnap = await orderRef.get();
       const updatedOrder = updatedSnap.data();
+
+      // Payment refund side effect executed OUTSIDE Firestore transaction
+      const paymentAdapter = PaymentAdapterRegistry.getAdapter(updatedOrder.paymentMethod || 'cash_on_delivery');
+      const refundRes = await paymentAdapter.processRefund(
+        updatedOrder.paymentIntent?.paymentId || strOrderId,
+        updatedOrder.grandTotal,
+        reason || 'Customer cancellation'
+      );
+      await orderRef.update({ refundDetails: refundRes });
 
       await logAuditEvent(
         user.uid,
@@ -2233,7 +2241,7 @@ export function createExpressApp(deps: ServerDependencies = {}): Express {
         req
       );
 
-      res.status(200).json({ success: true, orderId: strOrderId, order: updatedOrder });
+      res.status(200).json({ success: true, orderId: strOrderId, order: { ...updatedOrder, refundDetails: refundRes } });
     } catch (err: any) {
       res.status(500).json({ error: `Order cancellation failed: ${err.message}` });
     }
@@ -2433,26 +2441,20 @@ export function createExpressApp(deps: ServerDependencies = {}): Express {
             }
           }
 
-          const paymentAdapter = PaymentAdapterRegistry.getAdapter(txOrderData.paymentMethod || 'cash_on_delivery');
-          const refundRes = await paymentAdapter.processRefund(
-            txOrderData.paymentIntent?.paymentId || strOrderId,
-            txOrderData.grandTotal,
-            notes || 'Return approved'
-          );
-
-          transaction.update(orderRef, {
-            fulfillmentStatus: 'returned',
-            paymentStatus: 'refunded',
-            returnDetails: {
-              ...txOrderData.returnDetails,
-              processedAt: nowIso,
-              status: 'approved',
-              notes: notes || 'Return approved by staff',
-            },
-            refundDetails: refundRes,
-            updatedAt: nowIso
-          });
+        transaction.update(orderRef, {
+          fulfillmentStatus: 'returned',
+          paymentStatus: 'refunded',
+          refundedAmount: Number(txOrderData.grandTotal) || 0,
+          remainingRefundableBalance: 0,
+          returnDetails: {
+            ...txOrderData.returnDetails,
+            processedAt: nowIso,
+            status: 'approved',
+            notes: notes || 'Return approved by staff',
+          },
+          updatedAt: nowIso
         });
+      });
       } else {
         await orderRef.update({
           fulfillmentStatus: 'completed',
@@ -2467,7 +2469,20 @@ export function createExpressApp(deps: ServerDependencies = {}): Express {
       }
 
       const updatedSnap = await orderRef.get();
-      const updatedOrder = updatedSnap.data();
+      let updatedOrder = updatedSnap.data();
+
+      let refundRes: any;
+      if (decision === 'approve') {
+        // Payment refund side effect executed OUTSIDE Firestore transaction
+        const paymentAdapter = PaymentAdapterRegistry.getAdapter(updatedOrder.paymentMethod || 'cash_on_delivery');
+        refundRes = await paymentAdapter.processRefund(
+          updatedOrder.paymentIntent?.paymentId || strOrderId,
+          updatedOrder.grandTotal,
+          notes || 'Return approved'
+        );
+        await orderRef.update({ refundDetails: refundRes });
+        updatedOrder = { ...updatedOrder, refundDetails: refundRes };
+      }
 
       await logAuditEvent(
         user.uid,
@@ -2501,6 +2516,20 @@ export function createExpressApp(deps: ServerDependencies = {}): Express {
     const { amount, reason } = req.body;
     const strOrderId = String(orderId || '');
 
+    const idempotencyKey = (
+      req.headers['x-idempotency-key'] ||
+      req.headers['idempotency-key'] ||
+      req.body?.idempotencyKey ||
+      req.body?.idempotency_key
+    )?.toString().trim();
+
+    if (!idempotencyKey) {
+      res.status(400).json({ error: 'Missing required idempotencyKey for refund.' });
+      return;
+    }
+
+    const keyDocId = `${strOrderId}_${idempotencyKey}`;
+
     try {
       const orderRef = db.collection('orders').doc(strOrderId);
       const snap = await orderRef.get();
@@ -2511,45 +2540,131 @@ export function createExpressApp(deps: ServerDependencies = {}): Express {
 
       const orderData = snap.data();
       const currentStatus = orderData.fulfillmentStatus;
-      if (currentStatus !== 'cancelled' && currentStatus !== 'returned' && currentStatus !== 'return_requested') {
+      if (currentStatus !== 'cancelled' && currentStatus !== 'returned' && currentStatus !== 'return_requested' && currentStatus !== 'completed') {
         res.status(400).json({
-          error: `INVALID_ORDER_STATE_TRANSITION: Refunds can only be processed for cancelled or returned orders. Current state: '${currentStatus}'`
+          error: `INVALID_ORDER_STATE_TRANSITION: Refunds can only be processed for cancelled, returned, or completed orders. Current state: '${currentStatus}'`
         });
         return;
       }
 
-      const refundAmount = amount ? Number(amount) : orderData.grandTotal;
-      const paymentAdapter = PaymentAdapterRegistry.getAdapter(orderData.paymentMethod || 'cash_on_delivery');
-      const refundRes = await paymentAdapter.processRefund(
-        orderData.paymentIntent?.paymentId || strOrderId,
-        refundAmount,
-        reason || 'Manual staff refund'
-      );
+      const refundAmount = Number(amount);
+      if (isNaN(refundAmount) || refundAmount <= 0) {
+        res.status(400).json({ error: 'Refund amount must be greater than 0.' });
+        return;
+      }
+
+      const currentRefunded = Number(orderData.refundedAmount) || (orderData.paymentStatus === 'refunded' ? Number(orderData.grandTotal) : 0);
+      const remainingBalance = Number(orderData.remainingRefundableBalance ?? (Number(orderData.grandTotal) - currentRefunded));
+
+      if (remainingBalance <= 0 || orderData.paymentStatus === 'refunded') {
+        res.status(400).json({ error: 'Order is already fully refunded.' });
+        return;
+      }
+
+      if (refundAmount > remainingBalance) {
+        res.status(400).json({ error: `Refund amount PHP ${refundAmount} exceeds remaining refundable balance PHP ${remainingBalance}.` });
+        return;
+      }
 
       const nowIso = new Date().toISOString();
-      await orderRef.update({
-        paymentStatus: 'refunded',
-        refundDetails: refundRes,
-        updatedAt: nowIso
+      let refundRecord: any;
+      let updatedOrder: any;
+      let isReplay = false;
+
+      await db.runTransaction(async (transaction: any) => {
+        const keyRef = db.collection('idempotency_keys').doc(keyDocId);
+        const keySnap = await transaction.get(keyRef);
+
+        if (keySnap && keySnap.exists) {
+          const existingData = typeof keySnap.data === 'function' ? keySnap.data() : keySnap.data;
+          refundRecord = existingData.refundRecord;
+          updatedOrder = existingData.updatedOrder;
+          isReplay = true;
+          return;
+        }
+
+        const txOrderSnap = await transaction.get(orderRef);
+        const txOrderData = typeof txOrderSnap.data === 'function' ? txOrderSnap.data() : txOrderSnap.data;
+
+        const txCurrentRefunded = Number(txOrderData.refundedAmount) || (txOrderData.paymentStatus === 'refunded' ? Number(txOrderData.grandTotal) : 0);
+        const txRemainingBalance = Number(txOrderData.remainingRefundableBalance ?? (Number(txOrderData.grandTotal) - txCurrentRefunded));
+
+        if (txRemainingBalance <= 0 || txOrderData.paymentStatus === 'refunded') {
+          throw new Error('Order is already fully refunded.');
+        }
+
+        if (refundAmount > txRemainingBalance) {
+          throw new Error(`Refund amount PHP ${refundAmount} exceeds remaining refundable balance PHP ${txRemainingBalance}.`);
+        }
+
+        const newRefundedAmount = txCurrentRefunded + refundAmount;
+        const newRemainingBalance = txRemainingBalance - refundAmount;
+        const newPaymentStatus = newRemainingBalance <= 0 ? 'refunded' : 'partially_refunded';
+
+        const refundId = `RFND-${strOrderId}-${Date.now().toString().slice(-4)}`;
+        refundRecord = {
+          refundId,
+          orderId: strOrderId,
+          amount: refundAmount,
+          reason: reason || 'Manual staff refund',
+          refundedBy: user.uid,
+          refundedAt: nowIso,
+          idempotencyKey,
+        };
+
+        updatedOrder = {
+          ...txOrderData,
+          paymentStatus: newPaymentStatus,
+          refundedAmount: newRefundedAmount,
+          remainingRefundableBalance: newRemainingBalance,
+          updatedAt: nowIso,
+        };
+
+        transaction.update(orderRef, {
+          paymentStatus: newPaymentStatus,
+          refundedAmount: newRefundedAmount,
+          remainingRefundableBalance: newRemainingBalance,
+          updatedAt: nowIso,
+        });
+
+        transaction.set(keyRef, {
+          userId: user.uid,
+          idempotencyKey,
+          orderId: strOrderId,
+          refundRecord,
+          updatedOrder,
+          createdAt: nowIso,
+        });
       });
 
-      const updatedSnap = await orderRef.get();
-      const updatedOrder = updatedSnap.data();
+      if (!isReplay) {
+        // Payment refund provider side effect executed OUTSIDE Firestore transaction
+        const paymentAdapter = PaymentAdapterRegistry.getAdapter(orderData.paymentMethod || 'cash_on_delivery');
+        const refundRes = await paymentAdapter.processRefund(
+          orderData.paymentIntent?.paymentId || strOrderId,
+          refundAmount,
+          reason || 'Manual staff refund'
+        );
 
-      await logAuditEvent(
-        user.uid,
-        user.role,
-        updatedOrder.branchId,
-        'order_refund_processed',
-        'orders',
-        strOrderId,
-        true,
-        { refundAmount, reason },
-        req
-      );
+        await logAuditEvent(
+          user.uid,
+          user.role,
+          updatedOrder.branchId,
+          'order_refund_processed',
+          'orders',
+          strOrderId,
+          true,
+          { refundAmount, reason, idempotencyKey },
+          req
+        );
+      }
 
-      res.status(200).json({ success: true, orderId: strOrderId, order: updatedOrder, refund: refundRes });
+      res.status(200).json({ success: true, orderId: strOrderId, refund: refundRecord, order: updatedOrder, idempotentReplay: isReplay });
     } catch (err: any) {
+      if (err.message.includes('exceeds remaining') || err.message.includes('already fully refunded')) {
+        res.status(400).json({ error: err.message });
+        return;
+      }
       res.status(500).json({ error: `Refund processing failed: ${err.message}` });
     }
   });
