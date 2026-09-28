@@ -453,8 +453,12 @@ async function runTests() {
       '2. Role escalation prevention: Customer blocked from recording expenses, registering stockists, and inventory adjustments with 403 & zero mutation'
     );
 
-    // Assertion 3: Server-authoritative writes — Firestore rules verification for client-side operational denial
-    // ADR-009 enforces: orders, inventory, consultation_intakes, b2b_stockists, expenses have 'allow write: if false;'
+    // Assertion 3: Server-authoritative writes — Real programmatic verification of firestore.rules
+    const fs = await import('fs');
+    const path = await import('path');
+    const rulesPath = path.resolve(process.cwd(), 'firestore.rules');
+    const rulesContent = fs.readFileSync(rulesPath, 'utf8');
+
     const operationalCollectionsLocked = [
       'orders',
       'inventory',
@@ -466,14 +470,29 @@ async function runTests() {
       'b2b_ledger',
       'expenses',
     ];
-    // In our security specification, direct client writes are forbidden
-    const allLocked = operationalCollectionsLocked.every((c) => {
-      const store = harness.mockDb._getStoreForCollection(c);
-      return store !== undefined;
-    });
+
+    let allRulesValid = true;
+    for (const col of operationalCollectionsLocked) {
+      const targetStr = `match /${col}/`;
+      const idx = rulesContent.indexOf(targetStr);
+      if (idx === -1) {
+        allRulesValid = false;
+        break;
+      }
+      const nextMatchIdx = rulesContent.indexOf('match /', idx + targetStr.length);
+      const blockContent = nextMatchIdx !== -1 
+        ? rulesContent.slice(idx, nextMatchIdx) 
+        : rulesContent.slice(idx);
+
+      const hasDenyWrite = blockContent.includes('allow write: if false') || blockContent.includes('allow read, write: if false');
+      if (!hasDenyWrite) {
+        allRulesValid = false;
+        break;
+      }
+    }
 
     assert(
-      allLocked === true,
+      allRulesValid === true,
       '3. Server-authoritative write defense: Firestore security rules configure allow write: if false across all 9 operational collections (ADR-009)'
     );
 
@@ -850,7 +869,7 @@ async function runTests() {
 
     assert(
       daetMgrTicketReadRes.status === 403 &&
-      (daetMgrTicketPatchRes.status === 403 || daetMgrTicketPatchRes.status === 500) &&
+      daetMgrTicketPatchRes.status === 403 &&
       laboTicketAfter.status === 'open' &&
       laboTicketAfter.updatedAt === laboTicketBefore.updatedAt &&
       !laboTicketAfter.resolutionSummary,
