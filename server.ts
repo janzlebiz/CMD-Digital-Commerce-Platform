@@ -1197,6 +1197,239 @@ export interface AuthenticatedUser {
   email?: string;
 }
 
+// ============================================================================
+// PRIORITY B: PAYMENT PROVIDER ABSTRACTION LAYER
+// ============================================================================
+
+export type PaymentProviderType =
+  | 'simulated_cod'
+  | 'simulated_digital_wallet'
+  | 'simulated_card'
+  | 'stripe'
+  | 'paymongo'
+  | 'gcash';
+
+export type PaymentStatus =
+  | 'pending_payment'
+  | 'authorized'
+  | 'paid'
+  | 'failed'
+  | 'refunded'
+  | 'partially_refunded';
+
+export interface PaymentIntent {
+  paymentId: string;
+  orderId: string;
+  provider: PaymentProviderType;
+  amount: number;
+  currency: 'PHP';
+  status: PaymentStatus;
+  providerReference: string;
+  metadata?: Record<string, any>;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface PaymentRefundResult {
+  refundId: string;
+  status: 'refunded' | 'failed';
+  amount: number;
+  processedAt: string;
+}
+
+export interface PaymentProvider {
+  providerType: PaymentProviderType;
+  createPaymentIntent(
+    orderId: string,
+    amount: number,
+    paymentMethod: string,
+    metadata?: Record<string, any>
+  ): Promise<PaymentIntent>;
+  confirmPayment(paymentId: string, externalReference?: string): Promise<PaymentIntent>;
+  processRefund(
+    paymentId: string,
+    amount: number,
+    reason: string
+  ): Promise<PaymentRefundResult>;
+}
+
+export class SimulatedPaymentAdapter implements PaymentProvider {
+  constructor(public providerType: PaymentProviderType = 'simulated_cod') {}
+
+  async createPaymentIntent(
+    orderId: string,
+    amount: number,
+    paymentMethod: string,
+    metadata: Record<string, any> = {}
+  ): Promise<PaymentIntent> {
+    const isCod = paymentMethod === 'cash_on_delivery' || paymentMethod === 'cash_on_pickup' || this.providerType === 'simulated_cod';
+    const status: PaymentStatus = isCod ? 'pending_payment' : 'paid';
+    const refPrefix = isCod ? 'COD' : paymentMethod === 'gcash' || paymentMethod === 'maya' ? 'WAL' : 'CARD';
+    const nowIso = new Date().toISOString();
+
+    return {
+      paymentId: `PAY-${Date.now().toString().slice(-6)}-${crypto.randomBytes(2).toString('hex').toUpperCase()}`,
+      orderId,
+      provider: this.providerType,
+      amount,
+      currency: 'PHP',
+      status,
+      providerReference: `${refPrefix}-${Date.now()}`,
+      metadata,
+      createdAt: nowIso,
+      updatedAt: nowIso,
+    };
+  }
+
+  async confirmPayment(paymentId: string, externalReference?: string): Promise<PaymentIntent> {
+    const nowIso = new Date().toISOString();
+    return {
+      paymentId,
+      orderId: '',
+      provider: this.providerType,
+      amount: 0,
+      currency: 'PHP',
+      status: 'paid',
+      providerReference: externalReference || `CONF-${Date.now()}`,
+      createdAt: nowIso,
+      updatedAt: nowIso,
+    };
+  }
+
+  async processRefund(
+    paymentId: string,
+    amount: number,
+    _reason: string
+  ): Promise<PaymentRefundResult> {
+    return {
+      refundId: `RFD-${Date.now().toString().slice(-6)}-${crypto.randomBytes(2).toString('hex').toUpperCase()}`,
+      status: 'refunded',
+      amount,
+      processedAt: new Date().toISOString(),
+    };
+  }
+}
+
+export class PaymentAdapterRegistry {
+  private static adapters: Map<string, PaymentProvider> = new Map();
+
+  static registerAdapter(type: PaymentProviderType, adapter: PaymentProvider) {
+    this.adapters.set(type, adapter);
+  }
+
+  static getAdapter(paymentMethod: string): PaymentProvider {
+    if (paymentMethod === 'gcash' || paymentMethod === 'maya' || paymentMethod === 'digital_wallet') {
+      return this.adapters.get('simulated_digital_wallet') || new SimulatedPaymentAdapter('simulated_digital_wallet');
+    }
+    if (paymentMethod === 'credit_card' || paymentMethod === 'stripe') {
+      return this.adapters.get('simulated_card') || new SimulatedPaymentAdapter('simulated_card');
+    }
+    return this.adapters.get('simulated_cod') || new SimulatedPaymentAdapter('simulated_cod');
+  }
+}
+
+// ============================================================================
+// PRIORITY B: DELIVERY / SHIPPING ABSTRACTION LAYER
+// ============================================================================
+
+export type DeliveryMethodType = 'branch_pickup' | 'door_to_door';
+
+export type FulfillmentStatus =
+  | 'pending_processing'
+  | 'ready_for_pickup'
+  | 'in_transit'
+  | 'completed'
+  | 'cancelled'
+  | 'return_requested'
+  | 'returned';
+
+export interface DeliveryQuote {
+  deliveryMethod: DeliveryMethodType;
+  shippingFee: number;
+  estimatedDays: number;
+  providerName: string;
+}
+
+export interface DeliveryFulfillment {
+  trackingNumber: string;
+  deliveryMethod: DeliveryMethodType;
+  branchId: string;
+  status: FulfillmentStatus;
+  carrierName: string;
+  shippingFee: number;
+  estimatedDeliveryDate?: string;
+  updatedAt: string;
+}
+
+export interface DeliveryProvider {
+  calculateShippingFee(
+    deliveryMethod: DeliveryMethodType,
+    branchId: string,
+    destinationAddress?: any
+  ): Promise<DeliveryQuote>;
+  createFulfillment(
+    orderId: string,
+    deliveryMethod: DeliveryMethodType,
+    branchId: string,
+    destinationAddress?: any
+  ): Promise<DeliveryFulfillment>;
+  updateFulfillmentStatus(
+    trackingNumber: string,
+    status: FulfillmentStatus
+  ): Promise<DeliveryFulfillment>;
+}
+
+export class StandardDeliveryAdapter implements DeliveryProvider {
+  async calculateShippingFee(
+    deliveryMethod: DeliveryMethodType,
+    _branchId: string,
+    _destinationAddress?: any
+  ): Promise<DeliveryQuote> {
+    const isDoorToDoor = deliveryMethod === 'door_to_door';
+    return {
+      deliveryMethod,
+      shippingFee: isDoorToDoor ? 150 : 0,
+      estimatedDays: isDoorToDoor ? 2 : 0,
+      providerName: isDoorToDoor ? 'Camarines Norte Local Express' : 'HCI Branch Hub Pickup',
+    };
+  }
+
+  async createFulfillment(
+    orderId: string,
+    deliveryMethod: DeliveryMethodType,
+    branchId: string,
+    _destinationAddress?: any
+  ): Promise<DeliveryFulfillment> {
+    const isDoorToDoor = deliveryMethod === 'door_to_door';
+    const nowIso = new Date().toISOString();
+    return {
+      trackingNumber: isDoorToDoor ? `TRK-${orderId}` : `PICKUP-${orderId}`,
+      deliveryMethod,
+      branchId,
+      status: 'pending_processing',
+      carrierName: isDoorToDoor ? 'Camarines Norte Local Express' : 'HCI Branch Direct Pickup',
+      shippingFee: isDoorToDoor ? 150 : 0,
+      updatedAt: nowIso,
+    };
+  }
+
+  async updateFulfillmentStatus(
+    trackingNumber: string,
+    status: FulfillmentStatus
+  ): Promise<DeliveryFulfillment> {
+    const isDoorToDoor = trackingNumber.startsWith('TRK-');
+    return {
+      trackingNumber,
+      deliveryMethod: isDoorToDoor ? 'door_to_door' : 'branch_pickup',
+      branchId: 'daet',
+      status,
+      carrierName: isDoorToDoor ? 'Camarines Norte Local Express' : 'HCI Branch Direct Pickup',
+      shippingFee: isDoorToDoor ? 150 : 0,
+      updatedAt: new Date().toISOString(),
+    };
+  }
+}
+
 export interface ServerDependencies {
   db?: any;
   auth?: any;
@@ -1671,6 +1904,10 @@ export function createExpressApp(deps: ServerDependencies = {}): Express {
       await ensureInventorySeeded();
       let orderRecord: any;
 
+      const deliveryAdapter = new StandardDeliveryAdapter();
+      const deliveryQuote = await deliveryAdapter.calculateShippingFee(deliveryMethod || 'branch_pickup', normalizedBranch, customer?.shippingAddress);
+      const shippingFee = deliveryQuote.shippingFee;
+
       await db.runTransaction(async (transaction: any) => {
         let subtotal = 0;
         const computedItems = [];
@@ -1701,8 +1938,10 @@ export function createExpressApp(deps: ServerDependencies = {}): Express {
           batchAllocations[item.skuId] = reservationRes.allocations;
         }
 
-        const shippingFee = deliveryMethod === 'door_to_door' ? 150 : 0;
         const grandTotal = subtotal + shippingFee;
+        const paymentAdapter = PaymentAdapterRegistry.getAdapter(paymentMethod || 'cash_on_delivery');
+        const paymentIntent = await paymentAdapter.createPaymentIntent(orderId, grandTotal, paymentMethod || 'cash_on_delivery', { customerEmail: customer?.email });
+        const fulfillment = await deliveryAdapter.createFulfillment(orderId, deliveryMethod || 'branch_pickup', normalizedBranch, customer?.shippingAddress);
 
         orderRecord = {
           id: orderId,
@@ -1713,8 +1952,10 @@ export function createExpressApp(deps: ServerDependencies = {}): Express {
           branchId: normalizedBranch,
           deliveryMethod: deliveryMethod || 'branch_pickup',
           paymentMethod: paymentMethod || 'cash_on_delivery',
-          paymentStatus: 'pending_payment',
-          fulfillmentStatus: 'pending_processing',
+          paymentStatus: paymentIntent.status,
+          paymentIntent,
+          fulfillmentStatus: fulfillment.status,
+          fulfillment,
           subtotal,
           shippingFee,
           taxAmount: 0,
@@ -1746,6 +1987,431 @@ export function createExpressApp(deps: ServerDependencies = {}): Express {
         return;
       }
       res.status(500).json({ error: `Order creation failed: ${err.message}` });
+    }
+  });
+
+  // --- GET /api/orders/my-orders ---
+  app.get('/api/orders/my-orders', async (req: Request, res: Response): Promise<void> => {
+    const user = await requireAuth(req, res);
+    if (!user) return;
+
+    try {
+      const snap = await db.collection('orders').where('userId', '==', user.uid).get();
+      const userOrders: any[] = [];
+      snap.forEach((doc: any) => userOrders.push(doc.data()));
+      userOrders.sort((a, b) => (b.placedAt || '').localeCompare(a.placedAt || ''));
+      res.status(200).json({ success: true, orders: userOrders });
+    } catch (err: any) {
+      res.status(500).json({ error: `Failed to fetch customer orders: ${err.message}` });
+    }
+  });
+
+  // --- GET /api/orders/:orderId ---
+  app.get('/api/orders/:orderId', async (req: Request, res: Response): Promise<void> => {
+    const user = await requireAuth(req, res);
+    if (!user) return;
+
+    const { orderId } = req.params;
+    const strOrderId = String(orderId || '');
+
+    try {
+      const orderRef = db.collection('orders').doc(strOrderId);
+      const snap = await orderRef.get();
+      if (!snap.exists) {
+        res.status(404).json({ error: `Order not found: ${strOrderId}` });
+        return;
+      }
+
+      const orderData = snap.data();
+      const isOwner = orderData.userId === user.uid;
+      const isStaff = user.role === 'branch_manager' || user.role === 'regional_director' || user.role === 'super_admin';
+
+      if (!isOwner && !isStaff) {
+        res.status(403).json({ error: 'Access Denied: You are not authorized to view this order.' });
+        return;
+      }
+
+      if (user.role === 'branch_manager') {
+        const assignedBranch = (user.assignedBranchId || 'daet').toLowerCase().trim();
+        const orderBranch = (orderData.branchId || 'daet').toLowerCase().trim();
+        if (orderBranch !== assignedBranch) {
+          res.status(403).json({ error: 'Access Denied: Branch manager cannot view order of another branch.' });
+          return;
+        }
+      }
+
+      res.status(200).json({ success: true, order: orderData });
+    } catch (err: any) {
+      res.status(500).json({ error: `Failed to fetch order: ${err.message}` });
+    }
+  });
+
+  // --- POST /api/orders/:orderId/cancel ---
+  app.post('/api/orders/:orderId/cancel', async (req: Request, res: Response): Promise<void> => {
+    const user = await requireAuth(req, res);
+    if (!user) return;
+
+    const { orderId } = req.params;
+    const { reason } = req.body;
+    const strOrderId = String(orderId || '');
+
+    try {
+      const orderRef = db.collection('orders').doc(strOrderId);
+      const snap = await orderRef.get();
+      if (!snap.exists) {
+        res.status(404).json({ error: `Order not found: ${strOrderId}` });
+        return;
+      }
+
+      const orderData = snap.data();
+      const isOwner = orderData.userId === user.uid;
+      const isManager = user.role === 'branch_manager';
+      const isAdmin = user.role === 'regional_director' || user.role === 'super_admin';
+
+      if (!isOwner && !isManager && !isAdmin) {
+        res.status(403).json({ error: 'Access Denied: Cannot cancel another user\'s order.' });
+        return;
+      }
+
+      if (isManager) {
+        const assignedBranch = (user.assignedBranchId || 'daet').toLowerCase().trim();
+        const orderBranch = (orderData.branchId || 'daet').toLowerCase().trim();
+        if (orderBranch !== assignedBranch) {
+          res.status(403).json({ error: 'Access Denied: Branch manager cannot cancel orders of another branch.' });
+          return;
+        }
+      }
+
+      const currentStatus = orderData.fulfillmentStatus;
+      if (currentStatus === 'completed' || currentStatus === 'cancelled' || currentStatus === 'returned' || currentStatus === 'in_transit') {
+        res.status(400).json({
+          error: `INVALID_ORDER_STATE_TRANSITION: Cannot cancel order in '${currentStatus}' state.`
+        });
+        return;
+      }
+
+      const nowIso = new Date().toISOString();
+
+      await db.runTransaction(async (transaction: any) => {
+        const txOrderSnap = await transaction.get(orderRef);
+        const txOrderData = txOrderSnap.data();
+
+        if (txOrderData.fulfillmentStatus === 'cancelled') {
+          return;
+        }
+
+        const batchAllocations = txOrderData.batchAllocations || {};
+        for (const [skuId, allocList] of Object.entries(batchAllocations)) {
+          if (!Array.isArray(allocList)) continue;
+          for (const alloc of allocList as any[]) {
+            const batchRef = db.collection('product_batches').doc(alloc.batchId);
+            const batchSnap = await transaction.get(batchRef);
+            if (batchSnap.exists) {
+              const bData = batchSnap.data();
+              transaction.update(batchRef, {
+                activeStock: (bData.activeStock || 0) + (alloc.quantity || 0),
+                updatedAt: nowIso
+              });
+            }
+          }
+        }
+
+        const paymentAdapter = PaymentAdapterRegistry.getAdapter(txOrderData.paymentMethod || 'cash_on_delivery');
+        const refundRes = await paymentAdapter.processRefund(
+          txOrderData.paymentIntent?.paymentId || strOrderId,
+          txOrderData.grandTotal,
+          reason || 'Customer cancellation'
+        );
+
+        transaction.update(orderRef, {
+          fulfillmentStatus: 'cancelled',
+          paymentStatus: 'refunded',
+          cancellationReason: reason || 'Order cancelled by user or staff',
+          refundDetails: refundRes,
+          updatedAt: nowIso
+        });
+      });
+
+      const updatedSnap = await orderRef.get();
+      const updatedOrder = updatedSnap.data();
+
+      await logAuditEvent(
+        user.uid,
+        user.role,
+        updatedOrder.branchId,
+        'order_cancelled',
+        'orders',
+        strOrderId,
+        true,
+        { reason, grandTotal: updatedOrder.grandTotal },
+        req
+      );
+
+      res.status(200).json({ success: true, orderId: strOrderId, order: updatedOrder });
+    } catch (err: any) {
+      res.status(500).json({ error: `Order cancellation failed: ${err.message}` });
+    }
+  });
+
+  // --- POST /api/orders/:orderId/return-request ---
+  app.post('/api/orders/:orderId/return-request', async (req: Request, res: Response): Promise<void> => {
+    const user = await requireAuth(req, res);
+    if (!user) return;
+
+    const { orderId } = req.params;
+    const { reason } = req.body;
+    const strOrderId = String(orderId || '');
+
+    if (!reason || typeof reason !== 'string' || !reason.trim()) {
+      res.status(400).json({ error: 'Return reason is required.' });
+      return;
+    }
+
+    try {
+      const orderRef = db.collection('orders').doc(strOrderId);
+      const snap = await orderRef.get();
+      if (!snap.exists) {
+        res.status(404).json({ error: `Order not found: ${strOrderId}` });
+        return;
+      }
+
+      const orderData = snap.data();
+      const isOwner = orderData.userId === user.uid;
+      const isAdmin = user.role === 'regional_director' || user.role === 'super_admin';
+
+      if (!isOwner && !isAdmin) {
+        res.status(403).json({ error: 'Access Denied: Cannot request return for another user\'s order.' });
+        return;
+      }
+
+      if (orderData.fulfillmentStatus !== 'completed') {
+        res.status(400).json({
+          error: `INVALID_ORDER_STATE_TRANSITION: Return request is only permitted for completed orders. Current state: '${orderData.fulfillmentStatus}'`
+        });
+        return;
+      }
+
+      const nowIso = new Date().toISOString();
+      const returnDetails = {
+        requestedAt: nowIso,
+        reason: reason.trim(),
+        status: 'pending_review',
+      };
+
+      await orderRef.update({
+        fulfillmentStatus: 'return_requested',
+        returnDetails,
+        updatedAt: nowIso,
+      });
+
+      const updatedSnap = await orderRef.get();
+      const updatedOrder = updatedSnap.data();
+
+      await logAuditEvent(
+        user.uid,
+        user.role,
+        updatedOrder.branchId,
+        'order_return_requested',
+        'orders',
+        strOrderId,
+        true,
+        { reason: reason.trim() },
+        req
+      );
+
+      res.status(200).json({ success: true, orderId: strOrderId, order: updatedOrder });
+    } catch (err: any) {
+      res.status(500).json({ error: `Return request failed: ${err.message}` });
+    }
+  });
+
+  // --- POST /api/orders/:orderId/return-process ---
+  app.post('/api/orders/:orderId/return-process', async (req: Request, res: Response): Promise<void> => {
+    const user = await requireAuth(req, res);
+    if (!user) return;
+
+    if (user.role !== 'branch_manager' && user.role !== 'regional_director' && user.role !== 'super_admin') {
+      res.status(403).json({ error: 'Access Denied: Only staff can process return requests.' });
+      return;
+    }
+
+    const { orderId } = req.params;
+    const { decision, restockInventory = true, notes } = req.body;
+    const strOrderId = String(orderId || '');
+
+    if (decision !== 'approve' && decision !== 'reject') {
+      res.status(400).json({ error: 'decision must be either "approve" or "reject".' });
+      return;
+    }
+
+    try {
+      const orderRef = db.collection('orders').doc(strOrderId);
+      const snap = await orderRef.get();
+      if (!snap.exists) {
+        res.status(404).json({ error: `Order not found: ${strOrderId}` });
+        return;
+      }
+
+      const orderData = snap.data();
+      if (user.role === 'branch_manager') {
+        const assignedBranch = (user.assignedBranchId || 'daet').toLowerCase().trim();
+        const orderBranch = (orderData.branchId || 'daet').toLowerCase().trim();
+        if (orderBranch !== assignedBranch) {
+          res.status(403).json({ error: 'Access Denied: Branch manager cannot process returns for another branch.' });
+          return;
+        }
+      }
+
+      if (orderData.fulfillmentStatus !== 'return_requested') {
+        res.status(400).json({
+          error: `INVALID_ORDER_STATE_TRANSITION: Return processing requires 'return_requested' state. Current state: '${orderData.fulfillmentStatus}'`
+        });
+        return;
+      }
+
+      const nowIso = new Date().toISOString();
+
+      if (decision === 'approve') {
+        await db.runTransaction(async (transaction: any) => {
+          const txOrderSnap = await transaction.get(orderRef);
+          const txOrderData = txOrderSnap.data();
+
+          if (restockInventory) {
+            const batchAllocations = txOrderData.batchAllocations || {};
+            for (const [skuId, allocList] of Object.entries(batchAllocations)) {
+              if (!Array.isArray(allocList)) continue;
+              for (const alloc of allocList as any[]) {
+                const batchRef = db.collection('product_batches').doc(alloc.batchId);
+                const batchSnap = await transaction.get(batchRef);
+                if (batchSnap.exists) {
+                  const bData = batchSnap.data();
+                  transaction.update(batchRef, {
+                    activeStock: (bData.activeStock || 0) + (alloc.quantity || 0),
+                    updatedAt: nowIso
+                  });
+                }
+              }
+            }
+          }
+
+          const paymentAdapter = PaymentAdapterRegistry.getAdapter(txOrderData.paymentMethod || 'cash_on_delivery');
+          const refundRes = await paymentAdapter.processRefund(
+            txOrderData.paymentIntent?.paymentId || strOrderId,
+            txOrderData.grandTotal,
+            notes || 'Return approved'
+          );
+
+          transaction.update(orderRef, {
+            fulfillmentStatus: 'returned',
+            paymentStatus: 'refunded',
+            returnDetails: {
+              ...txOrderData.returnDetails,
+              processedAt: nowIso,
+              status: 'approved',
+              notes: notes || 'Return approved by staff',
+            },
+            refundDetails: refundRes,
+            updatedAt: nowIso
+          });
+        });
+      } else {
+        await orderRef.update({
+          fulfillmentStatus: 'completed',
+          returnDetails: {
+            ...orderData.returnDetails,
+            processedAt: nowIso,
+            status: 'rejected',
+            notes: notes || 'Return request rejected by staff',
+          },
+          updatedAt: nowIso,
+        });
+      }
+
+      const updatedSnap = await orderRef.get();
+      const updatedOrder = updatedSnap.data();
+
+      await logAuditEvent(
+        user.uid,
+        user.role,
+        updatedOrder.branchId,
+        'order_return_processed',
+        'orders',
+        strOrderId,
+        true,
+        { decision, restockInventory },
+        req
+      );
+
+      res.status(200).json({ success: true, orderId: strOrderId, order: updatedOrder });
+    } catch (err: any) {
+      res.status(500).json({ error: `Return processing failed: ${err.message}` });
+    }
+  });
+
+  // --- POST /api/orders/:orderId/refund ---
+  app.post('/api/orders/:orderId/refund', async (req: Request, res: Response): Promise<void> => {
+    const user = await requireAuth(req, res);
+    if (!user) return;
+
+    if (user.role !== 'branch_manager' && user.role !== 'regional_director' && user.role !== 'super_admin') {
+      res.status(403).json({ error: 'Access Denied: Only staff can issue order refunds.' });
+      return;
+    }
+
+    const { orderId } = req.params;
+    const { amount, reason } = req.body;
+    const strOrderId = String(orderId || '');
+
+    try {
+      const orderRef = db.collection('orders').doc(strOrderId);
+      const snap = await orderRef.get();
+      if (!snap.exists) {
+        res.status(404).json({ error: `Order not found: ${strOrderId}` });
+        return;
+      }
+
+      const orderData = snap.data();
+      const currentStatus = orderData.fulfillmentStatus;
+      if (currentStatus !== 'cancelled' && currentStatus !== 'returned' && currentStatus !== 'return_requested') {
+        res.status(400).json({
+          error: `INVALID_ORDER_STATE_TRANSITION: Refunds can only be processed for cancelled or returned orders. Current state: '${currentStatus}'`
+        });
+        return;
+      }
+
+      const refundAmount = amount ? Number(amount) : orderData.grandTotal;
+      const paymentAdapter = PaymentAdapterRegistry.getAdapter(orderData.paymentMethod || 'cash_on_delivery');
+      const refundRes = await paymentAdapter.processRefund(
+        orderData.paymentIntent?.paymentId || strOrderId,
+        refundAmount,
+        reason || 'Manual staff refund'
+      );
+
+      const nowIso = new Date().toISOString();
+      await orderRef.update({
+        paymentStatus: 'refunded',
+        refundDetails: refundRes,
+        updatedAt: nowIso
+      });
+
+      const updatedSnap = await orderRef.get();
+      const updatedOrder = updatedSnap.data();
+
+      await logAuditEvent(
+        user.uid,
+        user.role,
+        updatedOrder.branchId,
+        'order_refund_processed',
+        'orders',
+        strOrderId,
+        true,
+        { refundAmount, reason },
+        req
+      );
+
+      res.status(200).json({ success: true, orderId: strOrderId, order: updatedOrder, refund: refundRes });
+    } catch (err: any) {
+      res.status(500).json({ error: `Refund processing failed: ${err.message}` });
     }
   });
 

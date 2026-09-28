@@ -73,12 +73,12 @@ The canonical product roadmap comprises the following ten phases:
 * Safe centralized Express error handling and secret masking in production.
 * Production runtime baseline documentation (`PRODUCTION_RUNTIME_BASELINE.md` completed).
 
-### Priority B: E-Commerce & Order Lifecycle
-* Consolidate customer checkout onto authoritative server flow.
-* Payment-provider architecture and gateway integration (Stripe/GCash/PayMongo).
-* Delivery and shipping provider abstraction.
-* Refund, return, and order cancellation workflows.
-* Order receipt verification and lifecycle auditing.
+### Priority B: E-Commerce & Order Lifecycle (COMPLETED FOUNDATION BASELINE)
+* Authoritative customer checkout consolidated on `POST /api/orders/checkout` server endpoint with catalog pricing, FEFO reservation, and idempotency protections.
+* Payment provider abstraction layer implemented (`PaymentProvider`, `PaymentIntent`, `SimulatedPaymentAdapter`, `PaymentAdapterRegistry`).
+* Delivery and shipping provider abstraction layer implemented (`DeliveryProvider`, `DeliveryQuote`, `DeliveryFulfillment`, `StandardDeliveryAdapter`).
+* Server-side order lifecycle operations implemented (`POST /api/orders/:orderId/cancel`, `POST /api/orders/:orderId/return-request`, `POST /api/orders/:orderId/return-process`, `POST /api/orders/:orderId/refund`).
+* Priority B commerce baseline documentation (`PRIORITY_B_COMMERCE_BASELINE.md` completed).
 
 ### Priority C: Automation & Analytics (Original Phase 7)
 * Operational dashboards and business intelligence views.

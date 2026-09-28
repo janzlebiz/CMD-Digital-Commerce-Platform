@@ -82,35 +82,23 @@ export function useEcommerce() {
   };
 
   const placeOrder = async (orderPayload: any): Promise<OrderRecord> => {
-    const orderId = `HCI-ORD-${Date.now().toString().slice(-6)}`;
-    const items = orderPayload.items.map((i: any) => ({
-      skuId: i.skuId,
-      quantity: i.quantity,
-      unitPrice: getSkuPrice(i.skuId),
-      totalPrice: getSkuPrice(i.skuId) * i.quantity,
-      productName: PRODUCTS_METADATA[i.skuId]?.name || i.skuId,
-    }));
+    const token = localStorage.getItem('demo_token') || 'DEMO_TOKEN_customer';
+    const res = await fetch('/api/orders/checkout', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${token}`,
+      },
+      body: JSON.stringify(orderPayload),
+    });
 
-    const totals = calculateTotals(orderPayload.items, orderPayload.deliveryMethod === 'door_to_door' ? 150 : 0);
+    if (!res.ok) {
+      const errData = await res.json();
+      throw new Error(errData.error || 'Server checkout failed.');
+    }
 
-    const newOrder: OrderRecord = {
-      id: orderId,
-      userId: orderPayload.userId,
-      customer: orderPayload.customer,
-      items,
-      branchId: orderPayload.branchId || 'daet',
-      deliveryMethod: orderPayload.deliveryMethod || 'branch_pickup',
-      paymentMethod: orderPayload.paymentMethod || 'cash_on_delivery',
-      paymentStatus: 'pending_payment',
-      fulfillmentStatus: 'pending_processing',
-      subtotal: totals.subtotal,
-      shippingFee: totals.shippingFee,
-      taxAmount: totals.taxAmount,
-      grandTotal: totals.grandTotal,
-      placedAt: new Date().toISOString(),
-      updatedAt: new Date().toISOString(),
-    };
-
+    const data = await res.json();
+    const newOrder: OrderRecord = data.order;
     setOrders((prev) => [newOrder, ...prev]);
     clearCart();
     return newOrder;
@@ -123,6 +111,8 @@ export function useEcommerce() {
       in_transit: 'completed',
       completed: 'completed',
       cancelled: 'cancelled',
+      return_requested: 'return_requested',
+      returned: 'returned',
     };
 
     setOrders((prev) =>
@@ -138,7 +128,27 @@ export function useEcommerce() {
     );
   };
 
-  const cancelOrder = (orderId: string, reason: string = 'User requested cancellation') => {
+  const cancelOrder = async (orderId: string, reason: string = 'User requested cancellation') => {
+    const token = localStorage.getItem('demo_token') || 'DEMO_TOKEN_customer';
+    try {
+      const res = await fetch(`/api/orders/${orderId}/cancel`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify({ reason }),
+      });
+
+      if (res.ok) {
+        const data = await res.json();
+        setOrders((prev) => prev.map((ord) => (ord.id === orderId ? data.order : ord)));
+        return;
+      }
+    } catch {
+      // Fallback local update if offline in preview
+    }
+
     setOrders((prev) =>
       prev.map((ord) =>
         ord.id === orderId

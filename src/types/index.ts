@@ -35,8 +35,8 @@ export interface UserProfile {
   createdAt?: string;
 }
 
-export type OrderPaymentStatus = 'pending_payment' | 'payment_verification_required' | 'paid' | 'payment_failed';
-export type OrderFulfillmentStatus = 'pending_processing' | 'ready_for_pickup' | 'in_transit' | 'completed' | 'cancelled';
+export type OrderPaymentStatus = 'pending_payment' | 'payment_verification_required' | 'paid' | 'payment_failed' | 'refunded' | 'partially_refunded';
+export type OrderFulfillmentStatus = 'pending_processing' | 'ready_for_pickup' | 'in_transit' | 'completed' | 'cancelled' | 'return_requested' | 'returned';
 export type DeliveryMethod = 'branch_pickup' | 'door_to_door';
 export type PaymentMethod = 'cash_on_delivery' | 'cash_on_pickup' | 'gcash' | 'maya' | 'bank_transfer_bdo';
 
