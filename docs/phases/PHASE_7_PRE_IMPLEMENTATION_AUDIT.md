@@ -392,7 +392,7 @@ Phase 7 establishes a comprehensive, mathematically rigorous, and privacy-harden
 * **Test Verification:** Dedicated test suite `scripts/testPhase7Inventory.ts` passing 83/83 assertions. Cumulative platform suite passing 416/416 assertions.
 
 ### Milestone 2 Status: ACTIVE & VERIFIED (Completed 2026-09-27)
-* **Scope Completed:** Server-authoritative FEFO batch eligibility and reservation routing, strict QC filtering (`passed`, `pending`, `failed`), expiry validation, multi-branch isolation, atomic insufficient stock handling, zero negative stock bounds, ADR-009 audit event logging, and transaction isolation / concurrency protection.
+* **Scope Completed:** Server-authoritative FEFO batch eligibility and reservation routing, strict QC filtering (`passed`, `pending`, `failed`), expiry validation, multi-branch isolation, atomic insufficient stock handling with zero partial mutation, zero negative stock bounds, ADR-009 audit event logging, and transaction isolation / concurrency protection with strict ascending expiry ordering verification.
 * **Test Verification:** Dedicated test suite `scripts/testPhase7Milestone2Fefo.ts` passing exactly 20/20 real acceptance assertions. Cumulative platform suite passing 436/436 assertions.
 
 

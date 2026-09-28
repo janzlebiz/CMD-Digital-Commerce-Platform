@@ -442,9 +442,15 @@ async function runMilestone2TestSuite() {
       '9. Wrong-branch inventory is actually excluded'
     );
 
-    // Capture batch quantity before insufficient stock request
-    const targetBatchRef = bbStore.get('daet_batch-2026-09c');
-    const availBeforeFail = targetBatchRef ? targetBatchRef.availableQuantity : 0;
+    // Capture snapshots of every eligible Daet 65ml batch before insufficient reservation
+    const daetBatchesBefore = Array.from(bbStore.values()).filter(
+      (b: any) => b.branchId === 'daet' && b.skuId === 'hci-cmd-65ml'
+    );
+    const snapshotsBefore = daetBatchesBefore.map((b: any) => ({
+      id: b.id,
+      availableQuantity: b.availableQuantity,
+      reservedQuantity: b.reservedQuantity,
+    }));
 
     // 10. Insufficient eligible stock returns failure
     const resInsuff = await makeRequest(
@@ -455,11 +461,20 @@ async function runMilestone2TestSuite() {
     assert(resInsuff.status === 400, '10. Insufficient eligible stock returns failure (400 Bad Request)');
 
     // 11. Insufficient reservation leaves every affected batch unchanged and never creates negative stock
-    const targetBatchAfter = bbStore.get('daet_batch-2026-09c');
-    const availAfterFail = targetBatchAfter ? targetBatchAfter.availableQuantity : 0;
+    let allUnchanged = true;
+    let noNegative = true;
+    for (const snap of snapshotsBefore) {
+      const current = bbStore.get(snap.id);
+      if (!current || current.availableQuantity !== snap.availableQuantity || current.reservedQuantity !== snap.reservedQuantity) {
+        allUnchanged = false;
+      }
+      if (current && (current.availableQuantity < 0 || current.reservedQuantity < 0)) {
+        noNegative = false;
+      }
+    }
     assert(
-      availAfterFail === availBeforeFail && availAfterFail >= 0,
-      '11. Insufficient reservation leaves affected batch unchanged with zero negative stock'
+      snapshotsBefore.length > 0 && allUnchanged && noNegative,
+      '11. Insufficient reservation leaves every affected batch unchanged and never creates negative stock'
     );
 
     // 12. Successful reservation correctly changes available and reserved quantities
@@ -565,12 +580,72 @@ async function runMilestone2TestSuite() {
     );
 
     // 20. Competing reservations preserve FEFO ordering and the inventory reconciliation invariant
-    const finalReconLabo = await makeRequest(server, '/api/inventory/reconciliation?branchId=labo', 'GET', undefined, {
+    pbStore.set('batch-fefo-a', {
+      id: 'batch-fefo-a', batchNumber: 'FEFO-A-15', skuId: 'hci-cmd-30ml',
+      manufactureDate: '2026-01-01', expiryDate: '2028-10-01', qualityControlStatus: 'passed', totalManufacturedQuantity: 15
+    });
+    bbStore.set('labo_batch-fefo-a', {
+      id: 'labo_batch-fefo-a', branchId: 'labo', batchId: 'batch-fefo-a', skuId: 'hci-cmd-30ml',
+      availableQuantity: 15, reservedQuantity: 0, damagedQuantity: 0, expiryDate: '2028-10-01', updatedAt: new Date().toISOString()
+    });
+
+    pbStore.set('batch-fefo-b', {
+      id: 'batch-fefo-b', batchNumber: 'FEFO-B-15', skuId: 'hci-cmd-30ml',
+      manufactureDate: '2026-01-01', expiryDate: '2028-11-01', qualityControlStatus: 'passed', totalManufacturedQuantity: 15
+    });
+    bbStore.set('labo_batch-fefo-b', {
+      id: 'labo_batch-fefo-b', branchId: 'labo', batchId: 'batch-fefo-b', skuId: 'hci-cmd-30ml',
+      availableQuantity: 15, reservedQuantity: 0, damagedQuantity: 0, expiryDate: '2028-11-01', updatedAt: new Date().toISOString()
+    });
+
+    const fefoAgg = computeAggregateInventoryFromBatches({
+      branchBatches: Array.from(bbStore.values()),
+      branchId: 'labo',
+      skuId: 'hci-cmd-30ml',
+    });
+    invStore.set(fefoAgg.id, fefoAgg);
+
+    const [fefoRes1, fefoRes2] = await Promise.all([
+      makeRequest(
+        server, '/api/inventory/reservations', 'POST',
+        { branchId: 'labo', skuId: 'hci-cmd-30ml', requestedQuantity: 15 },
+        { Authorization: 'Bearer VALID_STAFF_LABO_MANAGER_TOKEN' }
+      ),
+      makeRequest(
+        server, '/api/inventory/reservations', 'POST',
+        { branchId: 'labo', skuId: 'hci-cmd-30ml', requestedQuantity: 10 },
+        { Authorization: 'Bearer VALID_STAFF_LABO_MANAGER_TOKEN' }
+      ),
+    ]);
+
+    let fefoOrderValid = true;
+    const successfulFefoResponses = [fefoRes1, fefoRes2].filter(r => r.status === 201);
+    for (const r of successfulFefoResponses) {
+      const allocations = r.data.allocations || [];
+      for (let i = 0; i < allocations.length - 1; i++) {
+        if (allocations[i].expiryDate > allocations[i + 1].expiryDate) {
+          fefoOrderValid = false;
+        }
+      }
+      if (allocations.length > 1) {
+        if (allocations[0].batchId !== 'batch-fefo-a' || allocations[1].batchId !== 'batch-fefo-b') {
+          fefoOrderValid = false;
+        }
+      }
+    }
+
+    const finalReconLaboFefo = await makeRequest(server, '/api/inventory/reconciliation?branchId=labo', 'GET', undefined, {
       Authorization: 'Bearer VALID_STAFF_SUPER_ADMIN_TOKEN',
     });
+
+    const reconciliationExact =
+      finalReconLaboFefo.status === 200 &&
+      finalReconLaboFefo.data.reconciliation.allConsistent === true &&
+      finalReconLaboFefo.data.reconciliation.reconciliationResults.find((it: any) => it.skuId === 'hci-cmd-30ml')?.divergenceDelta === 0;
+
     assert(
-      finalReconLabo.status === 200 && finalReconLabo.data.reconciliation.allConsistent === true,
-      '20. Competing reservations preserve FEFO ordering and inventory reconciliation invariant'
+      fefoOrderValid && successfulFefoResponses.length > 0 && reconciliationExact,
+      '20. Competing reservations preserve FEFO ordering and the inventory reconciliation invariant'
     );
 
   } finally {
