@@ -682,12 +682,12 @@ async function runMilestone4TestSuite() {
     );
 
     // 22. Conservation of stock invariant holds (Numerically strict check)
-    const getBatchStockSum = (branchIds: string[], batchId: string) => {
+    const getBatchStockSum = (branchIds: readonly string[], batchId: string) => {
       let sum = 0;
       for (const bId of branchIds) {
         const batch = bbStore.get(`${bId}_${batchId}`);
         if (batch) {
-          sum += (Number(batch.availableQuantity) || 0) + (Number(batch.reservedQuantity) || 0) + (Number(batch.damagedQuantity) || 0);
+          sum += (Number(batch.availableQuantity) || 0) + (Number(batch.reservedQuantity) || 0);
         }
       }
       return sum;
@@ -708,9 +708,8 @@ async function runMilestone4TestSuite() {
     };
 
     const targetBatchId = 'batch-2026-09a';
-    const branchesToSum = ['daet', 'labo', 'capalonga'];
     
-    const initialBatchStock = getBatchStockSum(branchesToSum, targetBatchId);
+    const initialBatchStock = getBatchStockSum(SUPPORTED_BRANCH_IDS, targetBatchId);
     const initialTL = getTransitAndLossSum(targetBatchId);
     const initialTotalSum = initialBatchStock + initialTL.transit + initialTL.loss;
 
@@ -723,7 +722,7 @@ async function runMilestone4TestSuite() {
       { Authorization: 'Bearer VALID_DAET_MANAGER_TOKEN' }
     );
     
-    const finalBatchStock = getBatchStockSum(branchesToSum, targetBatchId);
+    const finalBatchStock = getBatchStockSum(SUPPORTED_BRANCH_IDS, targetBatchId);
     const finalTL = getTransitAndLossSum(targetBatchId);
     const finalTotalSum = finalBatchStock + finalTL.transit + finalTL.loss;
     
