@@ -753,6 +753,143 @@ export interface InventoryAdjustmentRecord {
   timestamp: string;
 }
 
+// --- PHASE 7 MILESTONE 6: B2B Bulk Stockist Portal & Credit Controls ---
+
+export type B2BStockistTier = 'tier_1' | 'tier_2' | 'tier_3';
+
+export interface B2BStockistTierConfig {
+  tier: B2BStockistTier;
+  name: string;
+  minUnits: number;
+  discountRate: number; // e.g. 0.15 for 15%
+}
+
+export const B2B_STOCKIST_TIERS: Record<B2BStockistTier, B2BStockistTierConfig> = {
+  tier_1: {
+    tier: 'tier_1',
+    name: 'Stockist Partner (Tier 1)',
+    minUnits: 50,
+    discountRate: 0.15,
+  },
+  tier_2: {
+    tier: 'tier_2',
+    name: 'Municipal Distributor (Tier 2)',
+    minUnits: 200,
+    discountRate: 0.25,
+  },
+  tier_3: {
+    tier: 'tier_3',
+    name: 'Regional Stockist (Tier 3)',
+    minUnits: 500,
+    discountRate: 0.35,
+  },
+};
+
+export interface B2BStockistProfile {
+  id: string; // e.g. STK-DAET-001
+  businessName: string;
+  contactEmail: string;
+  contactPhone?: string;
+  branchId: string;
+  tier: B2BStockistTier;
+  status: 'active' | 'locked' | 'suspended';
+  depositBalance: number;
+  creditMultiplier: number;
+  creditLimit: number;
+  outstandingBalance: number;
+  availableCredit: number;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export type B2BConsignmentLedgerType = 'deposit' | 'order_debit' | 'payment_credit' | 'adjustment';
+
+export interface B2BConsignmentLedgerEntry {
+  id: string;
+  stockistId: string;
+  branchId: string;
+  type: B2BConsignmentLedgerType;
+  amount: number;
+  previousDeposit: number;
+  depositAfter: number;
+  previousOutstanding: number;
+  outstandingAfter: number;
+  referenceId?: string;
+  notes?: string;
+  timestamp: string;
+  performedBy: string;
+}
+
+export function calculateB2BWholesalePricing(
+  tier: B2BStockistTier,
+  items: Array<{ skuId: string; quantity: number }>
+) {
+  const tierConfig = B2B_STOCKIST_TIERS[tier] || B2B_STOCKIST_TIERS.tier_1;
+  const totalUnits = items.reduce((sum, it) => sum + (Number(it.quantity) || 0), 0);
+  const isEligible = totalUnits >= tierConfig.minUnits;
+
+  let retailSubtotal = 0;
+  let wholesaleTotal = 0;
+
+  const computedItems = items.map((item) => {
+    const prod = PRODUCTS_CATALOG[item.skuId] || { price: 0, name: item.skuId };
+    const qty = Number(item.quantity) || 0;
+    const retailUnitPrice = prod.price;
+    const wholesaleUnitPrice = Math.round(retailUnitPrice * (1 - tierConfig.discountRate) * 100) / 100;
+    const retailItemTotal = retailUnitPrice * qty;
+    const wholesaleItemTotal = wholesaleUnitPrice * qty;
+
+    retailSubtotal += retailItemTotal;
+    wholesaleTotal += wholesaleItemTotal;
+
+    return {
+      skuId: item.skuId,
+      productName: prod.name,
+      quantity: qty,
+      retailUnitPrice,
+      discountRate: tierConfig.discountRate,
+      wholesaleUnitPrice,
+      retailItemTotal,
+      wholesaleItemTotal,
+    };
+  });
+
+  const discountAmount = retailSubtotal - wholesaleTotal;
+
+  return {
+    tierConfig,
+    totalUnits,
+    isEligible,
+    minUnits: tierConfig.minUnits,
+    discountRate: tierConfig.discountRate,
+    retailSubtotal,
+    discountAmount,
+    wholesaleTotal,
+    items: computedItems,
+  };
+}
+
+export function calculateB2BCreditLimits(
+  depositBalance: number,
+  creditMultiplier = 2.0,
+  outstandingBalance = 0,
+  customCreditLimit?: number
+) {
+  const deposit = Math.max(0, Number(depositBalance) || 0);
+  const mult = Math.max(1, Number(creditMultiplier) || 2.0);
+  const creditLimit = customCreditLimit !== undefined ? Number(customCreditLimit) : deposit * mult;
+  const outstanding = Math.max(0, Number(outstandingBalance) || 0);
+  const availableCredit = Math.max(0, creditLimit - outstanding);
+
+  return {
+    depositBalance: deposit,
+    creditMultiplier: mult,
+    creditLimit,
+    outstandingBalance: outstanding,
+    availableCredit,
+  };
+}
+
 export const SEED_PRODUCT_BATCHES: ProductBatchRecord[] = [
   {
     id: 'batch-2026-09a',
@@ -3744,6 +3881,30 @@ export function createExpressApp(deps: ServerDependencies = {}): Express {
         }
       }
 
+      // Phase 7 M6: B2B Stockist dispatch lockout protection
+      if (orderData.stockistId) {
+        const stockistRef = db.collection('b2b_stockists').doc(orderData.stockistId);
+        const stockistSnap = await stockistRef.get();
+        if (stockistSnap.exists) {
+          const stockistData = stockistSnap.data();
+          if (stockistData.status === 'locked' || stockistData.status === 'suspended') {
+            await logAuditEvent(
+              user.uid,
+              user.role,
+              normalizedBranch,
+              'b2b_dispatch_blocked_account_locked',
+              'orders',
+              strOrderId,
+              false,
+              { stockistId: orderData.stockistId, status: stockistData.status },
+              req
+            );
+            res.status(403).json({ error: `DISPATCH_BLOCKED: Stockist account ${orderData.stockistId} is locked. Dispatch not permitted.` });
+            return;
+          }
+        }
+      }
+
       // Idempotency check
       if (orderData.fulfillmentStatus === 'fulfilled' || orderData.fulfillmentStatus === 'completed') {
         res.status(200).json({ success: true, alreadyFulfilled: true, orderId: strOrderId, order: orderData });
@@ -4705,6 +4866,770 @@ export function createExpressApp(deps: ServerDependencies = {}): Express {
       );
 
       res.status(200).json({ success: true, forecast });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  // --- PHASE 7 MILESTONE 6: B2B Bulk Stockist Portal & Credit Controls ---
+
+  // 1. POST /api/b2b/orders/quote - Calculate wholesale pricing and validate minimum order threshold
+  app.post('/api/b2b/orders/quote', async (req: Request, res: Response): Promise<void> => {
+    const { tier, items } = req.body;
+    if (!tier || !B2B_STOCKIST_TIERS[tier as B2BStockistTier]) {
+      res.status(400).json({ error: 'Invalid or missing tier. Must be one of: tier_1, tier_2, tier_3' });
+      return;
+    }
+    if (!Array.isArray(items) || items.length === 0) {
+      res.status(400).json({ error: 'items array must not be empty.' });
+      return;
+    }
+
+    for (const it of items) {
+      if (!it.skuId || !PRODUCTS_CATALOG[it.skuId]) {
+        res.status(400).json({ error: `Invalid SKU in items: ${it.skuId}` });
+        return;
+      }
+      const qty = Number(it.quantity);
+      if (!Number.isInteger(qty) || qty <= 0) {
+        res.status(400).json({ error: `Invalid quantity for SKU: ${it.skuId}` });
+        return;
+      }
+    }
+
+    const pricing = calculateB2BWholesalePricing(tier as B2BStockistTier, items);
+    if (!pricing.isEligible) {
+      res.status(400).json({
+        error: `Minimum order requirement not met for ${pricing.tierConfig.name}: minimum ${pricing.minUnits} units required (received: ${pricing.totalUnits}).`,
+        pricing,
+      });
+      return;
+    }
+
+    res.status(200).json({ success: true, pricing });
+  });
+
+  // 2. POST /api/b2b/stockists - Register stockist profile with initial security deposit
+  app.post('/api/b2b/stockists', async (req: Request, res: Response): Promise<void> => {
+    const user = await requireAuth(req, res);
+    if (!user) return;
+
+    if (user.role !== 'branch_manager' && user.role !== 'regional_director' && user.role !== 'super_admin') {
+      res.status(403).json({ error: 'Access Denied: B2B stockist creation requires authorized staff role.' });
+      return;
+    }
+
+    const {
+      stockistId,
+      businessName,
+      contactEmail,
+      contactPhone,
+      branchId,
+      tier,
+      depositAmount = 0,
+      creditMultiplier = 2.0,
+      customCreditLimit,
+    } = req.body;
+
+    if (!businessName || typeof businessName !== 'string') {
+      res.status(400).json({ error: 'businessName is required.' });
+      return;
+    }
+    if (!branchId || typeof branchId !== 'string') {
+      res.status(400).json({ error: 'branchId is required.' });
+      return;
+    }
+
+    const normalizedBranch = branchId.toLowerCase().trim();
+    if (!SUPPORTED_BRANCH_IDS.includes(normalizedBranch as any)) {
+      res.status(400).json({ error: `Invalid branchId: ${branchId}. Must be one of: ${SUPPORTED_BRANCH_IDS.join(', ')}` });
+      return;
+    }
+
+    if (user.role === 'branch_manager') {
+      const assigned = (user.assignedBranchId || 'daet').toLowerCase().trim();
+      if (normalizedBranch !== assigned) {
+        await logAuditEvent(
+          user.uid,
+          user.role,
+          normalizedBranch,
+          'unauthorized_cross_branch_b2b_access_blocked',
+          'b2b_stockists',
+          null,
+          false,
+          { targetBranch: normalizedBranch, assignedBranch: assigned },
+          req
+        );
+        res.status(403).json({ error: 'Access Denied: Branch managers cannot create stockists for other branches.' });
+        return;
+      }
+    }
+
+    const assignedTier: B2BStockistTier = (tier && B2B_STOCKIST_TIERS[tier as B2BStockistTier]) ? (tier as B2BStockistTier) : 'tier_1';
+    const numDeposit = Math.max(0, Number(depositAmount) || 0);
+    const numMult = Math.max(1, Number(creditMultiplier) || 2.0);
+
+    const creditCalculations = calculateB2BCreditLimits(numDeposit, numMult, 0, customCreditLimit);
+
+    const strStockistId = stockistId || `STK-${normalizedBranch.toUpperCase()}-${crypto.randomBytes(3).toString('hex').toUpperCase()}`;
+    const nowIso = new Date().toISOString();
+
+    const stockistProfile: B2BStockistProfile = {
+      id: strStockistId,
+      businessName: businessName.trim(),
+      contactEmail: (contactEmail || '').trim(),
+      contactPhone: (contactPhone || '').trim(),
+      branchId: normalizedBranch,
+      tier: assignedTier,
+      status: 'active',
+      depositBalance: creditCalculations.depositBalance,
+      creditMultiplier: creditCalculations.creditMultiplier,
+      creditLimit: creditCalculations.creditLimit,
+      outstandingBalance: 0,
+      availableCredit: creditCalculations.availableCredit,
+      createdAt: nowIso,
+      updatedAt: nowIso,
+    };
+
+    try {
+      const stockistRef = db.collection('b2b_stockists').doc(strStockistId);
+      await stockistRef.set(stockistProfile);
+
+      let initialLedgerEntry: B2BConsignmentLedgerEntry | null = null;
+      if (numDeposit > 0) {
+        const ledgerId = `LEDGER-DEP-${Date.now()}-${crypto.randomBytes(2).toString('hex').toUpperCase()}`;
+        initialLedgerEntry = {
+          id: ledgerId,
+          stockistId: strStockistId,
+          branchId: normalizedBranch,
+          type: 'deposit',
+          amount: numDeposit,
+          previousDeposit: 0,
+          depositAfter: numDeposit,
+          previousOutstanding: 0,
+          outstandingAfter: 0,
+          notes: 'Initial security deposit on registration',
+          timestamp: nowIso,
+          performedBy: user.uid,
+        };
+        await db.collection('b2b_ledger').doc(ledgerId).set(initialLedgerEntry);
+      }
+
+      await logAuditEvent(
+        user.uid,
+        user.role,
+        normalizedBranch,
+        'b2b_stockist_created',
+        'b2b_stockists',
+        strStockistId,
+        true,
+        {
+          tier: assignedTier,
+          depositBalance: stockistProfile.depositBalance,
+          creditLimit: stockistProfile.creditLimit,
+        },
+        req
+      );
+
+      res.status(201).json({ success: true, stockist: stockistProfile, initialLedgerEntry });
+    } catch (err: any) {
+      res.status(500).json({ error: `Stockist creation failed: ${err.message}` });
+    }
+  });
+
+  // 3. GET /api/b2b/stockists/:stockistId - Retrieve stockist profile
+  app.get('/api/b2b/stockists/:stockistId', async (req: Request, res: Response): Promise<void> => {
+    const user = await requireAuth(req, res);
+    if (!user) return;
+
+    const { stockistId } = req.params;
+    const strStockistId = String(stockistId || '');
+
+    try {
+      const stockistRef = db.collection('b2b_stockists').doc(strStockistId);
+      const stockistSnap = await stockistRef.get();
+      if (!stockistSnap.exists) {
+        res.status(404).json({ error: `Stockist profile not found: ${strStockistId}` });
+        return;
+      }
+
+      const stockist = stockistSnap.data() as B2BStockistProfile;
+      const normalizedBranch = (stockist.branchId || 'daet').toLowerCase().trim();
+
+      if (user.role === 'branch_manager') {
+        const assigned = (user.assignedBranchId || 'daet').toLowerCase().trim();
+        if (normalizedBranch !== assigned) {
+          await logAuditEvent(
+            user.uid,
+            user.role,
+            normalizedBranch,
+            'unauthorized_cross_branch_b2b_access_blocked',
+            'b2b_stockists',
+            strStockistId,
+            false,
+            { targetBranch: normalizedBranch, assignedBranch: assigned },
+            req
+          );
+          res.status(403).json({ error: 'Access Denied: Branch managers cannot access stockists of other branches.' });
+          return;
+        }
+      }
+
+      res.status(200).json({ success: true, stockist });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  // 4. POST /api/b2b/stockists/:stockistId/deposits - Add security deposit
+  app.post('/api/b2b/stockists/:stockistId/deposits', async (req: Request, res: Response): Promise<void> => {
+    const user = await requireAuth(req, res);
+    if (!user) return;
+
+    if (user.role !== 'branch_manager' && user.role !== 'regional_director' && user.role !== 'super_admin') {
+      res.status(403).json({ error: 'Access Denied: Recording security deposits requires staff role.' });
+      return;
+    }
+
+    const { stockistId } = req.params;
+    const strStockistId = String(stockistId || '');
+    const { amount, notes } = req.body;
+
+    const numAmount = Number(amount);
+    if (!numAmount || numAmount <= 0) {
+      res.status(400).json({ error: 'Deposit amount must be a positive number.' });
+      return;
+    }
+
+    try {
+      const stockistRef = db.collection('b2b_stockists').doc(strStockistId);
+      const stockistSnap = await stockistRef.get();
+      if (!stockistSnap.exists) {
+        res.status(404).json({ error: `Stockist not found: ${strStockistId}` });
+        return;
+      }
+
+      const stockist = stockistSnap.data() as B2BStockistProfile;
+      const normalizedBranch = (stockist.branchId || 'daet').toLowerCase().trim();
+
+      if (user.role === 'branch_manager') {
+        const assigned = (user.assignedBranchId || 'daet').toLowerCase().trim();
+        if (normalizedBranch !== assigned) {
+          await logAuditEvent(
+            user.uid,
+            user.role,
+            normalizedBranch,
+            'unauthorized_cross_branch_b2b_access_blocked',
+            'b2b_stockists',
+            strStockistId,
+            false,
+            { targetBranch: normalizedBranch, assignedBranch: assigned },
+            req
+          );
+          res.status(403).json({ error: 'Access Denied: Branch managers cannot update deposits for other branches.' });
+          return;
+        }
+      }
+
+      const nowIso = new Date().toISOString();
+      const prevDeposit = Number(stockist.depositBalance) || 0;
+      const newDeposit = prevDeposit + numAmount;
+      const mult = Number(stockist.creditMultiplier) || 2.0;
+      const newCreditLimit = newDeposit * mult;
+      const currentOutstanding = Number(stockist.outstandingBalance) || 0;
+      const newAvailableCredit = Math.max(0, newCreditLimit - currentOutstanding);
+
+      const updatedProfile: B2BStockistProfile = {
+        ...stockist,
+        depositBalance: newDeposit,
+        creditLimit: newCreditLimit,
+        availableCredit: newAvailableCredit,
+        updatedAt: nowIso,
+      };
+
+      await stockistRef.set(updatedProfile);
+
+      const ledgerId = `LEDGER-DEP-${Date.now()}-${crypto.randomBytes(2).toString('hex').toUpperCase()}`;
+      const ledgerEntry: B2BConsignmentLedgerEntry = {
+        id: ledgerId,
+        stockistId: strStockistId,
+        branchId: normalizedBranch,
+        type: 'deposit',
+        amount: numAmount,
+        previousDeposit: prevDeposit,
+        depositAfter: newDeposit,
+        previousOutstanding: currentOutstanding,
+        outstandingAfter: currentOutstanding,
+        notes: notes || 'Security deposit balance addition',
+        timestamp: nowIso,
+        performedBy: user.uid,
+      };
+      await db.collection('b2b_ledger').doc(ledgerId).set(ledgerEntry);
+
+      await logAuditEvent(
+        user.uid,
+        user.role,
+        normalizedBranch,
+        'b2b_deposit_recorded',
+        'b2b_stockists',
+        strStockistId,
+        true,
+        { amount: numAmount, newDeposit, newCreditLimit },
+        req
+      );
+
+      res.status(200).json({ success: true, stockist: updatedProfile, ledgerEntry });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  // 5. POST /api/b2b/stockists/:stockistId/payments - Pay down consignment balance (credit)
+  app.post('/api/b2b/stockists/:stockistId/payments', async (req: Request, res: Response): Promise<void> => {
+    const user = await requireAuth(req, res);
+    if (!user) return;
+
+    if (user.role !== 'branch_manager' && user.role !== 'regional_director' && user.role !== 'super_admin') {
+      res.status(403).json({ error: 'Access Denied: Recording consignment payments requires staff role.' });
+      return;
+    }
+
+    const { stockistId } = req.params;
+    const strStockistId = String(stockistId || '');
+    const { amount, notes } = req.body;
+
+    const numAmount = Number(amount);
+    if (!numAmount || numAmount <= 0) {
+      res.status(400).json({ error: 'Payment amount must be a positive number.' });
+      return;
+    }
+
+    try {
+      const stockistRef = db.collection('b2b_stockists').doc(strStockistId);
+      const stockistSnap = await stockistRef.get();
+      if (!stockistSnap.exists) {
+        res.status(404).json({ error: `Stockist not found: ${strStockistId}` });
+        return;
+      }
+
+      const stockist = stockistSnap.data() as B2BStockistProfile;
+      const normalizedBranch = (stockist.branchId || 'daet').toLowerCase().trim();
+
+      if (user.role === 'branch_manager') {
+        const assigned = (user.assignedBranchId || 'daet').toLowerCase().trim();
+        if (normalizedBranch !== assigned) {
+          res.status(403).json({ error: 'Access Denied: Branch managers cannot record payments for other branches.' });
+          return;
+        }
+      }
+
+      const nowIso = new Date().toISOString();
+      const prevOutstanding = Number(stockist.outstandingBalance) || 0;
+      const newOutstanding = Math.max(0, prevOutstanding - numAmount);
+      const creditLimit = Number(stockist.creditLimit) || 0;
+      const newAvailableCredit = Math.max(0, creditLimit - newOutstanding);
+
+      // Auto-unlock if outstanding is back under credit limit and was locked
+      let newStatus = stockist.status;
+      if (newStatus === 'locked' && newOutstanding <= creditLimit) {
+        newStatus = 'active';
+      }
+
+      const updatedProfile: B2BStockistProfile = {
+        ...stockist,
+        outstandingBalance: newOutstanding,
+        availableCredit: newAvailableCredit,
+        status: newStatus,
+        updatedAt: nowIso,
+      };
+
+      await stockistRef.set(updatedProfile);
+
+      const ledgerId = `LEDGER-PMT-${Date.now()}-${crypto.randomBytes(2).toString('hex').toUpperCase()}`;
+      const ledgerEntry: B2BConsignmentLedgerEntry = {
+        id: ledgerId,
+        stockistId: strStockistId,
+        branchId: normalizedBranch,
+        type: 'payment_credit',
+        amount: numAmount,
+        previousDeposit: stockist.depositBalance,
+        depositAfter: stockist.depositBalance,
+        previousOutstanding: prevOutstanding,
+        outstandingAfter: newOutstanding,
+        notes: notes || 'Consignment payment credit',
+        timestamp: nowIso,
+        performedBy: user.uid,
+      };
+      await db.collection('b2b_ledger').doc(ledgerId).set(ledgerEntry);
+
+      await logAuditEvent(
+        user.uid,
+        user.role,
+        normalizedBranch,
+        'b2b_payment_recorded',
+        'b2b_stockists',
+        strStockistId,
+        true,
+        { amount: numAmount, prevOutstanding, newOutstanding },
+        req
+      );
+
+      res.status(200).json({ success: true, stockist: updatedProfile, ledgerEntry });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  // 6. POST /api/b2b/stockists/:stockistId/status - Update account lock / active status
+  app.post('/api/b2b/stockists/:stockistId/status', async (req: Request, res: Response): Promise<void> => {
+    const user = await requireAuth(req, res);
+    if (!user) return;
+
+    if (user.role !== 'branch_manager' && user.role !== 'regional_director' && user.role !== 'super_admin') {
+      res.status(403).json({ error: 'Access Denied: Updating stockist status requires staff role.' });
+      return;
+    }
+
+    const { stockistId } = req.params;
+    const strStockistId = String(stockistId || '');
+    const { status, reason } = req.body;
+
+    if (!['active', 'locked', 'suspended'].includes(status)) {
+      res.status(400).json({ error: 'status must be active, locked, or suspended.' });
+      return;
+    }
+
+    try {
+      const stockistRef = db.collection('b2b_stockists').doc(strStockistId);
+      const stockistSnap = await stockistRef.get();
+      if (!stockistSnap.exists) {
+        res.status(404).json({ error: `Stockist not found: ${strStockistId}` });
+        return;
+      }
+
+      const stockist = stockistSnap.data() as B2BStockistProfile;
+      const normalizedBranch = (stockist.branchId || 'daet').toLowerCase().trim();
+
+      if (user.role === 'branch_manager') {
+        const assigned = (user.assignedBranchId || 'daet').toLowerCase().trim();
+        if (normalizedBranch !== assigned) {
+          res.status(403).json({ error: 'Access Denied: Branch managers cannot update stockists of other branches.' });
+          return;
+        }
+      }
+
+      const nowIso = new Date().toISOString();
+      const updatedProfile: B2BStockistProfile = {
+        ...stockist,
+        status,
+        updatedAt: nowIso,
+      };
+
+      await stockistRef.set(updatedProfile);
+
+      await logAuditEvent(
+        user.uid,
+        user.role,
+        normalizedBranch,
+        'b2b_stockist_status_updated',
+        'b2b_stockists',
+        strStockistId,
+        true,
+        { previousStatus: stockist.status, newStatus: status, reason },
+        req
+      );
+
+      res.status(200).json({ success: true, stockist: updatedProfile });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  // 7. POST /api/b2b/orders - Place B2B wholesale consignment order with FEFO reservations
+  app.post('/api/b2b/orders', async (req: Request, res: Response): Promise<void> => {
+    const user = await requireAuth(req, res);
+    if (!user) return;
+
+    if (user.role !== 'branch_manager' && user.role !== 'regional_director' && user.role !== 'super_admin' && user.role !== 'customer') {
+      res.status(403).json({ error: 'Access Denied: Unauthorized role for B2B ordering.' });
+      return;
+    }
+
+    const { stockistId, branchId, items, deliveryMethod } = req.body;
+    if (!stockistId || typeof stockistId !== 'string') {
+      res.status(400).json({ error: 'stockistId is required.' });
+      return;
+    }
+    if (!branchId || typeof branchId !== 'string') {
+      res.status(400).json({ error: 'branchId is required.' });
+      return;
+    }
+    if (!Array.isArray(items) || items.length === 0) {
+      res.status(400).json({ error: 'items array must not be empty.' });
+      return;
+    }
+
+    const strStockistId = stockistId.trim();
+    const normalizedBranch = branchId.toLowerCase().trim();
+
+    try {
+      const stockistRef = db.collection('b2b_stockists').doc(strStockistId);
+      const stockistSnap = await stockistRef.get();
+      if (!stockistSnap.exists) {
+        res.status(404).json({ error: `Stockist profile not found: ${strStockistId}` });
+        return;
+      }
+
+      const stockist = stockistSnap.data() as B2BStockistProfile;
+      const stockistBranch = (stockist.branchId || 'daet').toLowerCase().trim();
+
+      if (stockistBranch !== normalizedBranch) {
+        res.status(400).json({ error: `Branch mismatch: Stockist belongs to ${stockistBranch}, cannot order from ${normalizedBranch}` });
+        return;
+      }
+
+      if (user.role === 'branch_manager') {
+        const assigned = (user.assignedBranchId || 'daet').toLowerCase().trim();
+        if (normalizedBranch !== assigned) {
+          await logAuditEvent(
+            user.uid,
+            user.role,
+            normalizedBranch,
+            'unauthorized_cross_branch_b2b_access_blocked',
+            'b2b_orders',
+            null,
+            false,
+            { targetBranch: normalizedBranch, assignedBranch: assigned },
+            req
+          );
+          res.status(403).json({ error: 'Access Denied: Branch managers cannot place orders for other branches.' });
+          return;
+        }
+      }
+
+      // Check account lockout
+      if (stockist.status === 'locked' || stockist.status === 'suspended') {
+        await logAuditEvent(
+          user.uid,
+          user.role,
+          normalizedBranch,
+          'b2b_order_blocked_account_locked',
+          'b2b_stockists',
+          strStockistId,
+          false,
+          { status: stockist.status },
+          req
+        );
+        res.status(403).json({ error: `Account is locked. Cannot place B2B wholesale orders (status: ${stockist.status}).` });
+        return;
+      }
+
+      // Normalize items & check minimum units
+      const pricing = calculateB2BWholesalePricing(stockist.tier, items);
+      if (!pricing.isEligible) {
+        res.status(400).json({
+          error: `Minimum order requirement not met for ${pricing.tierConfig.name}: minimum ${pricing.minUnits} units required (received: ${pricing.totalUnits}).`,
+          pricing,
+        });
+        return;
+      }
+
+      // Check available credit
+      const currentAvailable = stockist.availableCredit !== undefined ? stockist.availableCredit : (stockist.creditLimit - (stockist.outstandingBalance || 0));
+      if (pricing.wholesaleTotal > currentAvailable) {
+        await logAuditEvent(
+          user.uid,
+          user.role,
+          normalizedBranch,
+          'b2b_order_credit_limit_exceeded',
+          'b2b_stockists',
+          strStockistId,
+          false,
+          {
+            orderTotal: pricing.wholesaleTotal,
+            availableCredit: currentAvailable,
+            creditLimit: stockist.creditLimit,
+          },
+          req
+        );
+        res.status(400).json({
+          error: `Credit limit exceeded. Order total (PHP ${pricing.wholesaleTotal}) exceeds available credit (PHP ${currentAvailable}).`,
+          orderTotal: pricing.wholesaleTotal,
+          availableCredit: currentAvailable,
+          creditLimit: stockist.creditLimit,
+        });
+        return;
+      }
+
+      // Seed check
+      await ensureInventorySeeded();
+      const orderId = `HCI-B2B-${Date.now().toString().slice(-6)}`;
+      const nowIso = new Date().toISOString();
+
+      let orderRecord: any;
+      let updatedStockist: B2BStockistProfile;
+      let ledgerEntry: B2BConsignmentLedgerEntry;
+
+      await db.runTransaction(async (transaction: any) => {
+        // Re-read stockist inside transaction
+        const txStockistSnap = await transaction.get(stockistRef);
+        const txStockist = txStockistSnap.data() as B2BStockistProfile;
+
+        const txAvailable = txStockist.availableCredit !== undefined ? txStockist.availableCredit : (txStockist.creditLimit - (txStockist.outstandingBalance || 0));
+        if (pricing.wholesaleTotal > txAvailable) {
+          throw new Error(`CREDIT_LIMIT_EXCEEDED: Order total (${pricing.wholesaleTotal}) exceeds available credit (${txAvailable}).`);
+        }
+
+        // Perform FEFO reservations
+        const batchAllocations: Record<string, any[]> = {};
+        for (const it of pricing.items) {
+          const resResult = await performFefoReservationInternal(
+            transaction,
+            normalizedBranch,
+            it.skuId,
+            it.quantity,
+            nowIso
+          );
+          batchAllocations[it.skuId] = resResult.allocations;
+        }
+
+        // Update stockist balance
+        const prevOutstanding = Number(txStockist.outstandingBalance) || 0;
+        const newOutstanding = prevOutstanding + pricing.wholesaleTotal;
+        const newAvailable = Math.max(0, txStockist.creditLimit - newOutstanding);
+        const isLocked = newOutstanding >= txStockist.creditLimit && newAvailable === 0;
+
+        updatedStockist = {
+          ...txStockist,
+          outstandingBalance: newOutstanding,
+          availableCredit: newAvailable,
+          status: isLocked ? 'locked' : txStockist.status,
+          updatedAt: nowIso,
+        };
+        transaction.set(stockistRef, updatedStockist);
+
+        // Append to ledger
+        const ledgerId = `LEDGER-B2B-${orderId}`;
+        ledgerEntry = {
+          id: ledgerId,
+          stockistId: strStockistId,
+          branchId: normalizedBranch,
+          type: 'order_debit',
+          amount: pricing.wholesaleTotal,
+          previousDeposit: txStockist.depositBalance,
+          depositAfter: txStockist.depositBalance,
+          previousOutstanding: prevOutstanding,
+          outstandingAfter: newOutstanding,
+          referenceId: orderId,
+          notes: `Wholesale consignment order ${orderId} (${pricing.tierConfig.name})`,
+          timestamp: nowIso,
+          performedBy: user.uid,
+        };
+        const ledgerRef = db.collection('b2b_ledger').doc(ledgerId);
+        transaction.set(ledgerRef, ledgerEntry);
+
+        // Create order
+        orderRecord = {
+          id: orderId,
+          userId: user.uid,
+          stockistId: strStockistId,
+          orderType: 'b2b_wholesale',
+          tier: stockist.tier,
+          customer: {
+            businessName: stockist.businessName,
+            email: stockist.contactEmail || user.email || '',
+            uid: user.uid,
+          },
+          items: pricing.items,
+          batchAllocations,
+          branchId: normalizedBranch,
+          deliveryMethod: deliveryMethod || 'branch_pickup',
+          paymentMethod: 'consignment_credit',
+          paymentStatus: 'consignment_pending_settlement',
+          fulfillmentStatus: 'pending_processing',
+          subtotal: pricing.retailSubtotal,
+          discountAmount: pricing.discountAmount,
+          taxAmount: 0,
+          grandTotal: pricing.wholesaleTotal,
+          placedAt: nowIso,
+          updatedAt: nowIso,
+        };
+
+        const orderDocRef = db.collection('orders').doc(orderId);
+        transaction.set(orderDocRef, orderRecord);
+      });
+
+      await logAuditEvent(
+        user.uid,
+        user.role,
+        normalizedBranch,
+        'b2b_order_placed',
+        'orders',
+        orderId,
+        true,
+        {
+          stockistId: strStockistId,
+          tier: stockist.tier,
+          wholesaleTotal: pricing.wholesaleTotal,
+          units: pricing.totalUnits,
+        },
+        req
+      );
+
+      res.status(201).json({
+        success: true,
+        orderId,
+        order: orderRecord,
+        stockist: updatedStockist!,
+        ledgerEntry: ledgerEntry!,
+      });
+    } catch (err: any) {
+      if (err.message.startsWith('INSUFFICIENT_ELIGIBLE_STOCK:')) {
+        res.status(400).json({ error: err.message.replace(/^INSUFFICIENT_ELIGIBLE_STOCK:\s*/, '') });
+        return;
+      }
+      res.status(500).json({ error: `B2B Order placement failed: ${err.message}` });
+    }
+  });
+
+  // 8. GET /api/b2b/stockists/:stockistId/ledger - View stockist consignment ledger
+  app.get('/api/b2b/stockists/:stockistId/ledger', async (req: Request, res: Response): Promise<void> => {
+    const user = await requireAuth(req, res);
+    if (!user) return;
+
+    const { stockistId } = req.params;
+    const strStockistId = String(stockistId || '');
+
+    try {
+      const stockistRef = db.collection('b2b_stockists').doc(strStockistId);
+      const stockistSnap = await stockistRef.get();
+      if (!stockistSnap.exists) {
+        res.status(404).json({ error: `Stockist not found: ${strStockistId}` });
+        return;
+      }
+
+      const stockist = stockistSnap.data() as B2BStockistProfile;
+      const normalizedBranch = (stockist.branchId || 'daet').toLowerCase().trim();
+
+      if (user.role === 'branch_manager') {
+        const assigned = (user.assignedBranchId || 'daet').toLowerCase().trim();
+        if (normalizedBranch !== assigned) {
+          res.status(403).json({ error: 'Access Denied: Branch managers cannot view ledger of other branches.' });
+          return;
+        }
+      }
+
+      const ledgerSnap = await db.collection('b2b_ledger')
+        .where('stockistId', '==', strStockistId)
+        .get();
+
+      const entries: B2BConsignmentLedgerEntry[] = [];
+      ledgerSnap.forEach((doc: any) => entries.push(doc.data()));
+
+      // Sort by timestamp
+      entries.sort((a, b) => (a.timestamp || '').localeCompare(b.timestamp || ''));
+
+      res.status(200).json({ success: true, stockistId: strStockistId, ledger: entries });
     } catch (err: any) {
       res.status(500).json({ error: err.message });
     }

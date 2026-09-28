@@ -293,6 +293,48 @@
         "timestamp": { "type": "string", "format": "date-time" }
       },
       "required": ["id", "branchId", "skuId", "batchId", "adjustmentType", "quantityDelta", "reason", "performedByUid", "timestamp"]
+    },
+    "b2b_stockist": {
+      "title": "B2BStockistProfile",
+      "description": "Stockist partner profile with consignment tier, deposit, and credit controls.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "businessName": { "type": "string" },
+        "contactEmail": { "type": "string", "format": "email" },
+        "branchId": { "type": "string" },
+        "tier": { "type": "string", "enum": ["tier_1", "tier_2", "tier_3"] },
+        "status": { "type": "string", "enum": ["active", "locked", "suspended"] },
+        "depositBalance": { "type": "number", "minimum": 0 },
+        "creditMultiplier": { "type": "number", "minimum": 1 },
+        "creditLimit": { "type": "number", "minimum": 0 },
+        "outstandingBalance": { "type": "number", "minimum": 0 },
+        "availableCredit": { "type": "number", "minimum": 0 },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["id", "businessName", "branchId", "tier", "status", "depositBalance", "creditLimit", "availableCredit"]
+    },
+    "b2b_ledger": {
+      "title": "B2BConsignmentLedger",
+      "description": "Immutable ledger tracking consignment debits, payment credits, and security deposits.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "stockistId": { "type": "string" },
+        "branchId": { "type": "string" },
+        "type": { "type": "string", "enum": ["deposit", "order_debit", "payment_credit", "adjustment"] },
+        "amount": { "type": "number" },
+        "previousDeposit": { "type": "number" },
+        "depositAfter": { "type": "number" },
+        "previousOutstanding": { "type": "number" },
+        "outstandingAfter": { "type": "number" },
+        "referenceId": { "type": "string" },
+        "notes": { "type": "string" },
+        "timestamp": { "type": "string", "format": "date-time" },
+        "performedBy": { "type": "string" }
+      },
+      "required": ["id", "stockistId", "branchId", "type", "amount", "timestamp", "performedBy"]
     }
   },
   "firestore": {
@@ -351,6 +393,14 @@
     "/expenses/{expenseId}": {
       "schema": "expense",
       "description": "Branch expenses, procurement, and agricultural commodity processing costs."
+    },
+    "/b2b_stockists/{stockistId}": {
+      "schema": "b2b_stockist",
+      "description": "B2B stockist profiles, wholesale tiers, and credit controls."
+    },
+    "/b2b_ledger/{ledgerId}": {
+      "schema": "b2b_ledger",
+      "description": "Immutable B2B consignment and security deposit transaction ledger."
     }
   }
 }

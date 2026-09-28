@@ -169,5 +169,23 @@ service cloud.firestore {
       );
       allow write: if false;
     }
+
+    match /b2b_stockists/{stockistId} {
+      allow get, list: if isSignedIn() && (
+        isRegionalDirector() || 
+        isSuperAdmin() || 
+        (isBranchManager() && get(/databases/$(database)/documents/users/$(request.auth.uid)).data.assignedBranchId == resource.data.branchId)
+      );
+      allow write: if false; // ADR-009: Server-authoritative writes
+    }
+
+    match /b2b_ledger/{ledgerId} {
+      allow get, list: if isSignedIn() && (
+        isRegionalDirector() || 
+        isSuperAdmin() || 
+        (isBranchManager() && get(/databases/$(database)/documents/users/$(request.auth.uid)).data.assignedBranchId == resource.data.branchId)
+      );
+      allow write: if false; // ADR-009: Server-authoritative writes
+    }
   }
 }
