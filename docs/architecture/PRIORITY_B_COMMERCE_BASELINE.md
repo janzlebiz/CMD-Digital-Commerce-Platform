@@ -14,10 +14,16 @@ To eliminate local client-state order creation risks and enforce strict price an
 
 ### Key Enforcement Rules
 1. **Catalog Price Authority**: Client-provided item prices in payloads are strictly ignored. Item prices and subtotals are calculated server-side using the authoritative `PRODUCTS_CATALOG`.
-2. **Delivery Fee Calculation**: Shipping fees are generated via the `DeliveryProvider` abstraction (PHP 0 for `branch_pickup`, PHP 150 for `door_to_door`).
-3. **FEFO Inventory Reservation**: Atomic batch stock allocation and FEFO reservation are executed inside a Firestore database transaction.
-4. **Payment Intent Creation**: Generates a server-side `PaymentIntent` via the `PaymentProvider` abstraction.
-5. **Fulfillment Record Creation**: Generates a server-side `DeliveryFulfillment` record with tracking reference.
+2. **Required Checkout Idempotency**:
+   - Every `POST /api/orders/checkout` request MUST supply an `idempotencyKey` via header (`x-idempotency-key`) or request body (`idempotencyKey`).
+   - Requests missing `idempotencyKey` are rejected with `HTTP 400 Bad Request`.
+   - The key is scoped to the authenticated customer UID (`idempotency_keys/${user.uid}_${idempotencyKey}`).
+   - Detection and reservation occur atomically inside a Firestore transaction.
+   - Retries or concurrent duplicate submissions return the original order payload without creating duplicate order documents or reserving stock twice.
+3. **Delivery Fee Calculation**: Shipping fees are generated via the `DeliveryProvider` abstraction (PHP 0 for `branch_pickup`, PHP 150 for `door_to_door`).
+4. **FEFO Inventory Reservation**: Atomic batch stock allocation and FEFO reservation are executed inside a Firestore database transaction on `branch_batch_inventory`.
+5. **Payment Intent Creation**: Generates a server-side `PaymentIntent` via the `PaymentProvider` abstraction.
+6. **Fulfillment Record Creation**: Generates a server-side `DeliveryFulfillment` record with tracking reference.
 
 ---
 
@@ -151,7 +157,8 @@ Order lifecycle state transitions are enforced server-side with RBAC authorizati
 1. **Order Cancellation (`POST /api/orders/:orderId/cancel`)**:
    - **Allowed States**: `pending_processing`, `ready_for_pickup`.
    - **Authorization**: Customer owner (if `pending_processing`), assigned branch manager, regional director, super admin.
-   - **Action**: Releases/restocks reserved FEFO batch inventory, issues refund via `PaymentProvider`, sets `fulfillmentStatus = 'cancelled'`, `paymentStatus = 'refunded'`.
+   - **Exact Inventory Restoration Invariant**: Decrements `reservedQuantity` and increments `availableQuantity` on the exact `branch_batch_inventory` records associated with the order's FEFO batch allocations. Recomputes aggregate `/inventory/{branchId_skuId}` (`activeStock = sum(availableQuantity)`). Transaction state check prevents duplicate inventory restoration on repeated cancellation attempts.
+   - **Action**: Issues refund via `PaymentProvider`, sets `fulfillmentStatus = 'cancelled'`, `paymentStatus = 'refunded'`.
 2. **Return Request (`POST /api/orders/:orderId/return-request`)**:
    - **Allowed States**: `completed`. (Fails with HTTP 400 `INVALID_ORDER_STATE_TRANSITION` on uncompleted orders).
    - **Authorization**: Customer owner or admin roles.
@@ -159,11 +166,17 @@ Order lifecycle state transitions are enforced server-side with RBAC authorizati
 3. **Return Processing (`POST /api/orders/:orderId/return-process`)**:
    - **Allowed States**: `return_requested`.
    - **Authorization**: Staff roles (`branch_manager`, `regional_director`, `super_admin`).
-   - **Action**: Decision `approve` restocks batch inventory (if re-usable) and issues refund via `PaymentProvider`, setting `fulfillmentStatus = 'returned'`, `paymentStatus = 'refunded'`. Decision `reject` reverts status to `completed`.
+   - **Exact Inventory Restoration Invariant**: When `decision === 'approve'` and `restockInventory === true`, increments `availableQuantity` on the exact `branch_batch_inventory` records. Recomputes aggregate `/inventory/{branchId_skuId}`. Transaction state check prevents duplicate inventory restoration on repeated return processing attempts.
+   - **Action**: Decision `approve` sets `fulfillmentStatus = 'returned'`, `paymentStatus = 'refunded'`. Decision `reject` reverts status to `completed`.
 4. **Order Refund (`POST /api/orders/:orderId/refund`)**:
    - **Allowed States**: `cancelled`, `returned`, `return_requested`.
    - **Authorization**: Staff roles.
    - **Action**: Processes refund through `PaymentProvider` and updates `paymentStatus = 'refunded'`.
+
+### Client-Side State Model
+- Client-side React state in `useEcommerce` is strictly **advisory**.
+- Local state MUST NOT convert an order to `cancelled` or modify order state when server mutations fail.
+- All order mutations require valid Firebase ID tokens (or authenticated demo tokens in preview mode) and propagate server responses to caller hooks and UI.
 
 ---
 

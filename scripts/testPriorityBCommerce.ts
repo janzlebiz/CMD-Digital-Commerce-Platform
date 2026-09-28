@@ -30,28 +30,43 @@ function createCommerceMockDb() {
     inventory: new Map(),
     product_batches: new Map(),
     branch_batch_inventory: new Map(),
+    idempotency_keys: new Map(),
     audit_logs: new Map(),
   };
 
-  // Seed branch batch inventory and product batches
+  // Seed product batches, branch_batch_inventory, and aggregate inventory
   const daetBatch = {
     id: 'BAT-DAET-CMD65-01',
     batchId: 'BAT-DAET-CMD65-01',
     branchId: 'daet',
     skuId: 'hci-cmd-65ml',
     activeStock: 100,
+    qualityControlStatus: 'passed',
     expiryDate: '2028-12-31',
     createdAt: new Date().toISOString()
   };
   store.product_batches.set('BAT-DAET-CMD65-01', daetBatch);
+
+  const daetBranchBatch = {
+    id: 'daet_BAT-DAET-CMD65-01',
+    branchId: 'daet',
+    skuId: 'hci-cmd-65ml',
+    batchId: 'BAT-DAET-CMD65-01',
+    availableQuantity: 100,
+    reservedQuantity: 0,
+    expiryDate: '2028-12-31',
+    createdAt: new Date().toISOString()
+  };
+  store.branch_batch_inventory.set('daet_BAT-DAET-CMD65-01', daetBranchBatch);
 
   const daetAgg = {
     id: 'daet_hci-cmd-65ml',
     branchId: 'daet',
     skuId: 'hci-cmd-65ml',
     activeStock: 100,
+    availableStock: 100,
     reservedStock: 0,
-    branchBatches: [daetBatch],
+    branchBatches: [daetBranchBatch],
     updatedAt: new Date().toISOString()
   };
   store.inventory.set('daet_hci-cmd-65ml', daetAgg);
@@ -103,7 +118,11 @@ function createCommerceMockDb() {
                 const results: any[] = [];
                 for (const item of colMap.values()) {
                   if (item[field] === val && item[f2] === v2) {
-                    results.push({ data: () => item });
+                    results.push({
+                      id: item.id || item.batchId,
+                      data: () => item,
+                      ref: mockDb.collection(colName).doc(item.id || item.batchId)
+                    });
                   }
                 }
                 return {
@@ -117,7 +136,11 @@ function createCommerceMockDb() {
               const results: any[] = [];
               for (const item of colMap.values()) {
                 if (item[field] === val) {
-                  results.push({ data: () => item });
+                  results.push({
+                    id: item.id || item.batchId,
+                    data: () => item,
+                    ref: mockDb.collection(colName).doc(item.id || item.batchId)
+                  });
                 }
               }
               return {
@@ -174,11 +197,27 @@ async function runTests() {
   const customerToken = 'DEMO_TOKEN_customer';
   const customerBobToken = 'DEMO_TOKEN_customer_bob';
   const managerToken = 'DEMO_TOKEN_branch_manager';
-  const adminToken = 'DEMO_TOKEN_super_admin';
 
   try {
-    // 1. Customer Checkout uses /api/orders/checkout server endpoint
+    // 1. Missing idempotencyKey is rejected with HTTP 400 Bad Request
+    const missingKeyRes = await fetch(`http://127.0.0.1:${port}/api/orders/checkout`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${customerToken}`
+      },
+      body: JSON.stringify({
+        branchId: 'daet',
+        deliveryMethod: 'door_to_door',
+        paymentMethod: 'cash_on_delivery',
+        items: [{ skuId: 'hci-cmd-65ml', quantity: 2 }]
+      })
+    });
+    assert(missingKeyRes.status === 400, '1. Checkout request without idempotencyKey rejected with HTTP 400 Bad Request');
+
+    // 2. Customer Checkout with valid idempotencyKey uses /api/orders/checkout server endpoint
     const checkoutPayload = {
+      idempotencyKey: 'key_test_checkout_001',
       branchId: 'daet',
       deliveryMethod: 'door_to_door',
       paymentMethod: 'cash_on_delivery',
@@ -198,66 +237,126 @@ async function runTests() {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
-        Authorization: `Bearer ${customerToken}`
+        Authorization: `Bearer ${customerToken}`,
+        'x-idempotency-key': 'key_test_checkout_001'
       },
       body: JSON.stringify(checkoutPayload)
     });
 
     const checkoutData: any = await checkoutRes.json();
-    assert(checkoutRes.status === 200, '1. Authoritative server checkout POST /api/orders/checkout returns HTTP 200 OK');
-    assert(checkoutData.success === true && !!checkoutData.orderId, '2. Checkout response returns valid server order ID');
+    assert(checkoutRes.status === 200, '2. Authoritative server checkout POST /api/orders/checkout returns HTTP 200 OK');
+    assert(checkoutData.success === true && !!checkoutData.orderId, '3. Checkout response returns valid server order ID');
 
     const createdOrder = checkoutData.order;
-    assert(createdOrder.userId === 'demo-customer-uid', '3. Order correctly assigned to authenticated customer UID');
-    
-    // 2. Server remains authoritative for price & totals
-    // Catalog price for 65ml bottle is PHP 1,200. Quantity 2 = PHP 2,400. Door-to-door shipping = PHP 150. Total = PHP 2,550.
-    assert(createdOrder.subtotal === 2400, '4. Server authoritatively computes subtotal from PRODUCTS_CATALOG (PHP 2,400) ignoring manipulated client price');
-    assert(createdOrder.shippingFee === 150, '5. Delivery abstraction calculates door-to-door shipping fee (PHP 150)');
-    assert(createdOrder.grandTotal === 2550, '6. Server authoritatively calculates grand total (PHP 2,550)');
+    assert(createdOrder.userId === 'demo-customer-uid', '4. Order correctly assigned to authenticated customer UID');
 
-    // 3. Payment Abstraction Verification
-    assert(!!createdOrder.paymentIntent, '7. Order includes server-generated PaymentIntent structure');
-    assert(createdOrder.paymentIntent.status === 'pending_payment', '8. COD PaymentIntent has pending_payment status');
-    assert(createdOrder.paymentIntent.amount === 2550, '9. PaymentIntent amount matches grand total');
+    // 3. Server remains authoritative for price & totals
+    assert(createdOrder.subtotal === 2400, '5. Server authoritatively computes subtotal from PRODUCTS_CATALOG (PHP 2,400) ignoring manipulated client price');
+    assert(createdOrder.shippingFee === 150, '6. Delivery abstraction calculates door-to-door shipping fee (PHP 150)');
+    assert(createdOrder.grandTotal === 2550, '7. Server authoritatively calculates grand total (PHP 2,550)');
 
-    // 4. Delivery Abstraction Verification
-    assert(!!createdOrder.fulfillment, '10. Order includes server-generated DeliveryFulfillment structure');
-    assert(createdOrder.fulfillment.deliveryMethod === 'door_to_door', '11. Fulfillment records correct delivery method');
-    assert(createdOrder.fulfillment.trackingNumber.startsWith('TRK-'), '12. Fulfillment generates valid tracking reference');
+    // 4. Payment & Delivery Abstractions
+    assert(!!createdOrder.paymentIntent, '8. Order includes server-generated PaymentIntent structure');
+    assert(createdOrder.paymentIntent.status === 'pending_payment', '9. COD PaymentIntent has pending_payment status');
+    assert(createdOrder.paymentIntent.amount === 2550, '10. PaymentIntent amount matches grand total');
+    assert(!!createdOrder.fulfillment, '11. Order includes server-generated DeliveryFulfillment structure');
+    assert(createdOrder.fulfillment.deliveryMethod === 'door_to_door', '12. Fulfillment records correct delivery method');
+    assert(createdOrder.fulfillment.trackingNumber.startsWith('TRK-'), '13. Fulfillment generates valid tracking reference');
 
-    // 5. Digital Wallet Checkout Payment Abstraction
+    // 5. Idempotent Retry Verification (Identical retry returns same order)
+    const retryCheckoutRes = await fetch(`http://127.0.0.1:${port}/api/orders/checkout`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${customerToken}`,
+        'x-idempotency-key': 'key_test_checkout_001'
+      },
+      body: JSON.stringify(checkoutPayload)
+    });
+    const retryData: any = await retryCheckoutRes.json();
+    assert(retryCheckoutRes.status === 200, '14. Idempotent retry returns HTTP 200 OK');
+    assert(retryData.orderId === checkoutData.orderId, '15. Idempotent retry returns identical server order ID');
+    assert(retryData.idempotentReplay === true, '16. Server indicates idempotent replay response');
+
+    // 6. Concurrent Duplicate Checkout Protection
+    const concurrentKey = 'key_test_checkout_concurrent_999';
+    const concurrentPayload = {
+      ...checkoutPayload,
+      idempotencyKey: concurrentKey,
+      items: [{ skuId: 'hci-cmd-65ml', quantity: 3 }]
+    };
+
+    const availBeforeConcurrent = store.branch_batch_inventory.get('daet_BAT-DAET-CMD65-01').availableQuantity;
+
+    const [concRes1, concRes2] = await Promise.all([
+      fetch(`http://127.0.0.1:${port}/api/orders/checkout`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${customerToken}`,
+          'x-idempotency-key': concurrentKey
+        },
+        body: JSON.stringify(concurrentPayload)
+      }),
+      fetch(`http://127.0.0.1:${port}/api/orders/checkout`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${customerToken}`,
+          'x-idempotency-key': concurrentKey
+        },
+        body: JSON.stringify(concurrentPayload)
+      })
+    ]);
+
+    const concData1: any = await concRes1.json();
+    const concData2: any = await concRes2.json();
+
+    assert(concRes1.status === 200 && concRes2.status === 200, '17. Concurrent duplicate requests both succeed with HTTP 200 OK');
+    assert(concData1.orderId === concData2.orderId, '18. Concurrent duplicate submissions produce exactly ONE order ID');
+
+    // Zero duplicate order creation
+    const matchingKeyOrders = Array.from(store.orders.values()).filter((o) => o.idempotencyKey === concurrentKey);
+    assert(matchingKeyOrders.length === 1, '19. Exactly ONE order document exists in database for concurrent key (zero duplicate order creation)');
+
+    // Zero duplicate inventory reservation
+    const availAfterConcurrent = store.branch_batch_inventory.get('daet_BAT-DAET-CMD65-01').availableQuantity;
+    assert(availBeforeConcurrent - availAfterConcurrent === 3, '20. Inventory reserved exactly ONCE (3 units) across concurrent duplicate checkouts (zero duplicate reservation)');
+
+    // 7. Digital Wallet Checkout
     const walletCheckoutRes = await fetch(`http://127.0.0.1:${port}/api/orders/checkout`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
-        Authorization: `Bearer ${customerToken}`
+        Authorization: `Bearer ${customerToken}`,
+        'x-idempotency-key': 'key_test_wallet_101'
       },
       body: JSON.stringify({
         ...checkoutPayload,
+        idempotencyKey: 'key_test_wallet_101',
         paymentMethod: 'gcash',
         deliveryMethod: 'branch_pickup'
       })
     });
     const walletData: any = await walletCheckoutRes.json();
-    assert(walletCheckoutRes.status === 200, '13. GCash checkout creates order via payment abstraction');
-    assert(walletData.order.paymentIntent.status === 'paid', '14. Simulated GCash payment adapter sets intent status to paid');
-    assert(walletData.order.shippingFee === 0, '15. Branch pickup delivery quote returns PHP 0 shipping fee');
+    assert(walletCheckoutRes.status === 200, '21. GCash checkout creates order via payment abstraction');
+    assert(walletData.order.paymentIntent.status === 'paid', '22. Simulated GCash payment adapter sets intent status to paid');
+    assert(walletData.order.shippingFee === 0, '23. Branch pickup delivery quote returns PHP 0 shipping fee');
 
     const orderId = createdOrder.id;
 
-    // 6. IDOR Protection on Order Retrieval
+    // 8. IDOR Protection on Order Retrieval
     const unauthorizedGetRes = await fetch(`http://127.0.0.1:${port}/api/orders/${orderId}`, {
       headers: { Authorization: `Bearer ${customerBobToken}` }
     });
-    assert(unauthorizedGetRes.status === 403, '16. Unauthorized customer Bob blocked from reading Alice\'s order (HTTP 403)');
+    assert(unauthorizedGetRes.status === 403, '24. Unauthorized customer Bob blocked from reading Alice\'s order (HTTP 403)');
 
     const authorizedGetRes = await fetch(`http://127.0.0.1:${port}/api/orders/${orderId}`, {
       headers: { Authorization: `Bearer ${customerToken}` }
     });
-    assert(authorizedGetRes.status === 200, '17. Customer Alice can retrieve her own order (HTTP 200)');
+    assert(authorizedGetRes.status === 200, '25. Customer Alice can retrieve her own order (HTTP 200)');
 
-    // 7. Invalid Order Cancellation (Unauthorized Customer Bob attempting cancellation)
+    // 9. Invalid Order Cancellation by Unauthorized Customer Bob
     const unauthorizedCancelRes = await fetch(`http://127.0.0.1:${port}/api/orders/${orderId}/cancel`, {
       method: 'POST',
       headers: {
@@ -266,9 +365,9 @@ async function runTests() {
       },
       body: JSON.stringify({ reason: 'Malicious cancellation' })
     });
-    assert(unauthorizedCancelRes.status === 403, '18. Unauthorized customer Bob blocked from cancelling Alice\'s order (HTTP 403)');
+    assert(unauthorizedCancelRes.status === 403, '26. Unauthorized customer Bob blocked from cancelling Alice\'s order (HTTP 403)');
 
-    // 8. Invalid Return Request on Uncompleted Order (HTTP 400 Invalid Transition)
+    // 10. Invalid Return Request on Uncompleted Order
     const invalidReturnRes = await fetch(`http://127.0.0.1:${port}/api/orders/${orderId}/return-request`, {
       method: 'POST',
       headers: {
@@ -278,10 +377,12 @@ async function runTests() {
       body: JSON.stringify({ reason: 'Damaged item' })
     });
     const invalidReturnData: any = await invalidReturnRes.json();
-    assert(invalidReturnRes.status === 400, '19. Return request rejected on uncompleted pending order with HTTP 400');
-    assert(invalidReturnData.error.includes('INVALID_ORDER_STATE_TRANSITION'), '20. Return error explicitly cites INVALID_ORDER_STATE_TRANSITION');
+    assert(invalidReturnRes.status === 400, '27. Return request rejected on uncompleted pending order with HTTP 400');
+    assert(invalidReturnData.error.includes('INVALID_ORDER_STATE_TRANSITION'), '28. Return error explicitly cites INVALID_ORDER_STATE_TRANSITION');
 
-    // 9. Valid Order Cancellation Lifecycle Transition & FEFO Inventory Restock
+    // 11. Cancellation Inventory Restoration Invariant Verification
+    const branchBatchBeforeCancel = { ...store.branch_batch_inventory.get('daet_BAT-DAET-CMD65-01') };
+
     const validCancelRes = await fetch(`http://127.0.0.1:${port}/api/orders/${orderId}/cancel`, {
       method: 'POST',
       headers: {
@@ -291,11 +392,18 @@ async function runTests() {
       body: JSON.stringify({ reason: 'Changed my mind' })
     });
     const cancelData: any = await validCancelRes.json();
-    assert(validCancelRes.status === 200, '21. Authorized customer Alice cancels pending order (HTTP 200)');
-    assert(cancelData.order.fulfillmentStatus === 'cancelled', '22. Order fulfillment status transitions to cancelled');
-    assert(cancelData.order.paymentStatus === 'refunded', '23. Payment status transitions to refunded');
+    assert(validCancelRes.status === 200, '29. Authorized customer Alice cancels pending order (HTTP 200)');
+    assert(cancelData.order.fulfillmentStatus === 'cancelled', '30. Order fulfillment status transitions to cancelled');
+    assert(cancelData.order.paymentStatus === 'refunded', '31. Payment status transitions to refunded');
 
-    // 10. Invalid Cancellation Attempt on Already Cancelled Order
+    const branchBatchAfterCancel = store.branch_batch_inventory.get('daet_BAT-DAET-CMD65-01');
+    const aggAfterCancel = store.inventory.get('daet_hci-cmd-65ml');
+
+    assert(branchBatchAfterCancel.availableQuantity === branchBatchBeforeCancel.availableQuantity + 2, '32. Cancellation restores exact available quantity (+2 units) on branch_batch_inventory');
+    assert(branchBatchAfterCancel.reservedQuantity === branchBatchBeforeCancel.reservedQuantity - 2, '33. Cancellation releases exact reserved quantity (-2 units) on branch_batch_inventory');
+    assert(aggAfterCancel.activeStock === branchBatchAfterCancel.availableQuantity && aggAfterCancel.reservedStock === branchBatchAfterCancel.reservedQuantity, '34. Aggregate activeStock and reservedStock match branch_batch_inventory sums after cancellation');
+
+    // 12. Repeated Cancellation Protection (Cannot restore inventory twice)
     const doubleCancelRes = await fetch(`http://127.0.0.1:${port}/api/orders/${orderId}/cancel`, {
       method: 'POST',
       headers: {
@@ -304,17 +412,24 @@ async function runTests() {
       },
       body: JSON.stringify({ reason: 'Cancel again' })
     });
-    assert(doubleCancelRes.status === 400, '24. Cancelling an already cancelled order rejected with HTTP 400 INVALID_ORDER_STATE_TRANSITION');
+    assert(doubleCancelRes.status === 400, '35. Cancelling an already cancelled order rejected with HTTP 400 INVALID_ORDER_STATE_TRANSITION');
 
-    // 11. Complete Return Lifecycle: Fulfill -> Return Request -> Return Process
-    // First create a new order and mark it completed/fulfilled
+    const branchBatchAfterDoubleCancel = store.branch_batch_inventory.get('daet_BAT-DAET-CMD65-01');
+    assert(branchBatchAfterDoubleCancel.availableQuantity === branchBatchAfterCancel.availableQuantity, '36. Repeated cancellation does NOT restore inventory twice (availableQuantity unchanged)');
+    assert(branchBatchAfterDoubleCancel.reservedQuantity === branchBatchAfterCancel.reservedQuantity, '37. Repeated cancellation does NOT alter reserved quantity');
+
+    // 13. Complete Return Lifecycle & Inventory Restoration Verification
     const order2Res = await fetch(`http://127.0.0.1:${port}/api/orders/checkout`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
-        Authorization: `Bearer ${customerToken}`
+        Authorization: `Bearer ${customerToken}`,
+        'x-idempotency-key': 'key_test_order2_202'
       },
-      body: JSON.stringify(checkoutPayload)
+      body: JSON.stringify({
+        ...checkoutPayload,
+        idempotencyKey: 'key_test_order2_202'
+      })
     });
     const order2Data: any = await order2Res.json();
     const order2Id = order2Data.orderId;
@@ -324,9 +439,9 @@ async function runTests() {
       method: 'POST',
       headers: { Authorization: `Bearer ${managerToken}` }
     });
-    assert(fulfillRes.status === 200, '25. Branch manager fulfills order2 (HTTP 200)');
+    assert(fulfillRes.status === 200, '38. Branch manager fulfills order2 (HTTP 200)');
 
-    // Manually mark fulfillmentStatus to 'completed' for return testing
+    // Set order status to completed for return testing
     store.orders.get(order2Id).fulfillmentStatus = 'completed';
 
     // Customer submits return request
@@ -339,8 +454,8 @@ async function runTests() {
       body: JSON.stringify({ reason: 'Bottle seal broken during transport' })
     });
     const returnReqData: any = await returnReqRes.json();
-    assert(returnReqRes.status === 200, '26. Customer submits return request for completed order (HTTP 200)');
-    assert(returnReqData.order.fulfillmentStatus === 'return_requested', '27. Order status transitions to return_requested');
+    assert(returnReqRes.status === 200, '39. Customer submits return request for completed order (HTTP 200)');
+    assert(returnReqData.order.fulfillmentStatus === 'return_requested', '40. Order status transitions to return_requested');
 
     // Unauthorized customer Bob attempts to process return
     const unauthReturnProcess = await fetch(`http://127.0.0.1:${port}/api/orders/${order2Id}/return-process`, {
@@ -351,9 +466,11 @@ async function runTests() {
       },
       body: JSON.stringify({ decision: 'approve' })
     });
-    assert(unauthReturnProcess.status === 403, '28. Customer Bob blocked from processing return approval (HTTP 403)');
+    assert(unauthReturnProcess.status === 403, '41. Customer Bob blocked from processing return approval (HTTP 403)');
 
-    // Authorized Branch Manager approves return and issues refund
+    // Approved Return Inventory Restoration
+    const branchBatchBeforeReturn = { ...store.branch_batch_inventory.get('daet_BAT-DAET-CMD65-01') };
+
     const approveReturnRes = await fetch(`http://127.0.0.1:${port}/api/orders/${order2Id}/return-process`, {
       method: 'POST',
       headers: {
@@ -363,9 +480,29 @@ async function runTests() {
       body: JSON.stringify({ decision: 'approve', restockInventory: true, notes: 'Inspected and restocked' })
     });
     const approveReturnData: any = await approveReturnRes.json();
-    assert(approveReturnRes.status === 200, '29. Branch manager approves return request (HTTP 200)');
-    assert(approveReturnData.order.fulfillmentStatus === 'returned', '30. Order status transitions to returned');
-    assert(approveReturnData.order.paymentStatus === 'refunded', '31. Payment status transitions to refunded upon return approval');
+    assert(approveReturnRes.status === 200, '42. Branch manager approves return request (HTTP 200)');
+    assert(approveReturnData.order.fulfillmentStatus === 'returned', '43. Order status transitions to returned');
+    assert(approveReturnData.order.paymentStatus === 'refunded', '44. Payment status transitions to refunded upon return approval');
+
+    const branchBatchAfterReturn = store.branch_batch_inventory.get('daet_BAT-DAET-CMD65-01');
+    const aggAfterReturn = store.inventory.get('daet_hci-cmd-65ml');
+
+    assert(branchBatchAfterReturn.availableQuantity === branchBatchBeforeReturn.availableQuantity + 2, '45. Approved return restores exact stock (+2 units) to branch_batch_inventory');
+    assert(aggAfterReturn.activeStock === branchBatchAfterReturn.availableQuantity && aggAfterReturn.reservedStock === branchBatchAfterReturn.reservedQuantity, '46. Aggregate activeStock and reservedStock match branch_batch_inventory sums after return restoration');
+
+    // 14. Repeated Return Processing Protection (Cannot restore inventory twice)
+    const doubleReturnRes = await fetch(`http://127.0.0.1:${port}/api/orders/${order2Id}/return-process`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${managerToken}`
+      },
+      body: JSON.stringify({ decision: 'approve', restockInventory: true, notes: 'Approve again' })
+    });
+    assert(doubleReturnRes.status === 400, '47. Processing return again on returned order rejected with HTTP 400 INVALID_ORDER_STATE_TRANSITION');
+
+    const branchBatchAfterDoubleReturn = store.branch_batch_inventory.get('daet_BAT-DAET-CMD65-01');
+    assert(branchBatchAfterDoubleReturn.availableQuantity === branchBatchAfterReturn.availableQuantity, '48. Repeated return processing does NOT restore inventory twice');
 
   } finally {
     await new Promise<void>((resolve) => server.close(() => resolve()));

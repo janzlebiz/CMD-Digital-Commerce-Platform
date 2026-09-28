@@ -292,6 +292,7 @@ async function runMilestone25TestSuite() {
       '/api/orders/checkout',
       'POST',
       {
+        idempotencyKey: 'key_p7_m25_001',
         branchId: 'daet',
         items: [{ skuId: 'hci-cmd-65ml', quantity: 10 }],
         deliveryMethod: 'branch_pickup',
@@ -315,6 +316,7 @@ async function runMilestone25TestSuite() {
       '/api/orders/checkout',
       'POST',
       {
+        idempotencyKey: 'key_p7_m25_002',
         branchId: 'daet',
         items: [{ skuId: 'hci-cmd-65ml', quantity: availABefore + 5 }],
         deliveryMethod: 'branch_pickup',
@@ -363,6 +365,7 @@ async function runMilestone25TestSuite() {
       '/api/orders/checkout',
       'POST',
       {
+        idempotencyKey: 'key_p7_m25_003',
         branchId: 'daet',
         items: [{ skuId: 'hci-cmd-65ml', quantity: 2 }],
         deliveryMethod: 'branch_pickup',
@@ -396,6 +399,7 @@ async function runMilestone25TestSuite() {
       '/api/orders/checkout',
       'POST',
       {
+        idempotencyKey: 'key_p7_m25_004',
         branchId: 'daet',
         items: [{ skuId: 'hci-cmd-65ml', quantity: 999999 }],
         deliveryMethod: 'branch_pickup',
@@ -452,6 +456,7 @@ async function runMilestone25TestSuite() {
       '/api/orders/checkout',
       'POST',
       {
+        idempotencyKey: 'key_p7_m25_005',
         branchId: 'daet',
         items: [
           { skuId: 'hci-cmd-65ml', quantity: 3 },

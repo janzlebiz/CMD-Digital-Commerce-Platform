@@ -1862,6 +1862,18 @@ export function createExpressApp(deps: ServerDependencies = {}): Express {
     const user = await requireAuth(req, res);
     if (!user) return;
 
+    const idempotencyKey = (
+      req.headers['x-idempotency-key'] ||
+      req.headers['idempotency-key'] ||
+      req.body?.idempotencyKey ||
+      req.body?.idempotency_key
+    )?.toString().trim();
+
+    if (!idempotencyKey) {
+      res.status(400).json({ error: 'Missing required idempotencyKey for checkout.' });
+      return;
+    }
+
     const { items, branchId, deliveryMethod, paymentMethod, customer } = req.body;
     if (!Array.isArray(items) || items.length === 0) {
       res.status(400).json({ error: 'items array must not be empty.' });
@@ -1899,16 +1911,30 @@ export function createExpressApp(deps: ServerDependencies = {}): Express {
 
     const orderId = `HCI-ORD-${Date.now().toString().slice(-6)}`;
     const nowIso = new Date().toISOString();
+    const keyDocId = `${user.uid}_${idempotencyKey}`;
+    let orderRecord: any;
+    let isReplay = false;
+    let finalOrderId = orderId;
 
     try {
       await ensureInventorySeeded();
-      let orderRecord: any;
 
       const deliveryAdapter = new StandardDeliveryAdapter();
       const deliveryQuote = await deliveryAdapter.calculateShippingFee(deliveryMethod || 'branch_pickup', normalizedBranch, customer?.shippingAddress);
       const shippingFee = deliveryQuote.shippingFee;
 
       await db.runTransaction(async (transaction: any) => {
+        const keyRef = db.collection('idempotency_keys').doc(keyDocId);
+        const keySnap = await transaction.get(keyRef);
+
+        if (keySnap && keySnap.exists) {
+          const existingData = typeof keySnap.data === 'function' ? keySnap.data() : keySnap.data;
+          finalOrderId = existingData.orderId;
+          orderRecord = existingData.orderRecord;
+          isReplay = true;
+          return;
+        }
+
         let subtotal = 0;
         const computedItems = [];
         const batchAllocations: Record<string, any[]> = {};
@@ -1960,29 +1986,40 @@ export function createExpressApp(deps: ServerDependencies = {}): Express {
           shippingFee,
           taxAmount: 0,
           grandTotal,
+          idempotencyKey,
           placedAt: nowIso,
           updatedAt: nowIso,
         };
 
         const orderDocRef = db.collection('orders').doc(orderId);
         transaction.set(orderDocRef, orderRecord);
+
+        transaction.set(keyRef, {
+          userId: user.uid,
+          idempotencyKey,
+          orderId,
+          orderRecord,
+          createdAt: nowIso,
+        });
       });
 
-      await logAuditEvent(
-        user.uid,
-        user.role,
-        normalizedBranch,
-        'order_placed',
-        'orders',
-        orderId,
-        true,
-        { grandTotal: orderRecord.grandTotal, branchId: normalizedBranch },
-        req
-      );
+      if (!isReplay) {
+        await logAuditEvent(
+          user.uid,
+          user.role,
+          normalizedBranch,
+          'order_placed',
+          'orders',
+          finalOrderId,
+          true,
+          { grandTotal: orderRecord.grandTotal, branchId: normalizedBranch, idempotencyKey },
+          req
+        );
+      }
 
-      res.status(200).json({ success: true, orderId, order: orderRecord });
+      res.status(200).json({ success: true, orderId: finalOrderId, order: orderRecord, idempotentReplay: isReplay });
     } catch (err: any) {
-      if (err.message.startsWith('INSUFFICIENT_ELIGIBLE_STOCK:')) {
+      if (err.message && err.message.startsWith('INSUFFICIENT_ELIGIBLE_STOCK:')) {
         res.status(400).json({ error: err.message.replace(/^INSUFFICIENT_ELIGIBLE_STOCK:\s*/, '') });
         return;
       }
@@ -2094,26 +2131,75 @@ export function createExpressApp(deps: ServerDependencies = {}): Express {
 
       await db.runTransaction(async (transaction: any) => {
         const txOrderSnap = await transaction.get(orderRef);
-        const txOrderData = txOrderSnap.data();
+        if (!txOrderSnap || !txOrderSnap.exists) return;
+        const txOrderData = typeof txOrderSnap.data === 'function' ? txOrderSnap.data() : txOrderSnap.data;
 
         if (txOrderData.fulfillmentStatus === 'cancelled') {
           return;
         }
 
+        const normalizedBranch = (txOrderData.branchId || 'daet').toLowerCase().trim();
         const batchAllocations = txOrderData.batchAllocations || {};
+        const affectedSkus = new Set<string>();
+        const updatedBatches: any[] = [];
+
         for (const [skuId, allocList] of Object.entries(batchAllocations)) {
           if (!Array.isArray(allocList)) continue;
+          affectedSkus.add(skuId);
+
           for (const alloc of allocList as any[]) {
-            const batchRef = db.collection('product_batches').doc(alloc.batchId);
-            const batchSnap = await transaction.get(batchRef);
-            if (batchSnap.exists) {
-              const bData = batchSnap.data();
-              transaction.update(batchRef, {
-                activeStock: (bData.activeStock || 0) + (alloc.quantity || 0),
-                updatedAt: nowIso
-              });
+            const batchId = alloc.batchId;
+            const qtyReserved = Number(alloc.quantityReserved || alloc.allocatedQuantity || alloc.quantity) || 0;
+            if (!batchId || qtyReserved <= 0) continue;
+
+            const branchBatchDocId = `${normalizedBranch}_${batchId}`;
+            const branchBatchRef = db.collection('branch_batch_inventory').doc(branchBatchDocId);
+            const batchSnap = await transaction.get(branchBatchRef);
+
+            if (batchSnap && batchSnap.exists) {
+              const bData = typeof batchSnap.data === 'function' ? batchSnap.data() : batchSnap.data;
+              const currentAvail = Number(bData.availableQuantity) || 0;
+              const currentRes = Number(bData.reservedQuantity) || 0;
+
+              const newAvail = currentAvail + qtyReserved;
+              const newRes = Math.max(0, currentRes - qtyReserved);
+
+              const updatedBatch = {
+                ...bData,
+                availableQuantity: newAvail,
+                reservedQuantity: newRes,
+                updatedAt: nowIso,
+              };
+
+              transaction.set(branchBatchRef, updatedBatch);
+              updatedBatches.push(updatedBatch);
             }
           }
+        }
+
+        for (const skuId of affectedSkus) {
+          const batchesQuery = db.collection('branch_batch_inventory')
+            .where('branchId', '==', normalizedBranch)
+            .where('skuId', '==', skuId);
+          const batchesSnap = await transaction.get(batchesQuery);
+          const allBatches: any[] = [];
+          if (batchesSnap && !batchesSnap.empty) {
+            batchesSnap.forEach((d: any) => {
+              const data = typeof d.data === 'function' ? d.data() : d.data;
+              const modified = updatedBatches.find((ub) => ub.id === data.id || ub.batchId === data.batchId);
+              allBatches.push(modified || data);
+            });
+          }
+
+          const updatedAggregate = computeAggregateInventoryFromBatches({
+            branchBatches: allBatches,
+            branchId: normalizedBranch,
+            skuId,
+            lastAdjustmentAt: nowIso,
+          });
+
+          const aggDocRef = db.collection('inventory').doc(`${normalizedBranch}_${skuId}`);
+          transaction.set(aggDocRef, updatedAggregate);
         }
 
         const paymentAdapter = PaymentAdapterRegistry.getAdapter(txOrderData.paymentMethod || 'cash_on_delivery');
@@ -2274,23 +2360,76 @@ export function createExpressApp(deps: ServerDependencies = {}): Express {
       if (decision === 'approve') {
         await db.runTransaction(async (transaction: any) => {
           const txOrderSnap = await transaction.get(orderRef);
-          const txOrderData = txOrderSnap.data();
+          if (!txOrderSnap || !txOrderSnap.exists) return;
+          const txOrderData = typeof txOrderSnap.data === 'function' ? txOrderSnap.data() : txOrderSnap.data;
+
+          if (txOrderData.fulfillmentStatus === 'returned') {
+            return;
+          }
+          if (txOrderData.fulfillmentStatus !== 'return_requested') {
+            throw new Error(`INVALID_ORDER_STATE_TRANSITION: Return processing requires 'return_requested' state. Current state: '${txOrderData.fulfillmentStatus}'`);
+          }
+
+          const normalizedBranch = (txOrderData.branchId || 'daet').toLowerCase().trim();
+          const batchAllocations = txOrderData.batchAllocations || {};
+          const affectedSkus = new Set<string>();
+          const updatedBatches: any[] = [];
 
           if (restockInventory) {
-            const batchAllocations = txOrderData.batchAllocations || {};
             for (const [skuId, allocList] of Object.entries(batchAllocations)) {
               if (!Array.isArray(allocList)) continue;
+              affectedSkus.add(skuId);
+
               for (const alloc of allocList as any[]) {
-                const batchRef = db.collection('product_batches').doc(alloc.batchId);
-                const batchSnap = await transaction.get(batchRef);
-                if (batchSnap.exists) {
-                  const bData = batchSnap.data();
-                  transaction.update(batchRef, {
-                    activeStock: (bData.activeStock || 0) + (alloc.quantity || 0),
-                    updatedAt: nowIso
-                  });
+                const batchId = alloc.batchId;
+                const qtyReserved = Number(alloc.quantityReserved || alloc.allocatedQuantity || alloc.quantity) || 0;
+                if (!batchId || qtyReserved <= 0) continue;
+
+                const branchBatchDocId = `${normalizedBranch}_${batchId}`;
+                const branchBatchRef = db.collection('branch_batch_inventory').doc(branchBatchDocId);
+                const batchSnap = await transaction.get(branchBatchRef);
+
+                if (batchSnap && batchSnap.exists) {
+                  const bData = typeof batchSnap.data === 'function' ? batchSnap.data() : batchSnap.data;
+                  const currentAvail = Number(bData.availableQuantity) || 0;
+
+                  const newAvail = currentAvail + qtyReserved;
+
+                  const updatedBatch = {
+                    ...bData,
+                    availableQuantity: newAvail,
+                    updatedAt: nowIso,
+                  };
+
+                  transaction.set(branchBatchRef, updatedBatch);
+                  updatedBatches.push(updatedBatch);
                 }
               }
+            }
+
+            for (const skuId of affectedSkus) {
+              const batchesQuery = db.collection('branch_batch_inventory')
+                .where('branchId', '==', normalizedBranch)
+                .where('skuId', '==', skuId);
+              const batchesSnap = await transaction.get(batchesQuery);
+              const allBatches: any[] = [];
+              if (batchesSnap && !batchesSnap.empty) {
+                batchesSnap.forEach((d: any) => {
+                  const data = typeof d.data === 'function' ? d.data() : d.data;
+                  const modified = updatedBatches.find((ub) => ub.id === data.id || ub.batchId === data.batchId);
+                  allBatches.push(modified || data);
+                });
+              }
+
+              const updatedAggregate = computeAggregateInventoryFromBatches({
+                branchBatches: allBatches,
+                branchId: normalizedBranch,
+                skuId,
+                lastAdjustmentAt: nowIso,
+              });
+
+              const aggDocRef = db.collection('inventory').doc(`${normalizedBranch}_${skuId}`);
+              transaction.set(aggDocRef, updatedAggregate);
             }
           }
 

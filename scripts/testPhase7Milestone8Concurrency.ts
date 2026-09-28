@@ -440,7 +440,7 @@ async function runTests() {
     const batchPre1 = harness.branchBatchInventoryStore.get('daet_batch-2026-09a');
     const ordersPreCount = harness.ordersStore.size;
 
-    const checkoutPromises = Array.from({ length: 5 }).map(() =>
+    const checkoutPromises = Array.from({ length: 5 }).map((_, idx) =>
       makeRequest(
         server,
         '/api/orders/checkout',
@@ -450,6 +450,7 @@ async function runTests() {
           items: [{ skuId: sku, quantity: 5 }],
           deliveryMethod: 'branch_pickup',
           paymentMethod: 'cash_on_delivery',
+          idempotencyKey: `conc_m8_${Date.now()}_${idx}_${Math.random()}`
         },
         { Authorization: 'Bearer VALID_PATIENT_TOKEN' }
       )

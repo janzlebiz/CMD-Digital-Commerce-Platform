@@ -5,6 +5,7 @@
 
 import { useState, useEffect } from 'react';
 import { OrderRecord, OrderPaymentStatus, OrderFulfillmentStatus } from '../types';
+import { useAuth } from '../context/AuthContext';
 
 export interface CartItem {
   skuId: string;
@@ -17,6 +18,7 @@ const PRODUCTS_METADATA: Record<string, { price: number; name: string; volume: s
 };
 
 export function useEcommerce() {
+  const { user } = useAuth();
   const [cart, setCart] = useState<CartItem[]>(() => {
     const saved = localStorage.getItem('hci_cmd_cart');
     return saved ? JSON.parse(saved) : [];
@@ -39,6 +41,18 @@ export function useEcommerce() {
   useEffect(() => {
     localStorage.setItem('hci_cmd_orders', JSON.stringify(orders));
   }, [orders]);
+
+  const getAuthToken = async () => {
+    if (user && typeof user.getIdToken === 'function') {
+      try {
+        const idToken = await user.getIdToken();
+        if (idToken) return idToken;
+      } catch {
+        // Fall back if token refresh fails in preview
+      }
+    }
+    return localStorage.getItem('demo_token') || 'DEMO_TOKEN_customer';
+  };
 
   const addToCart = (skuId: string, quantity: number = 1) => {
     setCart((prev) => {
@@ -82,24 +96,28 @@ export function useEcommerce() {
   };
 
   const placeOrder = async (orderPayload: any): Promise<OrderRecord> => {
-    const token = localStorage.getItem('demo_token') || 'DEMO_TOKEN_customer';
+    const token = await getAuthToken();
+    const idempotencyKey = orderPayload?.idempotencyKey || `key_cart_${Date.now()}_${Math.random().toString(36).substring(2, 9)}`;
+    const payloadWithKey = { ...orderPayload, idempotencyKey };
+
     const res = await fetch('/api/orders/checkout', {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
         Authorization: `Bearer ${token}`,
+        'x-idempotency-key': idempotencyKey,
       },
-      body: JSON.stringify(orderPayload),
+      body: JSON.stringify(payloadWithKey),
     });
 
     if (!res.ok) {
-      const errData = await res.json();
+      const errData = await res.json().catch(() => ({}));
       throw new Error(errData.error || 'Server checkout failed.');
     }
 
     const data = await res.json();
     const newOrder: OrderRecord = data.order;
-    setOrders((prev) => [newOrder, ...prev]);
+    setOrders((prev) => [newOrder, ...prev.filter((o) => o.id !== newOrder.id)]);
     clearCart();
     return newOrder;
   };
@@ -129,38 +147,24 @@ export function useEcommerce() {
   };
 
   const cancelOrder = async (orderId: string, reason: string = 'User requested cancellation') => {
-    const token = localStorage.getItem('demo_token') || 'DEMO_TOKEN_customer';
-    try {
-      const res = await fetch(`/api/orders/${orderId}/cancel`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          Authorization: `Bearer ${token}`,
-        },
-        body: JSON.stringify({ reason }),
-      });
+    const token = await getAuthToken();
+    const res = await fetch(`/api/orders/${orderId}/cancel`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${token}`,
+      },
+      body: JSON.stringify({ reason }),
+    });
 
-      if (res.ok) {
-        const data = await res.json();
-        setOrders((prev) => prev.map((ord) => (ord.id === orderId ? data.order : ord)));
-        return;
-      }
-    } catch {
-      // Fallback local update if offline in preview
+    if (res.ok) {
+      const data = await res.json();
+      setOrders((prev) => prev.map((ord) => (ord.id === orderId ? data.order : ord)));
+      return data.order;
     }
 
-    setOrders((prev) =>
-      prev.map((ord) =>
-        ord.id === orderId
-          ? {
-              ...ord,
-              fulfillmentStatus: 'cancelled',
-              cancellationReason: reason,
-              updatedAt: new Date().toISOString(),
-            }
-          : ord
-      )
-    );
+    const errData = await res.json().catch(() => ({}));
+    throw new Error(errData.error || 'Order cancellation failed on server.');
   };
 
   const restockAll = () => {

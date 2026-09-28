@@ -308,6 +308,7 @@ async function runMilestone3ProvenanceTestSuite() {
       '/api/orders/checkout',
       'POST',
       {
+        idempotencyKey: 'key_p7_m3_001',
         branchId: 'daet',
         items: [{ skuId: 'hci-cmd-65ml', quantity: 15 }],
         deliveryMethod: 'branch_pickup',
@@ -397,6 +398,7 @@ async function runMilestone3ProvenanceTestSuite() {
       '/api/orders/checkout',
       'POST',
       {
+        idempotencyKey: 'key_p7_m3_002',
         branchId: 'daet',
         items: [{ skuId: 'hci-cmd-65ml', quantity: 10 }],
         deliveryMethod: 'branch_pickup',
