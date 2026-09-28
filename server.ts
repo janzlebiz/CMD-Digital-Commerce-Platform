@@ -1257,6 +1257,121 @@ export function createExpressApp(deps: ServerDependencies = {}): Express {
     });
   });
 
+  async function performFefoReservationInternal(
+    transaction: any,
+    normalizedBranch: string,
+    skuId: string,
+    reqQty: number,
+    nowIso: string
+  ) {
+    const batchQuery = db.collection('branch_batch_inventory')
+      .where('branchId', '==', normalizedBranch)
+      .where('skuId', '==', skuId);
+    const batchSnap = await transaction.get(batchQuery);
+
+    const eligibleCandidates: Array<{ branchBatchDocRef: any; branchBatch: any; productBatch: any }> = [];
+
+    if (batchSnap && !batchSnap.empty) {
+      for (const docSnap of batchSnap.docs) {
+        const bData = docSnap.data();
+        const available = Number(bData.availableQuantity) || 0;
+        if (available <= 0) continue; // Skip zero-stock
+
+        const pbRef = db.collection('product_batches').doc(bData.batchId);
+        const pbSnap = await transaction.get(pbRef);
+
+        if (!pbSnap.exists) continue;
+        const pbData = pbSnap.data();
+
+        if (pbData.qualityControlStatus !== 'passed') continue; // Skip pending or failed QC
+        if (!pbData.expiryDate || pbData.expiryDate <= nowIso) continue; // Skip expired
+        if (pbData.skuId !== skuId) continue; // Skip wrong SKU
+
+        eligibleCandidates.push({
+          branchBatchDocRef: docSnap.ref,
+          branchBatch: bData,
+          productBatch: pbData,
+        });
+      }
+    }
+
+    // FEFO Ordering: sort by earliest valid expiryDate
+    eligibleCandidates.sort((a, b) => {
+      const expA = Date.parse(a.productBatch.expiryDate || a.branchBatch.expiryDate) || 0;
+      const expB = Date.parse(b.productBatch.expiryDate || b.branchBatch.expiryDate) || 0;
+      return expA - expB;
+    });
+
+    const totalEligibleAvailable = eligibleCandidates.reduce((sum, c) => sum + (Number(c.branchBatch.availableQuantity) || 0), 0);
+    if (totalEligibleAvailable < reqQty) {
+      throw new Error(`INSUFFICIENT_ELIGIBLE_STOCK: Requested ${reqQty} units for SKU ${skuId}, but only ${totalEligibleAvailable} eligible units available across passed & unexpired batches.`);
+    }
+
+    let remainingToAllocate = reqQty;
+    const allocations: Array<{ batchId: string; quantityReserved: number; expiryDate: string }> = [];
+    const updatedBatches: any[] = [];
+
+    for (const candidate of eligibleCandidates) {
+      if (remainingToAllocate <= 0) break;
+      const currentAvail = Number(candidate.branchBatch.availableQuantity) || 0;
+      const allocQty = Math.min(currentAvail, remainingToAllocate);
+
+      const newAvail = currentAvail - allocQty;
+      const newReserved = (Number(candidate.branchBatch.reservedQuantity) || 0) + allocQty;
+
+      const updatedBatch = {
+        ...candidate.branchBatch,
+        availableQuantity: newAvail,
+        reservedQuantity: newReserved,
+        updatedAt: nowIso,
+      };
+
+      transaction.set(candidate.branchBatchDocRef, updatedBatch);
+      updatedBatches.push(updatedBatch);
+
+      allocations.push({
+        batchId: candidate.branchBatch.batchId,
+        quantityReserved: allocQty,
+        expiryDate: candidate.productBatch.expiryDate || candidate.branchBatch.expiryDate,
+      });
+
+      remainingToAllocate -= allocQty;
+    }
+
+    const allBranchBatchesQuery = db.collection('branch_batch_inventory')
+      .where('branchId', '==', normalizedBranch)
+      .where('skuId', '==', skuId);
+    const allBatchesSnap = await transaction.get(allBranchBatchesQuery);
+    const allBatches: any[] = [];
+    if (allBatchesSnap && !allBatchesSnap.empty) {
+      allBatchesSnap.forEach((d: any) => {
+        const data = d.data();
+        const modified = updatedBatches.find((ub) => ub.id === data.id);
+        allBatches.push(modified || data);
+      });
+    }
+
+    const updatedAggregate = computeAggregateInventoryFromBatches({
+      branchBatches: allBatches,
+      branchId: normalizedBranch,
+      skuId,
+      lastAdjustmentAt: nowIso,
+    });
+
+    const aggDocRef = db.collection('inventory').doc(`${normalizedBranch}_${skuId}`);
+    transaction.set(aggDocRef, updatedAggregate);
+
+    return {
+      skuId,
+      branchId: normalizedBranch,
+      requestedQuantity: reqQty,
+      totalReservedQuantity: reqQty,
+      allocations,
+      remainingAvailableQuantity: updatedAggregate.activeStock,
+      updatedAggregate,
+    };
+  }
+
   // --- 2. POST /api/orders/checkout ---
   app.post('/api/orders/checkout', async (req: Request, res: Response): Promise<void> => {
     const user = await requireAuth(req, res);
@@ -1267,58 +1382,110 @@ export function createExpressApp(deps: ServerDependencies = {}): Express {
       res.status(400).json({ error: 'items array must not be empty.' });
       return;
     }
-    if (!branchId) {
-      res.status(400).json({ error: 'branchId is required.' });
+    if (!branchId || typeof branchId !== 'string') {
+      res.status(400).json({ error: 'Missing or invalid branchId.' });
       return;
     }
 
-    const orderId = `HCI-ORD-${Date.now().toString().slice(-6)}`;
-
-    let subtotal = 0;
-    const computedItems = [];
-    for (const item of items) {
-      const prod = PRODUCTS_CATALOG[item.skuId];
-      if (!prod) {
-        res.status(400).json({ error: `Invalid SKU: ${item.skuId}` });
-        return;
-      }
-      const itemTotal = prod.price * item.quantity;
-      subtotal += itemTotal;
-      computedItems.push({
-        skuId: item.skuId,
-        quantity: item.quantity,
-        unitPrice: prod.price,
-        totalPrice: itemTotal,
-        productName: prod.name,
-      });
+    const normalizedBranch = branchId.toLowerCase().trim();
+    if (!SUPPORTED_BRANCH_IDS.includes(normalizedBranch as any)) {
+      res.status(400).json({ error: `Invalid branchId: '${branchId}'. Must be one of: ${SUPPORTED_BRANCH_IDS.join(', ')}` });
+      return;
     }
 
-    const shippingFee = deliveryMethod === 'door_to_door' ? 150 : 0;
-    const grandTotal = subtotal + shippingFee;
+    for (const item of items) {
+      if (!item.skuId || !ACTIVE_CONSUMER_SKUS.includes(item.skuId as any) || !PRODUCTS_CATALOG[item.skuId]) {
+        res.status(400).json({ error: `Invalid or unsupported SKU: ${item.skuId}` });
+        return;
+      }
+      const qty = Number(item.quantity);
+      if (!Number.isInteger(qty) || qty <= 0) {
+        res.status(400).json({ error: `Invalid quantity for SKU: ${item.skuId}` });
+        return;
+      }
+    }
 
-    const orderRecord = {
-      id: orderId,
-      userId: user.uid,
-      customer: customer || { firstName: 'Juan', lastName: 'Dela Cruz', email: user.email || '' },
-      items: computedItems,
-      branchId,
-      deliveryMethod: deliveryMethod || 'branch_pickup',
-      paymentMethod: paymentMethod || 'cash_on_delivery',
-      paymentStatus: 'pending_payment',
-      fulfillmentStatus: 'pending_processing',
-      subtotal,
-      shippingFee,
-      taxAmount: 0,
-      grandTotal,
-      placedAt: new Date().toISOString(),
-      updatedAt: new Date().toISOString(),
-    };
+    const orderId = `HCI-ORD-${Date.now().toString().slice(-6)}`;
+    const nowIso = new Date().toISOString();
 
     try {
-      await db.collection('orders').doc(orderId).set(orderRecord);
-      await logAuditEvent(user.uid, user.role, branchId, 'order_placed', 'orders', orderId, true, { grandTotal }, req);
+      await ensureInventorySeeded();
+      let orderRecord: any;
+
+      await db.runTransaction(async (transaction: any) => {
+        let subtotal = 0;
+        const computedItems = [];
+        const batchAllocations: Record<string, any[]> = {};
+
+        for (const item of items) {
+          const prod = PRODUCTS_CATALOG[item.skuId];
+          const qty = Number(item.quantity);
+          const itemTotal = prod.price * qty;
+          subtotal += itemTotal;
+
+          computedItems.push({
+            skuId: item.skuId,
+            quantity: qty,
+            unitPrice: prod.price,
+            totalPrice: itemTotal,
+            productName: prod.name,
+          });
+
+          const reservationRes = await performFefoReservationInternal(
+            transaction,
+            normalizedBranch,
+            item.skuId,
+            qty,
+            nowIso
+          );
+
+          batchAllocations[item.skuId] = reservationRes.allocations;
+        }
+
+        const shippingFee = deliveryMethod === 'door_to_door' ? 150 : 0;
+        const grandTotal = subtotal + shippingFee;
+
+        orderRecord = {
+          id: orderId,
+          userId: user.uid,
+          customer: customer || { firstName: 'Juan', lastName: 'Dela Cruz', email: user.email || '' },
+          items: computedItems,
+          batchAllocations,
+          branchId: normalizedBranch,
+          deliveryMethod: deliveryMethod || 'branch_pickup',
+          paymentMethod: paymentMethod || 'cash_on_delivery',
+          paymentStatus: 'pending_payment',
+          fulfillmentStatus: 'pending_processing',
+          subtotal,
+          shippingFee,
+          taxAmount: 0,
+          grandTotal,
+          placedAt: nowIso,
+          updatedAt: nowIso,
+        };
+
+        const orderDocRef = db.collection('orders').doc(orderId);
+        transaction.set(orderDocRef, orderRecord);
+      });
+
+      await logAuditEvent(
+        user.uid,
+        user.role,
+        normalizedBranch,
+        'order_placed',
+        'orders',
+        orderId,
+        true,
+        { grandTotal: orderRecord.grandTotal, branchId: normalizedBranch },
+        req
+      );
+
       res.status(200).json({ success: true, orderId, order: orderRecord });
     } catch (err: any) {
+      if (err.message.startsWith('INSUFFICIENT_ELIGIBLE_STOCK:')) {
+        res.status(400).json({ error: err.message.replace(/^INSUFFICIENT_ELIGIBLE_STOCK:\s*/, '') });
+        return;
+      }
       res.status(500).json({ error: `Order creation failed: ${err.message}` });
     }
   });
@@ -3471,112 +3638,13 @@ export function createExpressApp(deps: ServerDependencies = {}): Express {
       let reservationResult: any;
 
       await db.runTransaction(async (transaction: any) => {
-        const batchQuery = db.collection('branch_batch_inventory')
-          .where('branchId', '==', normalizedBranch)
-          .where('skuId', '==', skuId);
-        const batchSnap = await transaction.get(batchQuery);
-
-        const eligibleCandidates: Array<{ branchBatchDocRef: any; branchBatch: any; productBatch: any }> = [];
-
-        if (batchSnap && !batchSnap.empty) {
-          for (const docSnap of batchSnap.docs) {
-            const bData = docSnap.data();
-            const available = Number(bData.availableQuantity) || 0;
-            if (available <= 0) continue; // Skip zero-stock
-
-            const pbRef = db.collection('product_batches').doc(bData.batchId);
-            const pbSnap = await transaction.get(pbRef);
-
-            if (!pbSnap.exists) continue;
-            const pbData = pbSnap.data();
-
-            if (pbData.qualityControlStatus !== 'passed') continue; // Skip pending or failed QC
-            if (!pbData.expiryDate || pbData.expiryDate <= nowIso) continue; // Skip expired
-            if (pbData.skuId !== skuId) continue; // Skip wrong SKU
-
-            eligibleCandidates.push({
-              branchBatchDocRef: docSnap.ref,
-              branchBatch: bData,
-              productBatch: pbData,
-            });
-          }
-        }
-
-        // FEFO Ordering: sort by earliest valid expiryDate
-        eligibleCandidates.sort((a, b) => {
-          const expA = Date.parse(a.productBatch.expiryDate || a.branchBatch.expiryDate) || 0;
-          const expB = Date.parse(b.productBatch.expiryDate || b.branchBatch.expiryDate) || 0;
-          return expA - expB;
-        });
-
-        const totalEligibleAvailable = eligibleCandidates.reduce((sum, c) => sum + (Number(c.branchBatch.availableQuantity) || 0), 0);
-        if (totalEligibleAvailable < reqQty) {
-          throw new Error(`INSUFFICIENT_ELIGIBLE_STOCK: Requested ${reqQty} units, but only ${totalEligibleAvailable} eligible units available across passed & unexpired batches.`);
-        }
-
-        let remainingToAllocate = reqQty;
-        const allocations: Array<{ batchId: string; quantityReserved: number; expiryDate: string }> = [];
-        const updatedBatches: any[] = [];
-
-        for (const candidate of eligibleCandidates) {
-          if (remainingToAllocate <= 0) break;
-          const currentAvail = Number(candidate.branchBatch.availableQuantity) || 0;
-          const allocQty = Math.min(currentAvail, remainingToAllocate);
-
-          const newAvail = currentAvail - allocQty;
-          const newReserved = (Number(candidate.branchBatch.reservedQuantity) || 0) + allocQty;
-
-          const updatedBatch = {
-            ...candidate.branchBatch,
-            availableQuantity: newAvail,
-            reservedQuantity: newReserved,
-            updatedAt: nowIso,
-          };
-
-          transaction.set(candidate.branchBatchDocRef, updatedBatch);
-          updatedBatches.push(updatedBatch);
-
-          allocations.push({
-            batchId: candidate.branchBatch.batchId,
-            quantityReserved: allocQty,
-            expiryDate: candidate.productBatch.expiryDate || candidate.branchBatch.expiryDate,
-          });
-
-          remainingToAllocate -= allocQty;
-        }
-
-        const allBranchBatchesQuery = db.collection('branch_batch_inventory')
-          .where('branchId', '==', normalizedBranch)
-          .where('skuId', '==', skuId);
-        const allBatchesSnap = await transaction.get(allBranchBatchesQuery);
-        const allBatches: any[] = [];
-        if (allBatchesSnap && !allBatchesSnap.empty) {
-          allBatchesSnap.forEach((d: any) => {
-            const data = d.data();
-            const modified = updatedBatches.find((ub) => ub.id === data.id);
-            allBatches.push(modified || data);
-          });
-        }
-
-        const updatedAggregate = computeAggregateInventoryFromBatches({
-          branchBatches: allBatches,
-          branchId: normalizedBranch,
+        reservationResult = await performFefoReservationInternal(
+          transaction,
+          normalizedBranch,
           skuId,
-          lastAdjustmentAt: nowIso,
-        });
-
-        const aggDocRef = db.collection('inventory').doc(`${normalizedBranch}_${skuId}`);
-        transaction.set(aggDocRef, updatedAggregate);
-
-        reservationResult = {
-          skuId,
-          branchId: normalizedBranch,
-          requestedQuantity: reqQty,
-          totalReservedQuantity: reqQty,
-          allocations,
-          remainingAvailableQuantity: updatedAggregate.activeStock,
-          updatedAggregate,
-        };
+          reqQty,
+          nowIso
+        );
       });
 
       await logAuditEvent(

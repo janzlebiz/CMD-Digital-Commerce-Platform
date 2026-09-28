@@ -395,4 +395,8 @@ Phase 7 establishes a comprehensive, mathematically rigorous, and privacy-harden
 * **Scope Completed:** Server-authoritative FEFO batch eligibility and reservation routing, strict QC filtering (`passed`, `pending`, `failed`), expiry validation, multi-branch isolation, atomic insufficient stock handling with zero partial mutation, zero negative stock bounds, ADR-009 audit event logging, and transaction isolation / concurrency protection with strict ascending expiry ordering verification.
 * **Test Verification:** Dedicated test suite `scripts/testPhase7Milestone2Fefo.ts` passing exactly 20/20 real acceptance assertions. Cumulative platform suite passing 436/436 assertions.
 
+### Milestone 2.5 Status: ACTIVE & VERIFIED (Completed 2026-09-27)
+* **Scope Completed:** Order checkout integration with server-authoritative FEFO reservation logic within a single atomic `db.runTransaction()`, multi-batch checkout allocation support, strict QC / expiry filtering during checkout, atomic insufficient stock rollback (zero order created, zero stock mutation), batch allocation breakdown persistence on orders, and `/inventory` aggregate reconciliation.
+* **Test Verification:** Dedicated test suite `scripts/testPhase7Milestone25Checkout.ts` passing 5/5 assertions. Cumulative platform suite passing 441/441 assertions.
+
 
