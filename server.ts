@@ -3985,6 +3985,560 @@ export function createExpressApp(deps: ServerDependencies = {}): Express {
     }
   });
 
+  // --- PHASE 7 MILESTONE 4: Dual-Custody Stock Transfers & Conservation of Stock ---
+
+  // 1. POST /api/inventory/transfers - Initiate Stock Transfer
+  app.post('/api/inventory/transfers', async (req: Request, res: Response): Promise<void> => {
+    const user = await requireAuth(req, res);
+    if (!user) return;
+
+    if (user.role !== 'branch_manager' && user.role !== 'regional_director' && user.role !== 'super_admin') {
+      await logAuditEvent(
+        user.uid,
+        user.role,
+        String(req.body?.sourceBranchId || ''),
+        'stock_transfer_unauthorized_role_blocked',
+        'stock_transfers',
+        null,
+        false,
+        { userRole: user.role },
+        req
+      );
+      res.status(403).json({ error: 'Access Denied: Stock transfer initiation requires authorized staff role.' });
+      return;
+    }
+
+    const { sourceBranchId, destinationBranchId, skuId, batchId, quantity, idempotencyKey } = req.body;
+
+    if (!sourceBranchId || !destinationBranchId || typeof sourceBranchId !== 'string' || typeof destinationBranchId !== 'string') {
+      res.status(400).json({ error: 'sourceBranchId and destinationBranchId are required strings.' });
+      return;
+    }
+
+    const srcBranch = sourceBranchId.toLowerCase().trim();
+    const destBranch = destinationBranchId.toLowerCase().trim();
+
+    if (!SUPPORTED_BRANCH_IDS.includes(srcBranch as any) || !SUPPORTED_BRANCH_IDS.includes(destBranch as any)) {
+      res.status(400).json({ error: 'Invalid source or destination branchId.' });
+      return;
+    }
+
+    if (srcBranch === destBranch) {
+      res.status(400).json({ error: 'Source branch and destination branch cannot be identical.' });
+      return;
+    }
+
+    if (user.role === 'branch_manager') {
+      const assigned = (user.assignedBranchId || 'daet').toLowerCase().trim();
+      if (srcBranch !== assigned) {
+        await logAuditEvent(
+          user.uid,
+          user.role,
+          srcBranch,
+          'stock_transfer_unauthorized_source_branch_blocked',
+          'stock_transfers',
+          null,
+          false,
+          { sourceBranch: srcBranch, assignedBranch: assigned },
+          req
+        );
+        res.status(403).json({ error: 'Access Denied: Branch managers can only initiate transfers from their assigned branch.' });
+        return;
+      }
+    }
+
+    if (!skuId || !ACTIVE_CONSUMER_SKUS.includes(skuId as any)) {
+      res.status(400).json({ error: `Invalid skuId: '${skuId}'.` });
+      return;
+    }
+
+    if (!batchId || typeof batchId !== 'string' || !batchId.trim()) {
+      res.status(400).json({ error: 'batchId is required.' });
+      return;
+    }
+
+    const qty = Number(quantity);
+    if (!Number.isInteger(qty) || qty <= 0) {
+      res.status(400).json({ error: 'quantity must be a positive integer greater than zero.' });
+      return;
+    }
+
+    const cleanIdempotencyKey = idempotencyKey ? String(idempotencyKey).trim() : null;
+
+    try {
+      await ensureInventorySeeded();
+      const nowIso = new Date().toISOString();
+      const transferId = `TRF-${Date.now().toString().slice(-6)}-${crypto.randomBytes(3).toString('hex').toUpperCase()}`;
+      const transferRef = db.collection('stock_transfers').doc(transferId);
+      const branchBatchDocId = `${srcBranch}_${batchId.trim()}`;
+      const branchBatchRef = db.collection('branch_batch_inventory').doc(branchBatchDocId);
+      const aggDocRef = db.collection('inventory').doc(`${srcBranch}_${skuId}`);
+
+      let transferRecord: any;
+
+      await db.runTransaction(async (transaction: any) => {
+        if (cleanIdempotencyKey) {
+          const existingQuery = db.collection('stock_transfers').where('idempotencyKey', '==', cleanIdempotencyKey);
+          const existingSnap = await transaction.get(existingQuery);
+          if (!existingSnap.empty) {
+            transferRecord = existingSnap.docs[0].data();
+            return;
+          }
+        }
+
+        const batchSnap = await transaction.get(branchBatchRef);
+        if (!batchSnap.exists) {
+          throw new Error(`BATCH_NOT_FOUND: Source batch ${branchBatchDocId} not found.`);
+        }
+        const bData = batchSnap.data();
+        if (bData.skuId !== skuId) {
+          throw new Error(`SKU_MISMATCH: Batch ${batchId} does not belong to SKU ${skuId}.`);
+        }
+
+        const currentAvail = Number(bData.availableQuantity) || 0;
+        if (currentAvail < qty) {
+          throw new Error(`INSUFFICIENT_STOCK: Source batch has ${currentAvail} available units, requested ${qty}.`);
+        }
+
+        const newAvail = currentAvail - qty;
+        const updatedBatch = {
+          ...bData,
+          availableQuantity: newAvail,
+          updatedAt: nowIso,
+        };
+
+        const branchBatchesQuery = db.collection('branch_batch_inventory').where('branchId', '==', srcBranch).where('skuId', '==', skuId);
+        const branchBatchesSnap = await transaction.get(branchBatchesQuery);
+        const branchBatches: any[] = [];
+        if (branchBatchesSnap && !branchBatchesSnap.empty) {
+          branchBatchesSnap.forEach((d: any) => {
+            if (d.id !== branchBatchDocId) branchBatches.push(d.data());
+          });
+        }
+        branchBatches.push(updatedBatch);
+
+        const updatedAggregate = computeAggregateInventoryFromBatches({
+          branchBatches,
+          branchId: srcBranch,
+          skuId,
+          lastAdjustmentAt: nowIso,
+        });
+
+        transferRecord = {
+          id: transferId,
+          sourceBranchId: srcBranch,
+          destinationBranchId: destBranch,
+          skuId,
+          batchId: batchId.trim(),
+          shippedQuantity: qty,
+          transitQuantity: qty,
+          status: 'IN_TRANSIT',
+          idempotencyKey: cleanIdempotencyKey,
+          initiatedByUid: user.uid,
+          initiatedByName: user.email ? user.email.split('@')[0] : 'Staff',
+          initiatedAt: nowIso,
+          updatedAt: nowIso,
+        };
+
+        transaction.set(branchBatchRef, updatedBatch);
+        transaction.set(aggDocRef, updatedAggregate);
+        transaction.set(transferRef, transferRecord);
+      });
+
+      await logAuditEvent(
+        user.uid,
+        user.role,
+        srcBranch,
+        'stock_transfer_initiated',
+        'stock_transfers',
+        transferRecord.id,
+        true,
+        {
+          sourceBranchId: srcBranch,
+          destinationBranchId: destBranch,
+          skuId,
+          batchId: batchId.trim(),
+          shippedQuantity: qty,
+        },
+        req
+      );
+
+      res.status(201).json({ success: true, transfer: transferRecord });
+    } catch (err: any) {
+      if (err.message.startsWith('INSUFFICIENT_STOCK:') || err.message.startsWith('BATCH_NOT_FOUND:') || err.message.startsWith('SKU_MISMATCH:')) {
+        res.status(400).json({ error: err.message.replace(/^(INSUFFICIENT_STOCK|BATCH_NOT_FOUND|SKU_MISMATCH):\s*/, '') });
+        return;
+      }
+      res.status(500).json({ error: `Transfer initiation failed: ${err.message}` });
+    }
+  });
+
+  // 2. GET /api/inventory/transfers - Query Stock Transfers with Branch Scoping & IDOR Protection
+  app.get('/api/inventory/transfers', async (req: Request, res: Response): Promise<void> => {
+    const user = await requireAuth(req, res);
+    if (!user) return;
+
+    if (user.role !== 'branch_manager' && user.role !== 'regional_director' && user.role !== 'super_admin') {
+      res.status(403).json({ error: 'Access Denied: Viewing stock transfers requires authorized staff role.' });
+      return;
+    }
+
+    try {
+      const snap = await db.collection('stock_transfers').get();
+      const transfers: any[] = [];
+      if (snap && !snap.empty) {
+        snap.forEach((d: any) => transfers.push(d.data()));
+      }
+
+      let filtered = transfers;
+      if (user.role === 'branch_manager') {
+        const assigned = (user.assignedBranchId || 'daet').toLowerCase().trim();
+        filtered = transfers.filter((t) => t.sourceBranchId === assigned || t.destinationBranchId === assigned);
+      }
+
+      res.json({ transfers: filtered, count: filtered.length });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  // 3. GET /api/inventory/transfers/:transferId - Get Single Transfer Record
+  app.get('/api/inventory/transfers/:transferId', async (req: Request, res: Response): Promise<void> => {
+    const user = await requireAuth(req, res);
+    if (!user) return;
+
+    if (user.role !== 'branch_manager' && user.role !== 'regional_director' && user.role !== 'super_admin') {
+      res.status(403).json({ error: 'Access Denied: Viewing stock transfer requires authorized staff role.' });
+      return;
+    }
+
+    const { transferId } = req.params;
+    try {
+      const doc = await db.collection('stock_transfers').doc(transferId).get();
+      if (!doc.exists) {
+        res.status(404).json({ error: `Transfer not found: ${transferId}` });
+        return;
+      }
+
+      const transfer = doc.data();
+      if (user.role === 'branch_manager') {
+        const assigned = (user.assignedBranchId || 'daet').toLowerCase().trim();
+        if (transfer.sourceBranchId !== assigned && transfer.destinationBranchId !== assigned) {
+          res.status(403).json({ error: 'Access Denied: Branch managers can only view transfers involving their assigned branch.' });
+          return;
+        }
+      }
+
+      res.json({ transfer });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  // 4. POST /api/inventory/transfers/:transferId/receive - Receive Stock Transfer (Full or Partial)
+  app.post('/api/inventory/transfers/:transferId/receive', async (req: Request, res: Response): Promise<void> => {
+    const user = await requireAuth(req, res);
+    if (!user) return;
+
+    if (user.role !== 'branch_manager' && user.role !== 'regional_director' && user.role !== 'super_admin') {
+      await logAuditEvent(
+        user.uid,
+        user.role,
+        null,
+        'stock_transfer_receive_unauthorized_role_blocked',
+        'stock_transfers',
+        req.params.transferId ? String(req.params.transferId) : null,
+        false,
+        { userRole: user.role },
+        req
+      );
+      res.status(403).json({ error: 'Access Denied: Receiving stock transfers requires authorized staff role.' });
+      return;
+    }
+
+    const { transferId } = req.params;
+    const { receivedQuantity, condition } = req.body;
+
+    try {
+      const transferRef = db.collection('stock_transfers').doc(transferId);
+      const transferSnap = await transferRef.get();
+      if (!transferSnap.exists) {
+        res.status(404).json({ error: `Transfer not found: ${transferId}` });
+        return;
+      }
+
+      const transfer = transferSnap.data();
+      const destBranch = transfer.destinationBranchId;
+
+      if (user.role === 'branch_manager') {
+        const assigned = (user.assignedBranchId || 'daet').toLowerCase().trim();
+        if (destBranch !== assigned) {
+          await logAuditEvent(
+            user.uid,
+            user.role,
+            destBranch,
+            'stock_transfer_receive_unauthorized_branch_blocked',
+            'stock_transfers',
+            String(transferId),
+            false,
+            { destinationBranch: destBranch, assignedBranch: assigned },
+            req
+          );
+          res.status(403).json({ error: 'Access Denied: Branch managers can only receive transfers into their assigned branch.' });
+          return;
+        }
+      }
+
+      if (transfer.status !== 'IN_TRANSIT') {
+        res.status(400).json({ error: `Invalid state transition: Transfer is in status '${transfer.status}', expected 'IN_TRANSIT'.` });
+        return;
+      }
+
+      const shippedQty = Number(transfer.shippedQuantity) || 0;
+      let receivedQty = shippedQty;
+      if (receivedQuantity !== undefined && receivedQuantity !== null) {
+        const parsed = Number(receivedQuantity);
+        if (!Number.isInteger(parsed) || parsed < 0) {
+          res.status(400).json({ error: 'receivedQuantity must be a non-negative integer.' });
+          return;
+        }
+        if (parsed > shippedQty) {
+          res.status(400).json({ error: `Over-receipt rejected: receivedQuantity (${parsed}) cannot exceed shippedQuantity (${shippedQty}).` });
+          return;
+        }
+        receivedQty = parsed;
+      }
+
+      const diff = shippedQty - receivedQty;
+      let newStatus = 'RECEIVED_FULL';
+      if (condition === 'rejected_damaged' || (receivedQuantity !== undefined && receivedQty === 0 && condition !== 'partial')) {
+        newStatus = 'REJECTED_DAMAGED';
+        receivedQty = 0;
+      } else if (diff > 0) {
+        newStatus = 'RECEIVED_PARTIAL';
+      }
+
+      const nowIso = new Date().toISOString();
+      const destBatchDocId = `${destBranch}_${transfer.batchId}`;
+      const destBatchRef = db.collection('branch_batch_inventory').doc(destBatchDocId);
+      const destAggRef = db.collection('inventory').doc(`${destBranch}_${transfer.skuId}`);
+
+      let updatedTransfer: any;
+
+      await db.runTransaction(async (transaction: any) => {
+        const txTransferSnap = await transaction.get(transferRef);
+        const txTransfer = txTransferSnap.data();
+        if (txTransfer.status !== 'IN_TRANSIT') {
+          throw new Error('TRANSFER_NOT_IN_TRANSIT');
+        }
+
+        const destBatchSnap = await transaction.get(destBatchRef);
+        let destBatchData: any = null;
+        if (!destBatchSnap.exists) {
+          destBatchData = {
+            id: destBatchDocId,
+            branchId: destBranch,
+            batchId: transfer.batchId,
+            skuId: transfer.skuId,
+            availableQuantity: receivedQty,
+            reservedQuantity: 0,
+            damagedQuantity: diff > 0 ? diff : 0,
+            expiryDate: '2028-12-31',
+            updatedAt: nowIso,
+          };
+        } else {
+          const bData = destBatchSnap.data();
+          destBatchData = {
+            ...bData,
+            availableQuantity: (Number(bData.availableQuantity) || 0) + receivedQty,
+            damagedQuantity: (Number(bData.damagedQuantity) || 0) + (diff > 0 ? diff : 0),
+            updatedAt: nowIso,
+          };
+        }
+        transaction.set(destBatchRef, destBatchData);
+
+        const destBatchesQuery = db.collection('branch_batch_inventory').where('branchId', '==', destBranch).where('skuId', '==', transfer.skuId);
+        const destBatchesSnap = await transaction.get(destBatchesQuery);
+        const destBatches: any[] = [];
+        let foundExistingBatch = false;
+        if (destBatchesSnap && !destBatchesSnap.empty) {
+          destBatchesSnap.forEach((d: any) => {
+            if (d.id === destBatchDocId) {
+              foundExistingBatch = true;
+              destBatches.push(destBatchData);
+            } else {
+              destBatches.push(d.data());
+            }
+          });
+        }
+        if (!foundExistingBatch && destBatchData) {
+          destBatches.push(destBatchData);
+        }
+
+        const updatedAggregate = computeAggregateInventoryFromBatches({
+          branchBatches: destBatches,
+          branchId: destBranch,
+          skuId: transfer.skuId,
+          lastAdjustmentAt: nowIso,
+        });
+
+        updatedTransfer = {
+          ...txTransfer,
+          status: newStatus,
+          receivedQuantity: receivedQty,
+          transitQuantity: 0,
+          auditedLossQuantity: diff,
+          receivedAt: nowIso,
+          updatedAt: nowIso,
+        };
+
+        transaction.set(destAggRef, updatedAggregate);
+        transaction.set(transferRef, updatedTransfer);
+      });
+
+      await logAuditEvent(
+        user.uid,
+        user.role,
+        destBranch,
+        newStatus === 'REJECTED_DAMAGED' ? 'stock_transfer_rejected_damaged' : 'stock_transfer_received',
+        'stock_transfers',
+        String(transferId),
+        true,
+        { status: newStatus, receivedQuantity: receivedQty, auditedLossQuantity: diff },
+        req
+      );
+
+      res.status(200).json({ success: true, transfer: updatedTransfer });
+    } catch (err: any) {
+      if (err.message === 'TRANSFER_NOT_IN_TRANSIT') {
+        res.status(400).json({ error: 'Transfer is no longer in transit.' });
+        return;
+      }
+      res.status(500).json({ error: `Transfer receipt failed: ${err.message}` });
+    }
+  });
+
+  // 5. POST /api/inventory/transfers/:transferId/reject-damaged - Reject Damaged Transfer
+  app.post('/api/inventory/transfers/:transferId/reject-damaged', async (req: Request, res: Response): Promise<void> => {
+    req.body.condition = 'rejected_damaged';
+    req.body.receivedQuantity = 0;
+    return (app as any)._router.stack.find((r: any) => r.route && r.route.path === '/api/inventory/transfers/:transferId/receive')?.handle(req, res);
+  });
+
+  // 6. POST /api/inventory/transfers/:transferId/cancel - Cancel / Reverse In-Transit Transfer
+  app.post('/api/inventory/transfers/:transferId/cancel', async (req: Request, res: Response): Promise<void> => {
+    const user = await requireAuth(req, res);
+    if (!user) return;
+
+    if (user.role !== 'branch_manager' && user.role !== 'regional_director' && user.role !== 'super_admin') {
+      res.status(403).json({ error: 'Access Denied: Cancelling transfers requires authorized staff role.' });
+      return;
+    }
+
+    const { transferId } = req.params;
+    try {
+      const transferRef = db.collection('stock_transfers').doc(transferId);
+      const transferSnap = await transferRef.get();
+      if (!transferSnap.exists) {
+        res.status(404).json({ error: `Transfer not found: ${transferId}` });
+        return;
+      }
+
+      const transfer = transferSnap.data();
+      const srcBranch = transfer.sourceBranchId;
+
+      if (user.role === 'branch_manager') {
+        const assigned = (user.assignedBranchId || 'daet').toLowerCase().trim();
+        if (transfer.sourceBranchId !== assigned) {
+          res.status(403).json({ error: 'Access Denied: Branch managers can only cancel transfers originating from their assigned branch.' });
+          return;
+        }
+      }
+
+      if (transfer.status !== 'IN_TRANSIT') {
+        res.status(400).json({ error: `Cannot cancel transfer in status '${transfer.status}'. Only IN_TRANSIT transfers can be cancelled.` });
+        return;
+      }
+
+      const transitQty = Number(transfer.transitQuantity || transfer.shippedQuantity) || 0;
+      const nowIso = new Date().toISOString();
+      const branchBatchDocId = `${srcBranch}_${transfer.batchId}`;
+      const branchBatchRef = db.collection('branch_batch_inventory').doc(branchBatchDocId);
+      const aggDocRef = db.collection('inventory').doc(`${srcBranch}_${transfer.skuId}`);
+
+      let updatedTransfer: any;
+
+      await db.runTransaction(async (transaction: any) => {
+        const txTransferSnap = await transaction.get(transferRef);
+        const txTransfer = txTransferSnap.data();
+        if (txTransfer.status !== 'IN_TRANSIT') {
+          throw new Error('TRANSFER_NOT_IN_TRANSIT');
+        }
+
+        const batchSnap = await transaction.get(branchBatchRef);
+        if (!batchSnap.exists) {
+          throw new Error('SOURCE_BATCH_NOT_FOUND');
+        }
+        const bData = batchSnap.data();
+        const newAvail = (Number(bData.availableQuantity) || 0) + transitQty;
+        const updatedBatch = {
+          ...bData,
+          availableQuantity: newAvail,
+          updatedAt: nowIso,
+        };
+        transaction.set(branchBatchRef, updatedBatch);
+
+        const branchBatchesQuery = db.collection('branch_batch_inventory').where('branchId', '==', srcBranch).where('skuId', '==', transfer.skuId);
+        const branchBatchesSnap = await transaction.get(branchBatchesQuery);
+        const branchBatches: any[] = [];
+        if (branchBatchesSnap && !branchBatchesSnap.empty) {
+          branchBatchesSnap.forEach((d: any) => {
+            if (d.id !== branchBatchDocId) branchBatches.push(d.data());
+          });
+        }
+        branchBatches.push(updatedBatch);
+
+        const updatedAggregate = computeAggregateInventoryFromBatches({
+          branchBatches,
+          branchId: srcBranch,
+          skuId: transfer.skuId,
+          lastAdjustmentAt: nowIso,
+        });
+
+        updatedTransfer = {
+          ...txTransfer,
+          status: 'CANCELLED',
+          transitQuantity: 0,
+          cancelledAt: nowIso,
+          updatedAt: nowIso,
+        };
+
+        transaction.set(aggDocRef, updatedAggregate);
+        transaction.set(transferRef, updatedTransfer);
+      });
+
+      await logAuditEvent(
+        user.uid,
+        user.role,
+        srcBranch,
+        'stock_transfer_cancelled',
+        'stock_transfers',
+        String(transferId),
+        true,
+        { transitQuantityReturned: transitQty },
+        req
+      );
+
+      res.status(200).json({ success: true, transfer: updatedTransfer });
+    } catch (err: any) {
+      if (err.message === 'TRANSFER_NOT_IN_TRANSIT') {
+        res.status(400).json({ error: 'Transfer is no longer in transit.' });
+        return;
+      }
+      res.status(500).json({ error: `Transfer cancellation failed: ${err.message}` });
+    }
+  });
+
   return app;
 }
 
