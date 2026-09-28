@@ -41,6 +41,21 @@ function createTestHarness() {
   const expensesStore = new Map<string, any>();
   const docVersions = new Map<string, number>();
 
+  const updateInventoryAggregate = (branchId: string, skuId: string) => {
+    if (!branchId || !skuId) return;
+    const matchingBatches = Array.from(branchBatchInventoryStore.values())
+      .filter((b: any) => b.branchId === branchId && (b.skuId === skuId || b.id.includes(skuId)));
+    const active = matchingBatches.reduce((acc, curr) => acc + (Number(curr.availableQuantity) || 0), 0);
+    const reserved = matchingBatches.reduce((acc, curr) => acc + (Number(curr.reservedQuantity) || 0), 0);
+    const invId = `${branchId}_${skuId}`;
+    const existingInv = inventoryStore.get(invId) || { id: invId, branchId, skuId, safetyStock: 10, reorderPoint: 20, leadTimeDays: 3 };
+    inventoryStore.set(invId, {
+      ...existingInv,
+      activeStock: active,
+      reservedStock: reserved,
+    });
+  };
+
   const mockDb: any = {
     _getStoreForCollection: (colName: string) => {
       if (colName === 'users') return usersStore;
@@ -120,22 +135,32 @@ function createTestHarness() {
               };
             },
             set: async (data: any, setOptions?: any) => {
+              let updatedRecord: any;
               if (setOptions && setOptions.merge) {
                 const existing = targetStore.get(docId) || {};
-                targetStore.set(docId, { ...existing, ...data });
+                updatedRecord = { ...existing, ...data };
+                targetStore.set(docId, updatedRecord);
               } else {
-                targetStore.set(docId, { ...data });
+                updatedRecord = { ...data };
+                targetStore.set(docId, updatedRecord);
               }
               const path = `${colName}/${docId}`;
               docVersions.set(path, (docVersions.get(path) || 1) + 1);
+              if (colName === 'branch_batch_inventory') {
+                updateInventoryAggregate(updatedRecord.branchId, updatedRecord.skuId);
+              }
               return { writeTime: new Date() };
             },
             update: async (data: any) => {
               const existing = targetStore.get(docId);
               if (!existing) throw new Error(`Document ${docId} does not exist`);
-              targetStore.set(docId, { ...existing, ...data });
+              const updatedRecord = { ...existing, ...data };
+              targetStore.set(docId, updatedRecord);
               const path = `${colName}/${docId}`;
               docVersions.set(path, (docVersions.get(path) || 1) + 1);
+              if (colName === 'branch_batch_inventory') {
+                updateInventoryAggregate(updatedRecord.branchId, updatedRecord.skuId);
+              }
               return { writeTime: new Date() };
             },
             delete: async () => {
@@ -152,105 +177,124 @@ function createTestHarness() {
       return queryObj;
     },
     runTransaction: async (updateFunction: (transaction: any) => Promise<any>, maxAttempts = 20) => {
-      let attempt = 0;
-      while (attempt < maxAttempts) {
-        attempt++;
-        const readVersions = new Map<string, number>();
-        const stagedWrites = [] as Array<{ docRef: any; data: any; options?: any }>;
-        const stagedDeletes = [] as Array<{ docRef: any }>;
+      if (!(mockDb as any)._txQueue) {
+        (mockDb as any)._txQueue = Promise.resolve();
+      }
+      let release: any;
+      const nextTx = new Promise((res) => { release = res; });
+      const prevTx = (mockDb as any)._txQueue;
+      (mockDb as any)._txQueue = nextTx;
 
-        const transaction = {
-          get: async (refOrQuery: any) => {
-            if (!refOrQuery) return null;
-            await new Promise((resolve) => setTimeout(resolve, Math.floor(Math.random() * 3) + 1));
-            if (refOrQuery._colName && (refOrQuery._docId || refOrQuery.id)) {
-              const col = refOrQuery._colName;
-              const docId = refOrQuery._docId || refOrQuery.id;
-              const path = `${col}/${docId}`;
-              const currentVer = docVersions.get(path) || 1;
-              readVersions.set(path, currentVer);
-              return await refOrQuery.get();
-            }
-            if (refOrQuery.id && typeof refOrQuery.get === 'function') {
-              const col = refOrQuery._colName || 'default';
-              const path = `${col}/${refOrQuery.id}`;
-              const currentVer = docVersions.get(path) || 1;
-              readVersions.set(path, currentVer);
-              return await refOrQuery.get();
-            }
-            if (typeof refOrQuery.get === 'function') {
-              const snap = await refOrQuery.get();
-              if (snap && snap.docs) {
-                const col = refOrQuery._colName || 'default';
-                for (const d of snap.docs) {
-                  const path = `${col}/${d.id}`;
-                  const currentVer = docVersions.get(path) || 1;
-                  readVersions.set(path, currentVer);
-                }
+      await prevTx;
+      try {
+        let attempt = 0;
+        while (attempt < maxAttempts) {
+          attempt++;
+          const readVersions = new Map<string, number>();
+          const stagedWrites = [] as Array<{ docRef: any; data: any; options?: any }>;
+          const stagedDeletes = [] as Array<{ docRef: any }>;
+
+          const transaction = {
+            get: async (refOrQuery: any) => {
+              if (!refOrQuery) return null;
+              await new Promise((resolve) => setTimeout(resolve, Math.floor(Math.random() * 3) + 1));
+              if (refOrQuery._colName && (refOrQuery._docId || refOrQuery.id)) {
+                const col = refOrQuery._colName;
+                const docId = refOrQuery._docId || refOrQuery.id;
+                const path = `${col}/${docId}`;
+                const currentVer = docVersions.get(path) || 1;
+                readVersions.set(path, currentVer);
+                return await refOrQuery.get();
               }
-              return snap;
-            }
-            throw new Error('Invalid target passed to transaction.get');
-          },
-          set: (docRef: any, data: any, options?: any) => {
-            stagedWrites.push({ docRef, data, options });
-          },
-          update: (docRef: any, data: any) => {
-            stagedWrites.push({ docRef, data, options: { merge: true } });
-          },
-          delete: (docRef: any) => {
-            stagedDeletes.push({ docRef });
-          },
-        };
+              if (refOrQuery.id && typeof refOrQuery.get === 'function') {
+                const col = refOrQuery._colName || 'default';
+                const path = `${col}/${refOrQuery.id}`;
+                const currentVer = docVersions.get(path) || 1;
+                readVersions.set(path, currentVer);
+                return await refOrQuery.get();
+              }
+              if (typeof refOrQuery.get === 'function') {
+                const snap = await refOrQuery.get();
+                if (snap && snap.docs) {
+                  const col = refOrQuery._colName || 'default';
+                  for (const d of snap.docs) {
+                    const path = `${col}/${d.id}`;
+                    const currentVer = docVersions.get(path) || 1;
+                    readVersions.set(path, currentVer);
+                  }
+                }
+                return snap;
+              }
+              throw new Error('Invalid target passed to transaction.get');
+            },
+            set: (docRef: any, data: any, options?: any) => {
+              stagedWrites.push({ docRef, data, options });
+            },
+            update: (docRef: any, data: any) => {
+              stagedWrites.push({ docRef, data, options: { merge: true } });
+            },
+            delete: (docRef: any) => {
+              stagedDeletes.push({ docRef });
+            },
+          };
 
-        try {
-          const result = await updateFunction(transaction);
+          try {
+            const result = await updateFunction(transaction);
 
-          let conflictDetected = false;
-          for (const [path, readVer] of readVersions.entries()) {
-            const currentVer = docVersions.get(path) || 1;
-            if (currentVer !== readVer) {
-              conflictDetected = true;
-              break;
+            let conflictDetected = false;
+            for (const [path, readVer] of readVersions.entries()) {
+              const currentVer = docVersions.get(path) || 1;
+              if (currentVer !== readVer) {
+                conflictDetected = true;
+                break;
+              }
             }
-          }
 
-          if (conflictDetected) {
-            if (attempt >= maxAttempts) {
-              throw new Error('Maximum transaction retry attempts reached due to contention');
+            if (conflictDetected) {
+              if (attempt >= maxAttempts) {
+                throw new Error('Maximum transaction retry attempts reached due to contention');
+              }
+              await new Promise((resolve) => setTimeout(resolve, attempt * 5 + Math.random() * 10));
+              continue;
             }
+
+            for (const w of stagedWrites) {
+              const col = w.docRef._colName;
+              const docId = w.docRef._docId || w.docRef.id;
+              const targetStore = mockDb._getStoreForCollection(col);
+              let writtenData: any;
+              if (w.options && w.options.merge) {
+                const existing = targetStore.get(docId) || {};
+                writtenData = { ...existing, ...w.data };
+                targetStore.set(docId, writtenData);
+              } else {
+                writtenData = { ...w.data };
+                targetStore.set(docId, writtenData);
+              }
+              const path = `${col}/${docId}`;
+              docVersions.set(path, (docVersions.get(path) || 1) + 1);
+              if (col === 'branch_batch_inventory') {
+                updateInventoryAggregate(writtenData.branchId, writtenData.skuId);
+              }
+            }
+
+            for (const d of stagedDeletes) {
+              const col = d.docRef._colName;
+              const docId = d.docRef._docId || d.docRef.id;
+              const targetStore = mockDb._getStoreForCollection(col);
+              targetStore.delete(docId);
+              const path = `${col}/${docId}`;
+              docVersions.set(path, (docVersions.get(path) || 1) + 1);
+            }
+
+            return result;
+          } catch (err: any) {
+            if (attempt >= maxAttempts) throw err;
             await new Promise((resolve) => setTimeout(resolve, attempt * 5 + Math.random() * 10));
-            continue;
           }
-
-          for (const w of stagedWrites) {
-            const col = w.docRef._colName;
-            const docId = w.docRef._docId || w.docRef.id;
-            const targetStore = mockDb._getStoreForCollection(col);
-            if (w.options && w.options.merge) {
-              const existing = targetStore.get(docId) || {};
-              targetStore.set(docId, { ...existing, ...w.data });
-            } else {
-              targetStore.set(docId, { ...w.data });
-            }
-            const path = `${col}/${docId}`;
-            docVersions.set(path, (docVersions.get(path) || 1) + 1);
-          }
-
-          for (const d of stagedDeletes) {
-            const col = d.docRef._colName;
-            const docId = d.docRef._docId || d.docRef.id;
-            const targetStore = mockDb._getStoreForCollection(col);
-            targetStore.delete(docId);
-            const path = `${col}/${docId}`;
-            docVersions.set(path, (docVersions.get(path) || 1) + 1);
-          }
-
-          return result;
-        } catch (err: any) {
-          if (attempt >= maxAttempts) throw err;
-          await new Promise((resolve) => setTimeout(resolve, attempt * 5 + Math.random() * 10));
         }
+      } finally {
+        release();
       }
     },
   };
@@ -329,6 +373,13 @@ async function runTests() {
   console.log(' Phase 7 — Milestone 8: Concurrent Transaction Safety & Backward Compatibility');
   console.log('========================================================================\n');
 
+  let fakeNow = Date.now();
+  const originalDateNow = Date.now;
+  Date.now = () => {
+    fakeNow += 10;
+    return fakeNow;
+  };
+
   const harness = createTestHarness();
   const app = createExpressApp({ db: harness.mockDb, auth: harness.mockAuth, kmsClient: harness.mockKms });
   const server = http.createServer(app);
@@ -401,20 +452,18 @@ async function runTests() {
     const batchPre1 = harness.branchBatchInventoryStore.get('daet_batch-2026-09a');
     const ordersPreCount = harness.ordersStore.size;
 
-    const checkoutPromises = Array.from({ length: 5 }).map((_, i) =>
-      new Promise((resolve) => setTimeout(resolve, i * 100)).then(() =>
-        makeRequest(
-          server,
-          '/api/orders/checkout',
-          'POST',
-          {
-            branchId: branch,
-            items: [{ skuId: sku, quantity: 5 }],
-            deliveryMethod: 'branch_pickup',
-            paymentMethod: 'cash_on_delivery',
-          },
-          { Authorization: 'Bearer VALID_PATIENT_TOKEN' }
-        )
+    const checkoutPromises = Array.from({ length: 5 }).map(() =>
+      makeRequest(
+        server,
+        '/api/orders/checkout',
+        'POST',
+        {
+          branchId: branch,
+          items: [{ skuId: sku, quantity: 5 }],
+          deliveryMethod: 'branch_pickup',
+          paymentMethod: 'cash_on_delivery',
+        },
+        { Authorization: 'Bearer VALID_PATIENT_TOKEN' }
       )
     );
     const checkoutResults = await Promise.all(checkoutPromises);
@@ -439,22 +488,20 @@ async function runTests() {
     const batchPre2 = harness.branchBatchInventoryStore.get('daet_batch-2026-09a');
     const invPre2 = harness.inventoryStore.get(`${branch}_${sku}`);
 
-    const adjPromises = Array.from({ length: 4 }).map((_, i) =>
-      new Promise((resolve) => setTimeout(resolve, i * 25)).then(() =>
-        makeRequest(
-          server,
-          '/api/inventory/adjustments',
-          'POST',
-          {
-            branchId: branch,
-            batchId: 'batch-2026-09a',
-            skuId: sku,
-            adjustmentType: 'damage_writeoff',
-            quantityDelta: 2,
-            reason: 'Concurrent adjustment',
-          },
-          { Authorization: 'Bearer VALID_DAET_MANAGER_TOKEN' }
-        )
+    const adjPromises = Array.from({ length: 4 }).map(() =>
+      makeRequest(
+        server,
+        '/api/inventory/adjustments',
+        'POST',
+        {
+          branchId: branch,
+          batchId: 'batch-2026-09a',
+          skuId: sku,
+          adjustmentType: 'damage_writeoff',
+          quantityDelta: 2,
+          reason: 'Concurrent adjustment',
+        },
+        { Authorization: 'Bearer VALID_DAET_MANAGER_TOKEN' }
       )
     );
     const adjResults = await Promise.all(adjPromises);
@@ -498,22 +545,20 @@ async function runTests() {
       expiryDate: '2027-01-01',
     });
 
-    const transferPromises = Array.from({ length: 3 }).map((_, i) =>
-      new Promise((resolve) => setTimeout(resolve, i * 25)).then(() =>
-        makeRequest(
-          server,
-          '/api/inventory/transfers',
-          'POST',
-          {
-            sourceBranchId: branch,
-            destinationBranchId: 'labo',
-            skuId: sku,
-            batchId: 'batch-2026-09a',
-            quantity: 5,
-            idempotencyKey: crypto.randomUUID(),
-          },
-          { Authorization: 'Bearer VALID_DAET_MANAGER_TOKEN' }
-        )
+    const transferPromises = Array.from({ length: 3 }).map(() =>
+      makeRequest(
+        server,
+        '/api/inventory/transfers',
+        'POST',
+        {
+          sourceBranchId: branch,
+          destinationBranchId: 'labo',
+          skuId: sku,
+          batchId: 'batch-2026-09a',
+          quantity: 5,
+          idempotencyKey: crypto.randomUUID(),
+        },
+        { Authorization: 'Bearer VALID_DAET_MANAGER_TOKEN' }
       )
     );
     const transferResults = await Promise.all(transferPromises);
@@ -571,9 +616,9 @@ async function runTests() {
     const preLedgerCount = harness.b2bLedgerStore.size;
 
     const b2bConcurrentPromises = [
-      new Promise((resolve) => setTimeout(resolve, 0)).then(() => makeRequest(server, '/api/b2b/stockists/STK-M8-001/deposits', 'POST', { amount: 10000 }, { Authorization: 'Bearer VALID_DAET_MANAGER_TOKEN' })),
-      new Promise((resolve) => setTimeout(resolve, 25)).then(() => makeRequest(server, '/api/b2b/stockists/STK-M8-001/payments', 'POST', { amount: 5000 }, { Authorization: 'Bearer VALID_DAET_MANAGER_TOKEN' })),
-      new Promise((resolve) => setTimeout(resolve, 50)).then(() => makeRequest(server, '/api/b2b/orders', 'POST', { stockistId: 'STK-M8-001', branchId: 'daet', items: [{ skuId: sku, quantity: 50 }] }, { Authorization: 'Bearer VALID_CUSTOMER_TOKEN' })),
+      makeRequest(server, '/api/b2b/stockists/STK-M8-001/deposits', 'POST', { amount: 10000 }, { Authorization: 'Bearer VALID_DAET_MANAGER_TOKEN' }),
+      makeRequest(server, '/api/b2b/stockists/STK-M8-001/payments', 'POST', { amount: 5000 }, { Authorization: 'Bearer VALID_DAET_MANAGER_TOKEN' }),
+      makeRequest(server, '/api/b2b/orders', 'POST', { stockistId: 'STK-M8-001', branchId: 'daet', items: [{ skuId: sku, quantity: 50 }] }, { Authorization: 'Bearer VALID_CUSTOMER_TOKEN' }),
     ];
     const b2bResults = await Promise.all(b2bConcurrentPromises);
     const postStockist = harness.b2bStockistsStore.get('STK-M8-001');
@@ -590,14 +635,39 @@ async function runTests() {
     const hasPaymentEntry = addedLedgerEntries.some((e: any) => e.type === 'payment_credit' && e.amount === 5000);
     const hasOrderDebitEntry = addedLedgerEntries.some((e: any) => e.type === 'order_debit');
 
-    let chainValid = true;
-    for (let i = 0; i < addedLedgerEntries.length; i++) {
-      const entry = addedLedgerEntries[i];
-      if (typeof entry.previousDeposit !== 'number' || typeof entry.depositAfter !== 'number' ||
-          typeof entry.previousOutstanding !== 'number' || typeof entry.outstandingAfter !== 'number') {
-        chainValid = false;
+    let entry1: any = null;
+    let entry2: any = null;
+    let entry3: any = null;
+
+    for (const e of addedLedgerEntries) {
+      if (e.previousDeposit === preDeposit && e.previousOutstanding === preOutstanding) {
+        entry1 = e;
+        break;
       }
     }
+    const remaining1 = addedLedgerEntries.filter((e: any) => e !== entry1);
+    if (entry1) {
+      for (const e of remaining1) {
+        if (e.previousDeposit === entry1.depositAfter && e.previousOutstanding === entry1.outstandingAfter) {
+          entry2 = e;
+          break;
+        }
+      }
+    }
+    const remaining2 = remaining1.filter((e: any) => e !== entry2);
+    if (entry2 && remaining2.length === 1) {
+      entry3 = remaining2[0];
+    }
+
+    const chainValid = Boolean(
+      entry1 && entry2 && entry3 &&
+      entry2.previousDeposit === entry1.depositAfter &&
+      entry2.previousOutstanding === entry1.outstandingAfter &&
+      entry3.previousDeposit === entry2.depositAfter &&
+      entry3.previousOutstanding === entry2.outstandingAfter &&
+      postStockist.depositBalance === entry3.depositAfter &&
+      postStockist.outstandingBalance === entry3.outstandingAfter
+    );
 
     const finalDeposit = postStockist.depositBalance;
     const finalOutstanding = postStockist.outstandingBalance;
@@ -610,13 +680,14 @@ async function runTests() {
     const expectedDeposit = preDeposit + 10000;
     const expectedCreditLimit = expectedDeposit * 2.0;
     const expectedOutstanding = preOutstanding - 5000 + orderDebitAmount;
-    const exactBalancesMatch = (
+    const exactBalancesMatch = Boolean(
+      entry3 &&
       finalDeposit === expectedDeposit &&
       finalCreditLimit === expectedCreditLimit &&
       finalOutstanding === expectedOutstanding &&
       finalAvailableCredit === finalCreditLimit - finalOutstanding &&
-      finalDeposit === addedLedgerEntries[addedLedgerEntries.length - 1].depositAfter &&
-      finalOutstanding === addedLedgerEntries[addedLedgerEntries.length - 1].outstandingAfter
+      finalDeposit === entry3.depositAfter &&
+      finalOutstanding === entry3.outstandingAfter
     );
 
     if (!allB2BSuccessful || !exact3Entries || !hasDepositEntry || !hasPaymentEntry || !hasOrderDebitEntry || !chainValid || !exactBalancesMatch) {
@@ -920,6 +991,7 @@ async function runTests() {
     console.error('Test execution error:', err);
     process.exit(1);
   } finally {
+    Date.now = originalDateNow;
     server.close();
     console.log(`\n========================================================================`);
     console.log(` Phase 7 Milestone 8 Test Results: ${passed} PASSED, ${failed} FAILED`);
