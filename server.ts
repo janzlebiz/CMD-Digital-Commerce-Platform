@@ -1393,6 +1393,7 @@ export function createExpressApp(deps: ServerDependencies = {}): Express {
       return;
     }
 
+    const itemMap = new Map<string, number>();
     for (const item of items) {
       if (!item.skuId || !ACTIVE_CONSUMER_SKUS.includes(item.skuId as any) || !PRODUCTS_CATALOG[item.skuId]) {
         res.status(400).json({ error: `Invalid or unsupported SKU: ${item.skuId}` });
@@ -1403,7 +1404,13 @@ export function createExpressApp(deps: ServerDependencies = {}): Express {
         res.status(400).json({ error: `Invalid quantity for SKU: ${item.skuId}` });
         return;
       }
+      itemMap.set(item.skuId, (itemMap.get(item.skuId) || 0) + qty);
     }
+
+    const normalizedItems = Array.from(itemMap.entries()).map(([skuId, quantity]) => ({
+      skuId,
+      quantity,
+    }));
 
     const orderId = `HCI-ORD-${Date.now().toString().slice(-6)}`;
     const nowIso = new Date().toISOString();
@@ -1417,9 +1424,9 @@ export function createExpressApp(deps: ServerDependencies = {}): Express {
         const computedItems = [];
         const batchAllocations: Record<string, any[]> = {};
 
-        for (const item of items) {
+        for (const item of normalizedItems) {
           const prod = PRODUCTS_CATALOG[item.skuId];
-          const qty = Number(item.quantity);
+          const qty = item.quantity;
           const itemTotal = prod.price * qty;
           subtotal += itemTotal;
 

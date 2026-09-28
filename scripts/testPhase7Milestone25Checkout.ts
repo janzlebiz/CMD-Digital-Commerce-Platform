@@ -446,6 +446,47 @@ async function runMilestone25TestSuite() {
       '5. Inventory aggregate remains fully reconciled after checkouts'
     );
 
+    // 6. Duplicate-SKU checkout combines quantities, creates one logical order line, reserves combined quantity, records complete FEFO allocation breakdown, and preserves /inventory reconciliation
+    const checkoutDup = await makeRequest(
+      server,
+      '/api/orders/checkout',
+      'POST',
+      {
+        branchId: 'daet',
+        items: [
+          { skuId: 'hci-cmd-65ml', quantity: 3 },
+          { skuId: 'hci-cmd-65ml', quantity: 4 }
+        ],
+        deliveryMethod: 'branch_pickup',
+      },
+      { Authorization: 'Bearer VALID_CUSTOMER_TOKEN' }
+    );
+    const orderDup = checkoutDup.data.order;
+    const itemsDup = orderDup.items;
+    const allocsDup = orderDup.batchAllocations['hci-cmd-65ml'];
+    const totalAllocatedQty = allocsDup.reduce((sum: number, a: any) => sum + (Number(a.allocatedQuantity || a.quantityReserved) || 0), 0);
+
+    const reconDup = await makeRequest(
+      server,
+      '/api/inventory/reconciliation?branchId=daet',
+      'GET',
+      undefined,
+      { Authorization: 'Bearer VALID_ADMIN_TOKEN' }
+    );
+
+    assert(
+      checkoutDup.status === 200 &&
+      checkoutDup.data.success === true &&
+      itemsDup.length === 1 &&
+      itemsDup[0].skuId === 'hci-cmd-65ml' &&
+      itemsDup[0].quantity === 7 &&
+      itemsDup[0].totalPrice === itemsDup[0].unitPrice * 7 &&
+      allocsDup && allocsDup.length > 0 &&
+      totalAllocatedQty === 7 &&
+      reconDup.status === 200 && reconDup.data.reconciliation.allConsistent === true,
+      '6. Duplicate-SKU checkout correctly combines quantities into one line item, reserves combined quantity through FEFO, persists complete allocation breakdown, and preserves reconciliation'
+    );
+
   } finally {
     await new Promise<void>((resolve) => server.close(() => resolve()));
   }
