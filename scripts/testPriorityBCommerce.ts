@@ -695,16 +695,15 @@ async function runTests() {
     const normalDeliveryAdapter = new StandardDeliveryAdapter();
     spyDeliveryAdapter.createFulfillment = normalDeliveryAdapter.createFulfillment;
 
-    const normalPaymentAdapterCreate = new SimulatedPaymentAdapter('simulated_cod').createPaymentIntent;
-
     // Test A: Failed checkout replay (Phase B transient failure)
     let throwTransient = true;
+    const originalCreatePaymentIntent = spyPaymentAdapter.createPaymentIntent.bind(spyPaymentAdapter);
     spyPaymentAdapter.createPaymentIntent = async (orderId, amount, paymentMethod, metadata, idempotencyKey) => {
       if (throwTransient) {
         throwTransient = false;
         throw new Error('Transient Payment Gateway Timeout');
       }
-      return normalPaymentAdapterCreate(orderId, amount, paymentMethod, metadata, idempotencyKey);
+      return originalCreatePaymentIntent(orderId, amount, paymentMethod, metadata, idempotencyKey);
     };
 
     spyPaymentAdapter.createCount = 0;
@@ -752,16 +751,44 @@ async function runTests() {
     });
 
     const retryData = await retryAttemptRes.json();
+    if (retryAttemptRes.status !== 200) {
+      console.error('DEBUG RETRY FAILURE ERROR:', retryData);
+    }
     assert(retryAttemptRes.status === 200, '31. Retry same key K succeeds with HTTP 200 after transient payment gateway timeout resolved');
     assert(retryData.orderId === failedOrderId, '32. Retried checkout uses the exact same order ID');
 
     const finalReservedStock = store.branch_batch_inventory.get('daet_BAT-DAET-CMD65-01').reservedQuantity;
     assert(finalReservedStock === initialReservedStock, '33. Retry does NOT run FEFO reservation again or double-reserve inventory');
+    assert(spyPaymentAdapter.createCount === 1, '33a. Second attempt actually calls payment provider again');
+    assert(spyDeliveryAdapter.createCount === 1, '33b. Second attempt actually calls delivery provider once');
+
+    // Third replay after completion
+    spyPaymentAdapter.createCount = 0;
+    spyDeliveryAdapter.createCount = 0;
+
+    const thirdAttemptRes = await fetch(`http://127.0.0.1:${port}/api/orders/checkout`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${customerToken}`,
+        'x-idempotency-key': replayKey,
+      },
+      body: JSON.stringify(replayPayload),
+    });
+
+    const thirdData = await thirdAttemptRes.json();
+    assert(thirdAttemptRes.status === 200, '33c. Third attempt (replay after completion) returns HTTP 200');
+    assert(thirdData.idempotentReplay === true, '33d. Third attempt reports idempotentReplay === true');
+    assert(spyPaymentAdapter.createCount === 0, '33e. Third attempt makes zero new payment provider calls');
+    assert(spyDeliveryAdapter.createCount === 0, '33f. Third attempt makes zero new delivery provider calls');
+
+    const postReplayReservedStock = store.branch_batch_inventory.get('daet_BAT-DAET-CMD65-01').reservedQuantity;
+    assert(postReplayReservedStock === finalReservedStock, '33g. Third attempt makes zero new inventory reservations');
 
 
     // Test B & C: Failed compensation recovery and Successful replay
     // Simulate: payment creation succeeds, delivery creation fails, payment compensation refund fails
-    spyPaymentAdapter.createPaymentIntent = normalPaymentAdapterCreate;
+    spyPaymentAdapter.createPaymentIntent = originalCreatePaymentIntent;
     spyDeliveryAdapter.createFulfillment = async () => {
       throw new Error('Fulfillment API Server Offline');
     };

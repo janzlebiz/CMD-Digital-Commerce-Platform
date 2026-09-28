@@ -2388,6 +2388,165 @@ export function createExpressApp(deps: ServerDependencies = {}): Express {
           }
         }
 
+        const isPaymentFailedRetry = orderRecord.checkoutStatus === 'failed' && 
+          orderRecord.paymentStatus !== 'paid' && 
+          orderRecord.paymentStatus !== 'authorized' &&
+          !orderRecord.paymentIntent;
+
+        if (isPaymentFailedRetry) {
+          const paymentAdapter = PaymentAdapterRegistry.getAdapter(orderRecord.paymentMethod || 'cash_on_delivery');
+          const deliveryAdapter = DeliveryAdapterRegistry.getAdapter(orderRecord.deliveryMethod || 'door_to_door');
+
+          const paymentIdempotencyKey = `pay_chk_${user.uid}_${orderRecord.id}_${idempotencyKey}`;
+          const deliveryIdempotencyKey = `del_chk_${orderRecord.id}`;
+
+          let paymentIntent: PaymentIntent | undefined = undefined;
+          let fulfillment: DeliveryFulfillment | undefined = undefined;
+
+          try {
+            paymentIntent = await paymentAdapter.createPaymentIntent(
+              orderRecord.id,
+              orderRecord.grandTotal,
+              orderRecord.paymentMethod,
+              { customerEmail: orderRecord.customer?.email },
+              paymentIdempotencyKey
+            );
+
+            fulfillment = await deliveryAdapter.createFulfillment(
+              orderRecord.id,
+              orderRecord.deliveryMethod,
+              orderRecord.branchId,
+              orderRecord.customer?.shippingAddress,
+              deliveryIdempotencyKey
+            );
+          } catch (providerErr: any) {
+            let compensationStatus: string | undefined = undefined;
+            let compensationError: string | undefined = undefined;
+
+            if (paymentIntent && (paymentIntent.status === 'paid' || paymentIntent.status === 'authorized')) {
+              const compRef = db.collection('payment_compensations').doc(orderRecord.id);
+              const compKey = `comp_${orderRecord.id}`;
+
+              await db.runTransaction(async (transaction: any) => {
+                transaction.set(compRef, {
+                  status: 'processing',
+                  orderId: orderRecord.id,
+                  paymentId: paymentIntent!.paymentId,
+                  amount: orderRecord.grandTotal,
+                  providerIdempotencyKey: compKey,
+                  reason: 'Compensating refund due to delivery fulfillment failure',
+                  createdAt: nowIso,
+                  updatedAt: nowIso,
+                });
+              });
+
+              let compSuccess = false;
+              let compResult: any = null;
+              let compErrMessage: string | null = null;
+
+              try {
+                compResult = await paymentAdapter.processRefund(
+                  paymentIntent.paymentId,
+                  orderRecord.grandTotal,
+                  'Compensating refund due to delivery fulfillment failure',
+                  compKey
+                );
+                compSuccess = true;
+              } catch (compErr: any) {
+                compErrMessage = compErr?.message || String(compErr);
+              }
+
+              if (compSuccess) {
+                compensationStatus = 'completed';
+                await db.runTransaction(async (transaction: any) => {
+                  transaction.set(compRef, {
+                    status: 'completed',
+                    providerResult: compResult,
+                    updatedAt: new Date().toISOString(),
+                  }, { merge: true });
+                });
+              } else {
+                compensationStatus = 'failed';
+                compensationError = compErrMessage || 'Compensation refund failed';
+                await db.runTransaction(async (transaction: any) => {
+                  transaction.set(compRef, {
+                    status: 'failed',
+                    lastError: compErrMessage,
+                    updatedAt: new Date().toISOString(),
+                  }, { merge: true });
+                });
+              }
+            }
+
+            await db.runTransaction(async (transaction: any) => {
+              const orderRef = db.collection('orders').doc(orderRecord.id);
+              const keyRef = db.collection('idempotency_keys').doc(keyDocId);
+
+              const failedOrderRecord = {
+                ...orderRecord,
+                fulfillmentStatus: 'failed',
+                checkoutStatus: 'failed',
+                failureReason: providerErr.message,
+                compensationStatus: compensationStatus || orderRecord.compensationStatus,
+                compensationError: compensationError || orderRecord.compensationError,
+                refundedAmount: compensationStatus === 'completed' ? orderRecord.grandTotal : (orderRecord.refundedAmount || 0),
+                remainingRefundableBalance: compensationStatus === 'completed' ? 0 : (orderRecord.remainingRefundableBalance ?? orderRecord.grandTotal),
+                paymentStatus: compensationStatus === 'completed' ? 'refunded' : (paymentIntent ? paymentIntent.status : 'pending_payment'),
+                paymentIntent: paymentIntent || orderRecord.paymentIntent,
+                updatedAt: nowIso,
+              };
+
+              transaction.set(orderRef, failedOrderRecord, { merge: true });
+              transaction.set(keyRef, {
+                userId: user.uid,
+                idempotencyKey,
+                orderId: orderRecord.id,
+                orderRecord: failedOrderRecord,
+                checkoutStatus: 'failed',
+                failureReason: providerErr.message,
+                updatedAt: nowIso,
+              }, { merge: true });
+            });
+
+            res.status(500).json({ error: `Checkout provider failed: ${providerErr.message}` });
+            return;
+          }
+
+          let finalizedOrder: any;
+          await db.runTransaction(async (transaction: any) => {
+            const orderRef = db.collection('orders').doc(orderRecord.id);
+            const keyRef = db.collection('idempotency_keys').doc(keyDocId);
+
+            finalizedOrder = {
+              ...orderRecord,
+              paymentStatus: paymentIntent!.status,
+              paymentIntent: paymentIntent!,
+              fulfillmentStatus: fulfillment!.status,
+              fulfillment: fulfillment!,
+              checkoutStatus: 'completed',
+              updatedAt: nowIso,
+            };
+
+            transaction.set(orderRef, finalizedOrder);
+            transaction.set(keyRef, {
+              userId: user.uid,
+              idempotencyKey,
+              orderId: orderRecord.id,
+              orderRecord: finalizedOrder,
+              checkoutStatus: 'completed',
+              createdAt: nowIso,
+              updatedAt: nowIso,
+            });
+          });
+
+          res.status(200).json({
+            success: true,
+            orderId: finalizedOrder.id,
+            order: finalizedOrder,
+          });
+          return;
+        }
+
         res.status(200).json({
           success: true,
           orderId: orderRecord.id || orderId,
