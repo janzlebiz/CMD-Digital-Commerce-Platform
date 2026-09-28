@@ -4063,7 +4063,11 @@ export function createExpressApp(deps: ServerDependencies = {}): Express {
       return;
     }
 
-    const cleanIdempotencyKey = idempotencyKey ? String(idempotencyKey).trim() : null;
+    const cleanIdempotencyKey = idempotencyKey && typeof idempotencyKey === 'string' && idempotencyKey.trim() ? idempotencyKey.trim() : null;
+    if (!cleanIdempotencyKey) {
+      res.status(400).json({ error: 'idempotencyKey is required.' });
+      return;
+    }
 
     try {
       await ensureInventorySeeded();

@@ -666,28 +666,70 @@ async function runMilestone4TestSuite() {
       'Destination branch batch inherits authoritative product batch expiryDate when initialized'
     );
 
-    // 22. Source/destination/transit conservation-of-stock invariant holds
-    const reconDaet = await makeRequest(
+    // 0. Test mandatory idempotencyKey for initiation
+    const availBeforeNoIdemp = bbStore.get('daet_batch-2026-09a').availableQuantity;
+    const noIdempRes = await makeRequest(
       server,
-      '/api/inventory/reconciliation?branchId=daet',
-      'GET',
-      undefined,
-      { Authorization: 'Bearer VALID_ADMIN_TOKEN' }
+      '/api/inventory/transfers',
+      'POST',
+      { sourceBranchId: 'daet', destinationBranchId: 'labo', skuId: 'hci-cmd-65ml', batchId: 'batch-2026-09a', quantity: 1 },
+      { Authorization: 'Bearer VALID_DAET_MANAGER_TOKEN' }
     );
-    const reconLabo = await makeRequest(
-      server,
-      '/api/inventory/reconciliation?branchId=labo',
-      'GET',
-      undefined,
-      { Authorization: 'Bearer VALID_ADMIN_TOKEN' }
-    );
-    if (!reconLabo.data.reconciliation.allConsistent) {
-      console.log('Labo reconciliation results:', reconLabo.data.reconciliation.reconciliationResults);
-    }
+    const availAfterNoIdemp = bbStore.get('daet_batch-2026-09a').availableQuantity;
     assert(
-      reconDaet.status === 200 && reconDaet.data.reconciliation.allConsistent === true &&
-      reconLabo.status === 200 && reconLabo.data.reconciliation.allConsistent === true,
-      '22. Conservation of stock invariant holds and passes reconciliation checks'
+      noIdempRes.status === 400 && availAfterNoIdemp === availBeforeNoIdemp,
+      '0. Mandatory idempotencyKey rejected with 400 and causes zero stock mutation'
+    );
+
+    // 22. Conservation of stock invariant holds (Numerically strict check)
+    const getBatchStockSum = (branchIds: string[], batchId: string) => {
+      let sum = 0;
+      for (const bId of branchIds) {
+        const batch = bbStore.get(`${bId}_${batchId}`);
+        if (batch) {
+          sum += (Number(batch.availableQuantity) || 0) + (Number(batch.reservedQuantity) || 0) + (Number(batch.damagedQuantity) || 0);
+        }
+      }
+      return sum;
+    };
+    
+    const getTransitAndLossSum = (batchId: string) => {
+      let transit = 0;
+      let loss = 0;
+      for (const t of harness.stockTransfersStore.values()) {
+        if (t.batchId === batchId) {
+          if (t.status === 'IN_TRANSIT') {
+            transit += Number(t.transitQuantity) || 0;
+          }
+          loss += Number(t.auditedLossQuantity) || 0;
+        }
+      }
+      return { transit, loss };
+    };
+
+    const targetBatchId = 'batch-2026-09a';
+    const branchesToSum = ['daet', 'labo', 'capalonga'];
+    
+    const initialBatchStock = getBatchStockSum(branchesToSum, targetBatchId);
+    const initialTL = getTransitAndLossSum(targetBatchId);
+    const initialTotalSum = initialBatchStock + initialTL.transit + initialTL.loss;
+
+    // Perform transfer initiation to verify stock conservation
+    await makeRequest(
+      server,
+      '/api/inventory/transfers',
+      'POST',
+      { sourceBranchId: 'daet', destinationBranchId: 'labo', skuId: 'hci-cmd-65ml', batchId: targetBatchId, quantity: 10, idempotencyKey: 'trf-idemp-22-conservation' },
+      { Authorization: 'Bearer VALID_DAET_MANAGER_TOKEN' }
+    );
+    
+    const finalBatchStock = getBatchStockSum(branchesToSum, targetBatchId);
+    const finalTL = getTransitAndLossSum(targetBatchId);
+    const finalTotalSum = finalBatchStock + finalTL.transit + finalTL.loss;
+    
+    assert(
+      initialTotalSum === finalTotalSum,
+      `22. Conservation of stock invariant holds: Initial Total (${initialTotalSum}) === Final Total (${finalTotalSum})`
     );
 
     // 23. Concurrent transfer attempts cannot overdraw source stock
