@@ -24,6 +24,7 @@ function createTestHarness() {
   const branchBatchInventoryStore = new Map<string, any>();
   const productBatchesStore = new Map<string, any>();
   const ordersStore = new Map<string, any>();
+  const stockTransfersStore = new Map<string, any>();
   const auditLogsStore = new Map<string, any>();
   const consultationIntakesStore = new Map<string, any>();
 
@@ -34,6 +35,7 @@ function createTestHarness() {
                     colName === 'branch_batch_inventory' ? branchBatchInventoryStore :
                     colName === 'product_batches' ? productBatchesStore :
                     colName === 'orders' ? ordersStore :
+                    colName === 'stock_transfers' ? stockTransfersStore :
                     colName === 'audit_logs' ? auditLogsStore :
                     colName === 'consultation_intakes' ? consultationIntakesStore :
                     new Map<string, any>();
@@ -88,7 +90,7 @@ function createTestHarness() {
     }
   };
 
-  return { mockDb, mockAuth, inventoryStore, ordersStore, auditLogsStore, consultationIntakesStore };
+  return { mockDb, mockAuth, inventoryStore, ordersStore, stockTransfersStore, auditLogsStore, consultationIntakesStore };
 }
 
 async function makeRequest(server: http.Server, path: string, method: string, body?: any, headers: any = {}) {
@@ -224,10 +226,28 @@ async function runTests() {
     const resExcl = await makeRequest(server, `/api/inventory/forecasting/${branch}/${sku}`, 'GET', null, { Authorization: 'Bearer VALID_DAET_MANAGER_TOKEN' });
     assert(resExcl.data.forecast.totalUnitsSold === 10, '7. Cancelled/refunded orders excluded from Vs');
 
-    // 8. Transfer Exclusion (Inter-branch transfers are not in orders collection with fulfilledAt, but let's be sure they aren't counted if they were)
-    // Actually the engine queries 'orders'. Transfers are in 'stock_transfers'.
-    // So they are naturally excluded as long as we only query 'orders'.
-    assert(true, '8. Inter-branch transfers excluded (Architecture confirmed)');
+    // 8. Transfer Exclusion
+    const resBaseline = await makeRequest(server, `/api/inventory/forecasting/${branch}/${sku}`, 'GET', null, { Authorization: 'Bearer VALID_DAET_MANAGER_TOKEN' });
+    const baselineUnits = resBaseline.data.forecast.totalUnitsSold;
+    const baselineVelocity = resBaseline.data.forecast.salesVelocity;
+    
+    harness.stockTransfersStore.set('TRF-1', {
+      id: 'TRF-1',
+      sourceBranchId: branch,
+      destinationBranchId: 'labo',
+      skuId: sku,
+      shippedQuantity: 1000,
+      status: 'RECEIVED_FULL',
+      initiatedAt: tenDaysAgo,
+      receivedAt: tenDaysAgo
+    });
+    
+    const resAfterTransfer = await makeRequest(server, `/api/inventory/forecasting/${branch}/${sku}`, 'GET', null, { Authorization: 'Bearer VALID_DAET_MANAGER_TOKEN' });
+    assert(
+      resAfterTransfer.data.forecast.totalUnitsSold === baselineUnits &&
+      resAfterTransfer.data.forecast.salesVelocity === baselineVelocity,
+      '8. Inter-branch transfers excluded: 1000 units transferred but Vs remains based on 10 units sold'
+    );
 
     // 9. Branch isolation: Branch A sales don't affect Branch B
     const resLabo = await makeRequest(server, `/api/inventory/forecasting/labo/${sku}`, 'GET', null, { Authorization: 'Bearer VALID_ADMIN_TOKEN' });
