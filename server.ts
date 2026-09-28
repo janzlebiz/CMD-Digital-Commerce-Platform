@@ -3674,6 +3674,307 @@ export function createExpressApp(deps: ServerDependencies = {}): Express {
     }
   });
 
+  // --- PHASE 7 MILESTONE 3: Batch Provenance & Recall Traversal Endpoints ---
+
+  // 1. POST /api/orders/:orderId/fulfill - Authoritative fulfillment transition & provenance recording
+  app.post('/api/orders/:orderId/fulfill', async (req: Request, res: Response): Promise<void> => {
+    const user = await requireAuth(req, res);
+    if (!user) return;
+
+    if (user.role !== 'branch_manager' && user.role !== 'regional_director' && user.role !== 'super_admin') {
+      await logAuditEvent(
+        user.uid,
+        user.role,
+        null,
+        'unauthorized_order_fulfillment_blocked',
+        'orders',
+        String(req.params.orderId || ''),
+        false,
+        { userRole: user.role },
+        req
+      );
+      res.status(403).json({ error: 'Access Denied: Order fulfillment requires authorized staff role.' });
+      return;
+    }
+
+    const { orderId } = req.params;
+    const strOrderId = String(orderId || '');
+    if (!strOrderId) {
+      res.status(400).json({ error: 'orderId is required.' });
+      return;
+    }
+
+    try {
+      const orderRef = db.collection('orders').doc(strOrderId);
+      const orderSnap = await orderRef.get();
+      if (!orderSnap.exists) {
+        res.status(404).json({ error: `Order not found: ${strOrderId}` });
+        return;
+      }
+      const orderData = orderSnap.data();
+      const normalizedBranch = (orderData.branchId || 'daet').toLowerCase().trim();
+
+      if (user.role === 'branch_manager') {
+        const assigned = (user.assignedBranchId || 'daet').toLowerCase().trim();
+        if (normalizedBranch !== assigned) {
+          await logAuditEvent(
+            user.uid,
+            user.role,
+            normalizedBranch,
+            'unauthorized_cross_branch_order_fulfillment_blocked',
+            'orders',
+            strOrderId,
+            false,
+            { targetBranch: normalizedBranch, assignedBranch: assigned },
+            req
+          );
+          res.status(403).json({ error: 'Access Denied: Branch managers cannot fulfill orders of other branches.' });
+          return;
+        }
+      }
+
+      // Idempotency check
+      if (orderData.fulfillmentStatus === 'fulfilled' || orderData.fulfillmentStatus === 'completed') {
+        res.status(200).json({ success: true, alreadyFulfilled: true, orderId: strOrderId, order: orderData });
+        return;
+      }
+
+      const batchAllocations = orderData.batchAllocations || {};
+      if (!batchAllocations || Object.keys(batchAllocations).length === 0) {
+        res.status(400).json({ error: 'Order has no reserved batch allocations to fulfill.' });
+        return;
+      }
+
+      const nowIso = new Date().toISOString();
+      const createdAllocations: any[] = [];
+
+      await db.runTransaction(async (transaction: any) => {
+        const txOrderSnap = await transaction.get(orderRef);
+        const txOrderData = txOrderSnap.data();
+        if (txOrderData.fulfillmentStatus === 'fulfilled' || txOrderData.fulfillmentStatus === 'completed') {
+          return;
+        }
+
+        const allocationsMap = txOrderData.batchAllocations || {};
+        const affectedSkus = new Set<string>();
+        const updatedBatches: any[] = [];
+
+        for (const [skuId, allocList] of Object.entries(allocationsMap)) {
+          if (!Array.isArray(allocList)) continue;
+          affectedSkus.add(skuId);
+
+          for (const alloc of allocList) {
+            const batchId = alloc.batchId;
+            const qtyReserved = Number(alloc.quantityReserved || alloc.allocatedQuantity) || 0;
+            if (!batchId || qtyReserved <= 0) continue;
+
+            const branchBatchDocId = `${normalizedBranch}_${batchId}`;
+            const branchBatchRef = db.collection('branch_batch_inventory').doc(branchBatchDocId);
+            const batchSnap = await transaction.get(branchBatchRef);
+
+            if (!batchSnap.exists) {
+              throw new Error(`BATCH_NOT_FOUND: Branch batch ${branchBatchDocId} not found.`);
+            }
+            const bData = batchSnap.data();
+            const currentReserved = Number(bData.reservedQuantity) || 0;
+            const newReserved = Math.max(0, currentReserved - qtyReserved);
+
+            const updatedBatch = {
+              ...bData,
+              reservedQuantity: newReserved,
+              updatedAt: nowIso,
+            };
+            transaction.set(branchBatchRef, updatedBatch);
+            updatedBatches.push(updatedBatch);
+
+            const allocationId = `BALLOC-${strOrderId}-${batchId}-${crypto.randomBytes(2).toString('hex').toUpperCase()}`;
+            const allocationRecord = {
+              id: allocationId,
+              orderId: strOrderId,
+              batchId,
+              skuId,
+              branchId: normalizedBranch,
+              customerUid: txOrderData.userId || txOrderData.customer?.uid || 'customer-anonymous',
+              allocatedQuantity: qtyReserved,
+              allocatedAt: nowIso,
+            };
+            const allocDocRef = db.collection('batch_allocations').doc(allocationId);
+            transaction.set(allocDocRef, allocationRecord);
+            createdAllocations.push(allocationRecord);
+          }
+        }
+
+        const updatedOrder = {
+          ...txOrderData,
+          fulfillmentStatus: 'fulfilled',
+          fulfilledAt: nowIso,
+          updatedAt: nowIso,
+        };
+        transaction.set(orderRef, updatedOrder);
+
+        for (const skuId of affectedSkus) {
+          const batchesQuery = db.collection('branch_batch_inventory').where('branchId', '==', normalizedBranch).where('skuId', '==', skuId);
+          const batchesSnap = await transaction.get(batchesQuery);
+          const allBatches: any[] = [];
+          if (batchesSnap && !batchesSnap.empty) {
+            batchesSnap.forEach((d: any) => {
+              const data = d.data();
+              const modified = updatedBatches.find((ub) => ub.id === data.id);
+              allBatches.push(modified || data);
+            });
+          }
+
+          const updatedAggregate = computeAggregateInventoryFromBatches({
+            branchBatches: allBatches,
+            branchId: normalizedBranch,
+            skuId,
+            lastAdjustmentAt: nowIso,
+          });
+
+          const aggDocRef = db.collection('inventory').doc(`${normalizedBranch}_${skuId}`);
+          transaction.set(aggDocRef, updatedAggregate);
+        }
+      });
+
+      await logAuditEvent(
+        user.uid,
+        user.role,
+        normalizedBranch,
+        'order_fulfilled',
+        'orders',
+        strOrderId,
+        true,
+        { allocationsCount: createdAllocations.length },
+        req
+      );
+
+      res.status(200).json({ success: true, orderId: strOrderId, allocationsCreated: createdAllocations });
+    } catch (err: any) {
+      res.status(500).json({ error: `Fulfillment failed: ${err.message}` });
+    }
+  });
+
+  // 2. GET /api/inventory/recall - Batch recall traversal by batchId or batchNumber
+  app.get('/api/inventory/recall', async (req: Request, res: Response): Promise<void> => {
+    const user = await requireAuth(req, res);
+    if (!user) return;
+
+    if (user.role !== 'branch_manager' && user.role !== 'regional_director' && user.role !== 'super_admin') {
+      await logAuditEvent(
+        user.uid,
+        user.role,
+        null,
+        'unauthorized_batch_recall_blocked',
+        'batch_allocations',
+        null,
+        false,
+        { userRole: user.role },
+        req
+      );
+      res.status(403).json({ error: 'Access Denied: Batch recall traversal requires authorized staff role.' });
+      return;
+    }
+
+    const batchIdParam = req.query.batchId ? String(req.query.batchId).trim() : null;
+    const batchNumberParam = req.query.batchNumber ? String(req.query.batchNumber).trim() : null;
+
+    if (!batchIdParam && !batchNumberParam) {
+      res.status(400).json({ error: 'Either batchId or batchNumber query parameter is required for recall traversal.' });
+      return;
+    }
+
+    try {
+      let targetBatchId = batchIdParam;
+
+      if (!targetBatchId && batchNumberParam) {
+        const pbSnap = await db.collection('product_batches').where('batchNumber', '==', batchNumberParam).get();
+        if (!pbSnap.empty) {
+          targetBatchId = pbSnap.docs[0].id;
+        } else {
+          const allPbSnap = await db.collection('product_batches').get();
+          if (!allPbSnap.empty) {
+            allPbSnap.forEach((d: any) => {
+              if (d.data().batchNumber === batchNumberParam) {
+                targetBatchId = d.id;
+              }
+            });
+          }
+        }
+      }
+
+      const queryBatchId = targetBatchId || batchNumberParam;
+
+      const allocSnap = await db.collection('batch_allocations').where('batchId', '==', queryBatchId).get();
+      const allocations: any[] = [];
+      if (!allocSnap.empty) {
+        allocSnap.forEach((d: any) => allocations.push(d.data()));
+      }
+
+      if (allocations.length === 0 && batchNumberParam) {
+        const allAllocSnap = await db.collection('batch_allocations').get();
+        if (!allAllocSnap.empty) {
+          allAllocSnap.forEach((d: any) => {
+            const data = d.data();
+            if (data.batchId === batchNumberParam || data.batchNumber === batchNumberParam) {
+              allocations.push(data);
+            }
+          });
+        }
+      }
+
+      if (user.role === 'branch_manager') {
+        const assigned = (user.assignedBranchId || 'daet').toLowerCase().trim();
+        const unauthorized = allocations.some((a) => (a.branchId || '').toLowerCase().trim() !== assigned);
+        if (unauthorized || (allocations.length === 0 && req.query.branchId && String(req.query.branchId).toLowerCase().trim() !== assigned)) {
+          await logAuditEvent(
+            user.uid,
+            user.role,
+            assigned,
+            'unauthorized_cross_branch_batch_recall_blocked',
+            'batch_allocations',
+            queryBatchId,
+            false,
+            { queryBatchId, assignedBranch: assigned },
+            req
+          );
+          res.status(403).json({ error: 'Access Denied: Branch managers cannot access batch recall records of other branches.' });
+          return;
+        }
+      }
+
+      const affectedOrders = allocations.map((a) => ({
+        orderId: a.orderId,
+        customerUid: a.customerUid,
+        branchId: a.branchId,
+        allocatedQuantity: a.allocatedQuantity,
+        fulfillmentTimestamp: a.allocatedAt,
+        skuId: a.skuId,
+        batchId: a.batchId,
+      }));
+
+      await logAuditEvent(
+        user.uid,
+        user.role,
+        user.role === 'branch_manager' ? (user.assignedBranchId || null) : null,
+        'batch_recall_queried',
+        'batch_allocations',
+        queryBatchId,
+        true,
+        { queryBatchId, affectedRecordsCount: affectedOrders.length },
+        req
+      );
+
+      res.status(200).json({
+        batchId: queryBatchId,
+        batchNumber: batchNumberParam,
+        affectedCount: affectedOrders.length,
+        affectedRecords: affectedOrders,
+      });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
   return app;
 }
 
