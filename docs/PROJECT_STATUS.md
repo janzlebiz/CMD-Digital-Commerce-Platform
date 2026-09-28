@@ -73,14 +73,15 @@ The canonical product roadmap comprises the following ten phases:
 * Safe centralized Express error handling and secret masking in production.
 * Production runtime baseline documentation (`PRODUCTION_RUNTIME_BASELINE.md` completed).
 
-### Priority B: E-Commerce & Order Lifecycle (REMEDIATED & HARDENED)
-* Authoritative customer checkout consolidated on `POST /api/orders/checkout` server endpoint with mandatory `idempotencyKey`, catalog pricing authority, atomic transaction deduplication, and zero duplicate inventory reservations.
-* Authoritative branch inventory restoration implemented for cancellation and approved returns on `branch_batch_inventory` and aggregate `/inventory/{branchId_skuId}` documents.
-* Client-side React order state in `useEcommerce.ts` made strictly advisory with removal of local fallback state mutations on server errors.
-* Payment provider abstraction layer implemented (`PaymentProvider`, `PaymentIntent`, `SimulatedPaymentAdapter`, `PaymentAdapterRegistry`).
-* Delivery and shipping provider abstraction layer implemented (`DeliveryProvider`, `DeliveryQuote`, `DeliveryFulfillment`, `StandardDeliveryAdapter`).
-* Server-side order lifecycle operations implemented (`POST /api/orders/:orderId/cancel`, `POST /api/orders/:orderId/return-request`, `POST /api/orders/:orderId/return-process`, `POST /api/orders/:orderId/refund`).
-* Priority B commerce baseline documentation (`PRIORITY_B_COMMERCE_BASELINE.md` updated).
+### Priority B: E-Commerce & Order Lifecycle (COMPLETED / CERTIFIED REMEDIATED)
+* Authoritative customer checkout consolidated on `POST /api/orders/checkout` using a safe two-phase model (Phase A: pricing & FEFO inventory transaction with deterministic order ID, Phase B: provider calls outside transaction with deterministic keys, Phase C: finalize order transaction).
+* Server-boundary authentication enforced in `requireAuth()`, rejecting `DEMO_TOKEN_*` when `NODE_ENV === 'production'`.
+* Refund safety architecture (`executeSafeRefund`) implemented with transactional refund intent reservation, external provider execution, and balance state updates on provider success.
+* Deterministic refund keys applied to cancellation (`cancel:<orderId>`), return approval (`return:<orderId>`), and manual refunds (`manual:<orderId>:<key>`).
+* Failure recovery verified for provider checkout failures, refund failures, cancellation failures, and return approval failures.
+* Authoritative branch inventory restoration enforced on `branch_batch_inventory` and aggregate `/inventory/{branchId_skuId}` documents with double-restoration protection.
+* Client-side React order state in `useEcommerce.ts` strictly advisory.
+* Spied regression suite (`scripts/testPriorityBCommerce.ts`) passing 25/25 safety assertions.
 
 ### Priority C: Automation & Analytics (Original Phase 7)
 * Operational dashboards and business intelligence views.

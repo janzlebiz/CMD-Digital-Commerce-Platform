@@ -6,49 +6,59 @@ This document defines the authoritative e-commerce, checkout architecture, provi
 
 ---
 
-## 2. Authoritative Server-Side Checkout Flow & Idempotency
+## 2. Authoritative Server-Side Checkout Flow & Safe Two-Phase Architecture
 
 To eliminate local client-state order creation risks and enforce strict price and inventory integrity, customer order placement is consolidated on the authoritative server endpoint:
 
 `POST /api/orders/checkout`
 
-### Key Enforcement Rules
-1. **Catalog Price Authority**: Client-provided item prices in payloads are strictly ignored. Item prices and subtotals are calculated server-side using the authoritative `PRODUCTS_CATALOG`.
-2. **Required Checkout Idempotency**:
-   - Every `POST /api/orders/checkout` request MUST supply an `idempotencyKey` via header (`x-idempotency-key`) or request body (`idempotencyKey`).
-   - Requests missing `idempotencyKey` are rejected with `HTTP 400 Bad Request`.
-   - The key is scoped to the authenticated customer UID (`idempotency_keys/${user.uid}_${idempotencyKey}`).
-   - Detection and reservation occur atomically inside a Firestore transaction.
-   - Retries or concurrent duplicate submissions return the original order payload without creating duplicate order documents or reserving stock twice.
-3. **Delivery Fee Calculation**: Shipping fees are generated via the `DeliveryProvider` abstraction (PHP 0 for `branch_pickup`, PHP 150 for `door_to_door`).
-4. **Transaction Boundary & Side-Effect Separation**:
-   - External payment intent creation (`paymentAdapter.createPaymentIntent`) and delivery quote/fulfillment creation are executed outside/prior to the Firestore transaction using deterministic idempotency references.
-   - Inside `db.runTransaction()`, FEFO inventory reservation on `branch_batch_inventory` and atomic order document creation occur.
-   - If the transaction retries or a duplicate request occurs, no duplicate external payment intents or inventory allocations are created.
-5. **FEFO Inventory Reservation**: Atomic batch stock allocation and FEFO reservation are executed inside a Firestore database transaction on `branch_batch_inventory`.
-6. **Fulfillment Record Creation**: Generates a server-side `DeliveryFulfillment` record with tracking reference.
+### Safe Two-Phase Checkout Model
+1. **Phase A — Firestore Transaction**:
+   - Customer-scoped idempotency key (`idempotency_keys/${user.uid}_${idempotencyKey}`) checked.
+   - Deterministic order ID generated from `user.uid + '_' + idempotencyKey` (`HCI-ORD-${sha256(user.uid_idempotencyKey).substring(0,8)}`).
+   - Server-side catalog pricing strictly validated (`PRODUCTS_CATALOG`).
+   - FEFO inventory reserved on `branch_batch_inventory` and aggregate `/inventory/{branchId_skuId}` updated.
+   - Order document created in `pending_provider` state.
+   - Idempotency record stored with deterministic order ID.
+   - **NO** external payment or delivery provider methods execute inside this Phase A transaction.
+2. **Phase B — External Provider Invocations**:
+   - Executes outside the Firestore transaction.
+   - Payment intent created using deterministic key `pay_chk_${user.uid}_${orderId}_${idempotencyKey}`.
+   - Delivery fulfillment created using deterministic key `del_chk_${orderId}`.
+   - If an external provider throws an error, a recovery transaction sets `checkoutStatus = 'failed'`, `fulfillmentStatus = 'failed'`, and releases the reserved FEFO inventory exactly once.
+3. **Phase C — Finalize Order Transaction**:
+   - Second Firestore transaction attaches payment intent and fulfillment records to the order document.
+   - Sets `checkoutStatus = 'completed'`, `paymentStatus = paymentIntent.status`, `fulfillmentStatus = fulfillment.status`.
+   - Concurrent duplicate requests deduplicate safely at the provider and database layers without creating multiple payment intents or inventory allocations.
 
 ---
 
-## 3. Production Authentication & Fail-Closed Rules
+## 3. Production Authentication & Fail-Closed Boundary
 
-Production customer operations must require a valid Firebase ID token acquired via `user.getIdToken()`:
+Server-boundary authentication in `requireAuth()` strictly rejects demo tokens in production:
 
 1. **Production Token Requirement**:
-   - In production environments (`PROD`), customer operations (checkout, order cancellation, viewing my orders) require a valid Firebase ID token.
-   - If no authenticated user exists or token acquisition fails, the client hook (`useEcommerce`) rejects the operation immediately.
-2. **Demo Authentication Isolation**:
-   - Demo token authentication (`DEMO_TOKEN_customer`) is strictly isolated behind development/test/preview flags (`NODE_ENV !== 'production'`) and cannot activate in production.
-   - Unauthenticated production client requests fail closed and cannot access customer commerce endpoints.
+   - Whenever `NODE_ENV === 'production'`, any request using `DEMO_TOKEN_*` in the `Authorization` header is immediately rejected with `HTTP 401 Unauthorized`.
+   - Production requests MUST present a valid Firebase ID token verified via `admin.auth().verifyIdToken()`.
+2. **Demo Token Isolation**:
+   - Demo token authentication exists exclusively in non-production development/test/preview environments.
 
 ---
 
-## 4. Payment Provider Abstraction Layer & Side-Effect Boundary
+## 4. Refund Safety & State Machine Architecture
 
-The platform defines a provider-neutral payment abstraction interface so that production payment gateways (e.g. Stripe, PayMongo, GCash) can be plugged in without changing domain or order logic.
+Order refunds, cancellations, and return approvals utilize a transactional refund intent state machine (`executeSafeRefund`) that separates balance state updates from external gateway side effects:
 
-### Side-Effect Boundary Rule
-No payment provider methods that create external side effects (e.g. `createPaymentIntent` or `processRefund`) are called inside a retryable `db.runTransaction()`. Firestore transactions establish the authoritative order and payment state, and provider calls execute with provider-safe, deterministic idempotency references (`idempotencyKey` / `orderId`).
+1. **Transaction A — Reserve Refund Intent**:
+   - Validates refund amount against authoritative `remainingRefundableBalance`.
+   - Claims/creates a `refund_intents` document (`rfnd_${orderId}_${hash(refundKey)}`) with `status = 'processing'`.
+2. **External Gateway Execution**:
+   - Calls `paymentAdapter.processRefund(paymentId, refundAmount, reason, providerKey)` outside transaction.
+   - Provider key is deterministic and unique (`cancel:<orderId>`, `return:<orderId>`, `manual:<orderId>:<key>`).
+3. **Transaction B — Finalize Balance State**:
+   - **On Provider Success**: Marks refund intent `completed`, updates `refundedAmount`, reduces `remainingRefundableBalance`, sets `paymentStatus = 'refunded'` or `'partially_refunded'`, stores provider refund result, and logs audit record.
+   - **On Provider Failure**: Marks refund intent `failed`, leaves `paymentStatus` and `remainingRefundableBalance` intact, allowing safe retry using the same refund key.
+   - **Replay Protection**: Replaying an already successful refund intent returns the existing provider result without calling the provider adapter again.
 
 ### Abstraction Interfaces & Types
 ```ts

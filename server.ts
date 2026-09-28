@@ -1243,42 +1243,66 @@ export interface PaymentProvider {
     orderId: string,
     amount: number,
     paymentMethod: string,
-    metadata?: Record<string, any>
+    metadata?: Record<string, any>,
+    idempotencyKey?: string
   ): Promise<PaymentIntent>;
   confirmPayment(paymentId: string, externalReference?: string): Promise<PaymentIntent>;
   processRefund(
     paymentId: string,
     amount: number,
-    reason: string
+    reason: string,
+    idempotencyKey?: string
   ): Promise<PaymentRefundResult>;
 }
 
 export class SimulatedPaymentAdapter implements PaymentProvider {
+  public createCount = 0;
+  public refundCount = 0;
+  public lastPaymentKey = '';
+  public lastRefundKey = '';
+  private paymentIntentsMap: Map<string, PaymentIntent> = new Map();
+  private refundResultsMap: Map<string, PaymentRefundResult> = new Map();
+
   constructor(public providerType: PaymentProviderType = 'simulated_cod') {}
 
   async createPaymentIntent(
     orderId: string,
     amount: number,
     paymentMethod: string,
-    metadata: Record<string, any> = {}
+    metadata: Record<string, any> = {},
+    idempotencyKey?: string
   ): Promise<PaymentIntent> {
+    if (idempotencyKey) {
+      this.lastPaymentKey = idempotencyKey;
+      if (this.paymentIntentsMap.has(idempotencyKey)) {
+        return this.paymentIntentsMap.get(idempotencyKey)!;
+      }
+    }
+
+    this.createCount++;
+
     const isCod = paymentMethod === 'cash_on_delivery' || paymentMethod === 'cash_on_pickup' || this.providerType === 'simulated_cod';
     const status: PaymentStatus = isCod ? 'pending_payment' : 'paid';
     const refPrefix = isCod ? 'COD' : paymentMethod === 'gcash' || paymentMethod === 'maya' ? 'WAL' : 'CARD';
     const nowIso = new Date().toISOString();
 
-    return {
+    const intent: PaymentIntent = {
       paymentId: `PAY-${Date.now().toString().slice(-6)}-${crypto.randomBytes(2).toString('hex').toUpperCase()}`,
       orderId,
       provider: this.providerType,
       amount,
       currency: 'PHP',
       status,
-      providerReference: `${refPrefix}-${Date.now()}`,
-      metadata,
+      providerReference: idempotencyKey ? `${refPrefix}-${idempotencyKey}` : `${refPrefix}-${Date.now()}`,
+      metadata: { ...metadata, idempotencyKey },
       createdAt: nowIso,
       updatedAt: nowIso,
     };
+
+    if (idempotencyKey) {
+      this.paymentIntentsMap.set(idempotencyKey, intent);
+    }
+    return intent;
   }
 
   async confirmPayment(paymentId: string, externalReference?: string): Promise<PaymentIntent> {
@@ -1299,25 +1323,43 @@ export class SimulatedPaymentAdapter implements PaymentProvider {
   async processRefund(
     paymentId: string,
     amount: number,
-    _reason: string
+    _reason: string,
+    idempotencyKey?: string
   ): Promise<PaymentRefundResult> {
-    return {
+    if (idempotencyKey) {
+      this.lastRefundKey = idempotencyKey;
+      if (this.refundResultsMap.has(idempotencyKey)) {
+        return this.refundResultsMap.get(idempotencyKey)!;
+      }
+    }
+
+    this.refundCount++;
+
+    const result: PaymentRefundResult = {
       refundId: `RFD-${Date.now().toString().slice(-6)}-${crypto.randomBytes(2).toString('hex').toUpperCase()}`,
       status: 'refunded',
       amount,
       processedAt: new Date().toISOString(),
     };
+
+    if (idempotencyKey) {
+      this.refundResultsMap.set(idempotencyKey, result);
+    }
+    return result;
   }
 }
 
 export class PaymentAdapterRegistry {
   private static adapters: Map<string, PaymentProvider> = new Map();
 
-  static registerAdapter(type: PaymentProviderType, adapter: PaymentProvider) {
+  static registerAdapter(type: PaymentProviderType | string, adapter: PaymentProvider) {
     this.adapters.set(type, adapter);
   }
 
   static getAdapter(paymentMethod: string): PaymentProvider {
+    if (this.adapters.has(paymentMethod)) {
+      return this.adapters.get(paymentMethod)!;
+    }
     if (paymentMethod === 'gcash' || paymentMethod === 'maya' || paymentMethod === 'digital_wallet') {
       return this.adapters.get('simulated_digital_wallet') || new SimulatedPaymentAdapter('simulated_digital_wallet');
     }
@@ -1325,6 +1367,10 @@ export class PaymentAdapterRegistry {
       return this.adapters.get('simulated_card') || new SimulatedPaymentAdapter('simulated_card');
     }
     return this.adapters.get('simulated_cod') || new SimulatedPaymentAdapter('simulated_cod');
+  }
+
+  static clear() {
+    this.adapters.clear();
   }
 }
 
@@ -1341,7 +1387,8 @@ export type FulfillmentStatus =
   | 'completed'
   | 'cancelled'
   | 'return_requested'
-  | 'returned';
+  | 'returned'
+  | 'failed';
 
 export interface DeliveryQuote {
   deliveryMethod: DeliveryMethodType;
@@ -1371,7 +1418,8 @@ export interface DeliveryProvider {
     orderId: string,
     deliveryMethod: DeliveryMethodType,
     branchId: string,
-    destinationAddress?: any
+    destinationAddress?: any,
+    idempotencyKey?: string
   ): Promise<DeliveryFulfillment>;
   updateFulfillmentStatus(
     trackingNumber: string,
@@ -1380,6 +1428,10 @@ export interface DeliveryProvider {
 }
 
 export class StandardDeliveryAdapter implements DeliveryProvider {
+  public createCount = 0;
+  public lastDeliveryKey = '';
+  private fulfillmentsMap: Map<string, DeliveryFulfillment> = new Map();
+
   async calculateShippingFee(
     deliveryMethod: DeliveryMethodType,
     _branchId: string,
@@ -1398,11 +1450,21 @@ export class StandardDeliveryAdapter implements DeliveryProvider {
     orderId: string,
     deliveryMethod: DeliveryMethodType,
     branchId: string,
-    _destinationAddress?: any
+    _destinationAddress?: any,
+    idempotencyKey?: string
   ): Promise<DeliveryFulfillment> {
+    if (idempotencyKey) {
+      this.lastDeliveryKey = idempotencyKey;
+      if (this.fulfillmentsMap.has(idempotencyKey)) {
+        return this.fulfillmentsMap.get(idempotencyKey)!;
+      }
+    }
+
+    this.createCount++;
+
     const isDoorToDoor = deliveryMethod === 'door_to_door';
     const nowIso = new Date().toISOString();
-    return {
+    const fulfillment: DeliveryFulfillment = {
       trackingNumber: isDoorToDoor ? `TRK-${orderId}` : `PICKUP-${orderId}`,
       deliveryMethod,
       branchId,
@@ -1411,6 +1473,11 @@ export class StandardDeliveryAdapter implements DeliveryProvider {
       shippingFee: isDoorToDoor ? 150 : 0,
       updatedAt: nowIso,
     };
+
+    if (idempotencyKey) {
+      this.fulfillmentsMap.set(idempotencyKey, fulfillment);
+    }
+    return fulfillment;
   }
 
   async updateFulfillmentStatus(
@@ -1573,8 +1640,14 @@ export function createExpressApp(deps: ServerDependencies = {}): Express {
     let uid: string;
     let email: string | undefined;
 
-    // Support demo mode tokens for preview
+    // Support demo mode tokens for preview/dev environments
     if (idToken.startsWith('DEMO_TOKEN_')) {
+      if (process.env.NODE_ENV === 'production') {
+        const errorMsg = 'Authentication Failed: Demo tokens are strictly forbidden in production.';
+        await logAuditEvent(null, null, null, 'authorization_failure', 'auth', null, false, { error: errorMsg, path: req.path }, req);
+        res.status(401).json({ error: errorMsg });
+        return null;
+      }
       const demoRole = idToken.replace('DEMO_TOKEN_', '').toLowerCase() as any;
       uid = `demo-${demoRole}-uid`;
       email = `${demoRole}@hcicmd.ph`;
@@ -1857,6 +1930,168 @@ export function createExpressApp(deps: ServerDependencies = {}): Express {
     };
   }
 
+  async function executeSafeRefund(
+    orderId: string,
+    refundAmount: number,
+    reason: string,
+    refundKey: string,
+    user: AuthenticatedUser,
+    req: Request
+  ): Promise<{ success: boolean; isReplay: boolean; refundRecord?: any; order?: any; error?: string }> {
+    const nowIso = new Date().toISOString();
+    const intentDocId = `rfnd_${orderId}_${crypto.createHash('sha256').update(refundKey).digest('hex').substring(0, 12)}`;
+    const intentRef = db.collection('refund_intents').doc(intentDocId);
+    const orderRef = db.collection('orders').doc(orderId);
+
+    let orderData: any;
+    let paymentId: string = orderId;
+    let paymentMethod: string = 'cash_on_delivery';
+    let isReplay = false;
+
+    try {
+      await db.runTransaction(async (transaction: any) => {
+        const intentSnap = await transaction.get(intentRef);
+        if (intentSnap && intentSnap.exists) {
+          const existingIntent = typeof intentSnap.data === 'function' ? intentSnap.data() : intentSnap.data;
+          if (existingIntent.status === 'completed') {
+            isReplay = true;
+            orderData = existingIntent.updatedOrder;
+            return;
+          }
+        }
+
+        const orderSnap = await transaction.get(orderRef);
+        if (!orderSnap || !orderSnap.exists) {
+          throw new Error(`Order not found: ${orderId}`);
+        }
+        orderData = typeof orderSnap.data === 'function' ? orderSnap.data() : orderSnap.data;
+
+        paymentId = orderData.paymentIntent?.paymentId || orderId;
+        paymentMethod = orderData.paymentMethod || 'cash_on_delivery';
+
+        if (isNaN(refundAmount) || refundAmount <= 0) {
+          throw new Error('Refund amount must be greater than 0.');
+        }
+
+        const currentRefunded = Number(orderData.refundedAmount) || 0;
+        const remainingBalance = Number(orderData.remainingRefundableBalance ?? (Number(orderData.grandTotal) - currentRefunded));
+
+        if (remainingBalance <= 0 || orderData.paymentStatus === 'refunded') {
+          throw new Error('Order is already fully refunded.');
+        }
+
+        if (refundAmount > remainingBalance) {
+          throw new Error(`Refund amount PHP ${refundAmount} exceeds remaining refundable balance PHP ${remainingBalance}.`);
+        }
+
+        transaction.set(intentRef, {
+          orderId,
+          refundAmount,
+          reason,
+          refundKey,
+          status: 'processing',
+          createdAt: nowIso,
+          updatedAt: nowIso,
+        });
+      });
+    } catch (err: any) {
+      return { success: false, isReplay: false, error: err.message };
+    }
+
+    if (isReplay) {
+      return { success: true, isReplay: true, order: orderData };
+    }
+
+    // External provider refund (outside transaction)
+    const providerIdempotencyKey = `prv_${intentDocId}`;
+    const paymentAdapter = PaymentAdapterRegistry.getAdapter(paymentMethod);
+    let refundRes: PaymentRefundResult;
+
+    try {
+      refundRes = await paymentAdapter.processRefund(paymentId, refundAmount, reason, providerIdempotencyKey);
+    } catch (providerErr: any) {
+      await db.runTransaction(async (transaction: any) => {
+        transaction.set(intentRef, {
+          orderId,
+          refundAmount,
+          reason,
+          refundKey,
+          status: 'failed',
+          lastError: providerErr.message,
+          updatedAt: new Date().toISOString(),
+        }, { merge: true });
+      });
+      return { success: false, isReplay: false, error: `Refund provider failed: ${providerErr.message}` };
+    }
+
+    let finalOrder: any;
+    let refundRecord: any;
+
+    await db.runTransaction(async (transaction: any) => {
+      const txOrderSnap = await transaction.get(orderRef);
+      const txOrderData = typeof txOrderSnap.data === 'function' ? txOrderSnap.data() : txOrderSnap.data;
+
+      const currentRefunded = Number(txOrderData.refundedAmount) || 0;
+      const currentRemaining = Number(txOrderData.remainingRefundableBalance ?? (Number(txOrderData.grandTotal) - currentRefunded));
+
+      const newRefunded = currentRefunded + refundAmount;
+      const newRemaining = Math.max(0, currentRemaining - refundAmount);
+      const newPaymentStatus = newRemaining <= 0 ? 'refunded' : 'partially_refunded';
+
+      const refundId = `RFND-${orderId}-${Date.now().toString().slice(-4)}`;
+      refundRecord = {
+        refundId,
+        orderId,
+        amount: refundAmount,
+        reason,
+        refundedBy: user.uid,
+        refundedAt: nowIso,
+        refundKey,
+        providerResult: refundRes,
+      };
+
+      finalOrder = {
+        ...txOrderData,
+        paymentStatus: newPaymentStatus,
+        refundedAmount: newRefunded,
+        remainingRefundableBalance: newRemaining,
+        updatedAt: nowIso,
+      };
+
+      transaction.update(orderRef, {
+        paymentStatus: newPaymentStatus,
+        refundedAmount: newRefunded,
+        remainingRefundableBalance: newRemaining,
+        updatedAt: nowIso,
+      });
+
+      transaction.set(intentRef, {
+        orderId,
+        refundAmount,
+        reason,
+        refundKey,
+        status: 'completed',
+        refundRecord,
+        updatedOrder: finalOrder,
+        updatedAt: nowIso,
+      });
+    });
+
+    await logAuditEvent(
+      user.uid,
+      user.role,
+      finalOrder.branchId,
+      'order_refund_processed',
+      'orders',
+      orderId,
+      true,
+      { refundAmount, reason, refundKey },
+      req
+    );
+
+    return { success: true, isReplay: false, refundRecord, order: finalOrder };
+  }
+
   // --- 2. POST /api/orders/checkout ---
   app.post('/api/orders/checkout', async (req: Request, res: Response): Promise<void> => {
     const user = await requireAuth(req, res);
@@ -1909,57 +2144,54 @@ export function createExpressApp(deps: ServerDependencies = {}): Express {
       quantity,
     }));
 
-    const orderId = `HCI-ORD-${Date.now().toString().slice(-6)}`;
+    const hash = crypto.createHash('sha256').update(`${user.uid}_${idempotencyKey}`).digest('hex').substring(0, 8).toUpperCase();
+    const orderId = `HCI-ORD-${hash}`;
     const nowIso = new Date().toISOString();
     const keyDocId = `${user.uid}_${idempotencyKey}`;
+
     let orderRecord: any;
     let isReplay = false;
-    let finalOrderId = orderId;
 
     try {
       await ensureInventorySeeded();
 
-      const deliveryAdapter = new StandardDeliveryAdapter();
-      const deliveryQuote = await deliveryAdapter.calculateShippingFee(deliveryMethod || 'branch_pickup', normalizedBranch, customer?.shippingAddress);
-      const shippingFee = deliveryQuote.shippingFee;
-
-      let subtotal = 0;
-      const computedItems: any[] = [];
-      for (const item of normalizedItems) {
-        const prod = PRODUCTS_CATALOG[item.skuId];
-        const qty = item.quantity;
-        const itemTotal = prod.price * qty;
-        subtotal += itemTotal;
-
-        computedItems.push({
-          skuId: item.skuId,
-          quantity: qty,
-          unitPrice: prod.price,
-          totalPrice: itemTotal,
-          productName: prod.name,
-        });
-      }
-      const grandTotal = subtotal + shippingFee;
-
-      // External payment & delivery provider side effects executed OUTSIDE Firestore transaction
-      const paymentAdapter = PaymentAdapterRegistry.getAdapter(paymentMethod || 'cash_on_delivery');
-      const paymentIntent = await paymentAdapter.createPaymentIntent(orderId, grandTotal, paymentMethod || 'cash_on_delivery', { customerEmail: customer?.email });
-      const fulfillment = await deliveryAdapter.createFulfillment(orderId, deliveryMethod || 'branch_pickup', normalizedBranch, customer?.shippingAddress);
-
+      // PHASE A: Firestore transaction — Validate pricing, reserve FEFO inventory, create pending order
       await db.runTransaction(async (transaction: any) => {
         const keyRef = db.collection('idempotency_keys').doc(keyDocId);
         const keySnap = await transaction.get(keyRef);
 
         if (keySnap && keySnap.exists) {
           const existingData = typeof keySnap.data === 'function' ? keySnap.data() : keySnap.data;
-          finalOrderId = existingData.orderId;
           orderRecord = existingData.orderRecord;
-          isReplay = true;
-          return;
+          if (existingData.checkoutStatus === 'completed') {
+            isReplay = true;
+            return;
+          }
         }
 
-        const batchAllocations: Record<string, any[]> = {};
+        const deliveryAdapter = new StandardDeliveryAdapter();
+        const deliveryQuote = await deliveryAdapter.calculateShippingFee(deliveryMethod || 'branch_pickup', normalizedBranch, customer?.shippingAddress);
+        const shippingFee = deliveryQuote.shippingFee;
 
+        let subtotal = 0;
+        const computedItems: any[] = [];
+        for (const item of normalizedItems) {
+          const prod = PRODUCTS_CATALOG[item.skuId];
+          const qty = item.quantity;
+          const itemTotal = prod.price * qty;
+          subtotal += itemTotal;
+
+          computedItems.push({
+            skuId: item.skuId,
+            quantity: qty,
+            unitPrice: prod.price,
+            totalPrice: itemTotal,
+            productName: prod.name,
+          });
+        }
+        const grandTotal = subtotal + shippingFee;
+
+        const batchAllocations: Record<string, any[]> = {};
         for (const item of normalizedItems) {
           const reservationRes = await performFefoReservationInternal(
             transaction,
@@ -1981,10 +2213,8 @@ export function createExpressApp(deps: ServerDependencies = {}): Express {
           branchId: normalizedBranch,
           deliveryMethod: deliveryMethod || 'branch_pickup',
           paymentMethod: paymentMethod || 'cash_on_delivery',
-          paymentStatus: paymentIntent.status,
-          paymentIntent,
-          fulfillmentStatus: fulfillment.status,
-          fulfillment,
+          paymentStatus: 'pending_payment',
+          fulfillmentStatus: 'pending_processing',
           subtotal,
           shippingFee,
           taxAmount: 0,
@@ -1992,37 +2222,166 @@ export function createExpressApp(deps: ServerDependencies = {}): Express {
           refundedAmount: 0,
           remainingRefundableBalance: grandTotal,
           idempotencyKey,
+          checkoutStatus: 'pending_provider',
           placedAt: nowIso,
           updatedAt: nowIso,
         };
 
         const orderDocRef = db.collection('orders').doc(orderId);
         transaction.set(orderDocRef, orderRecord);
-
         transaction.set(keyRef, {
           userId: user.uid,
           idempotencyKey,
           orderId,
           orderRecord,
+          checkoutStatus: 'pending_provider',
           createdAt: nowIso,
         });
       });
 
-      if (!isReplay) {
-        await logAuditEvent(
-          user.uid,
-          user.role,
-          normalizedBranch,
-          'order_placed',
-          'orders',
-          finalOrderId,
-          true,
-          { grandTotal: orderRecord.grandTotal, branchId: normalizedBranch, idempotencyKey },
-          req
-        );
+      if (isReplay) {
+        res.status(200).json({ success: true, orderId: orderRecord.id, order: orderRecord, idempotentReplay: true });
+        return;
       }
 
-      res.status(200).json({ success: true, orderId: finalOrderId, order: orderRecord, idempotentReplay: isReplay });
+      // PHASE B: External provider side effects (outside transaction)
+      const paymentAdapter = PaymentAdapterRegistry.getAdapter(orderRecord.paymentMethod || 'cash_on_delivery');
+      const deliveryAdapter = new StandardDeliveryAdapter();
+
+      const paymentIdempotencyKey = `pay_chk_${user.uid}_${orderId}_${idempotencyKey}`;
+      const deliveryIdempotencyKey = `del_chk_${orderId}`;
+
+      let paymentIntent: PaymentIntent;
+      let fulfillment: DeliveryFulfillment;
+
+      try {
+        paymentIntent = await paymentAdapter.createPaymentIntent(
+          orderId,
+          orderRecord.grandTotal,
+          orderRecord.paymentMethod,
+          { customerEmail: orderRecord.customer?.email },
+          paymentIdempotencyKey
+        );
+
+        fulfillment = await deliveryAdapter.createFulfillment(
+          orderId,
+          orderRecord.deliveryMethod,
+          orderRecord.branchId,
+          orderRecord.customer?.shippingAddress,
+          deliveryIdempotencyKey
+        );
+      } catch (providerErr: any) {
+        // Recovery transaction: release reserved stock and mark order failed
+        await db.runTransaction(async (transaction: any) => {
+          const orderRef = db.collection('orders').doc(orderId);
+          const txOrderSnap = await transaction.get(orderRef);
+          if (!txOrderSnap || !txOrderSnap.exists) return;
+
+          const batchAllocations = orderRecord.batchAllocations || {};
+          const affectedSkus = new Set<string>();
+          const updatedBatches: any[] = [];
+
+          for (const [skuId, allocList] of Object.entries(batchAllocations)) {
+            if (!Array.isArray(allocList)) continue;
+            affectedSkus.add(skuId);
+
+            for (const alloc of allocList as any[]) {
+              const batchId = alloc.batchId;
+              const qtyReserved = Number(alloc.quantityReserved || alloc.allocatedQuantity || alloc.quantity) || 0;
+              if (!batchId || qtyReserved <= 0) continue;
+
+              const branchBatchDocId = `${normalizedBranch}_${batchId}`;
+              const branchBatchRef = db.collection('branch_batch_inventory').doc(branchBatchDocId);
+              const batchSnap = await transaction.get(branchBatchRef);
+
+              if (batchSnap && batchSnap.exists) {
+                const bData = typeof batchSnap.data === 'function' ? batchSnap.data() : batchSnap.data;
+                const newAvail = (Number(bData.availableQuantity) || 0) + qtyReserved;
+                const newRes = Math.max(0, (Number(bData.reservedQuantity) || 0) - qtyReserved);
+
+                const updatedBatch = { ...bData, availableQuantity: newAvail, reservedQuantity: newRes, updatedAt: nowIso };
+                transaction.set(branchBatchRef, updatedBatch);
+                updatedBatches.push(updatedBatch);
+              }
+            }
+          }
+
+          for (const skuId of affectedSkus) {
+            const batchesQuery = db.collection('branch_batch_inventory')
+              .where('branchId', '==', normalizedBranch)
+              .where('skuId', '==', skuId);
+            const batchesSnap = await transaction.get(batchesQuery);
+            const allBatches: any[] = [];
+            if (batchesSnap && !batchesSnap.empty) {
+              batchesSnap.forEach((d: any) => {
+                const data = typeof d.data === 'function' ? d.data() : d.data;
+                const modified = updatedBatches.find((ub) => ub.id === data.id || ub.batchId === data.batchId);
+                allBatches.push(modified || data);
+              });
+            }
+
+            const updatedAggregate = computeAggregateInventoryFromBatches({
+              branchBatches: allBatches,
+              branchId: normalizedBranch,
+              skuId,
+              lastAdjustmentAt: nowIso,
+            });
+
+            const aggDocRef = db.collection('inventory').doc(`${normalizedBranch}_${skuId}`);
+            transaction.set(aggDocRef, updatedAggregate);
+          }
+
+          transaction.update(orderRef, {
+            fulfillmentStatus: 'failed',
+            checkoutStatus: 'failed',
+            failureReason: providerErr.message,
+            updatedAt: nowIso,
+          });
+        });
+
+        res.status(500).json({ error: `Checkout provider failed: ${providerErr.message}` });
+        return;
+      }
+
+      // PHASE C: Finalize order transaction
+      await db.runTransaction(async (transaction: any) => {
+        const orderRef = db.collection('orders').doc(orderId);
+        const keyRef = db.collection('idempotency_keys').doc(keyDocId);
+
+        orderRecord = {
+          ...orderRecord,
+          paymentStatus: paymentIntent.status,
+          paymentIntent,
+          fulfillmentStatus: fulfillment.status,
+          fulfillment,
+          checkoutStatus: 'completed',
+          updatedAt: nowIso,
+        };
+
+        transaction.set(orderRef, orderRecord);
+        transaction.set(keyRef, {
+          userId: user.uid,
+          idempotencyKey,
+          orderId,
+          orderRecord,
+          checkoutStatus: 'completed',
+          createdAt: nowIso,
+        });
+      });
+
+      await logAuditEvent(
+        user.uid,
+        user.role,
+        normalizedBranch,
+        'order_placed',
+        'orders',
+        orderId,
+        true,
+        { grandTotal: orderRecord.grandTotal, branchId: normalizedBranch, idempotencyKey },
+        req
+      );
+
+      res.status(200).json({ success: true, orderId, order: orderRecord, idempotentReplay: false });
     } catch (err: any) {
       if (err.message && err.message.startsWith('INSUFFICIENT_ELIGIBLE_STOCK:')) {
         res.status(400).json({ error: err.message.replace(/^INSUFFICIENT_ELIGIBLE_STOCK:\s*/, '') });
@@ -2209,25 +2568,27 @@ export function createExpressApp(deps: ServerDependencies = {}): Express {
 
         transaction.update(orderRef, {
           fulfillmentStatus: 'cancelled',
-          paymentStatus: 'refunded',
-          refundedAmount: Number(txOrderData.grandTotal) || 0,
-          remainingRefundableBalance: 0,
           cancellationReason: reason || 'Order cancelled by user or staff',
           updatedAt: nowIso
         });
       });
 
       const updatedSnap = await orderRef.get();
-      const updatedOrder = updatedSnap.data();
+      let updatedOrder = updatedSnap.data();
 
-      // Payment refund side effect executed OUTSIDE Firestore transaction
-      const paymentAdapter = PaymentAdapterRegistry.getAdapter(updatedOrder.paymentMethod || 'cash_on_delivery');
-      const refundRes = await paymentAdapter.processRefund(
-        updatedOrder.paymentIntent?.paymentId || strOrderId,
-        updatedOrder.grandTotal,
-        reason || 'Customer cancellation'
+      // Safe refund execution using cancel:${strOrderId}
+      const refundResult = await executeSafeRefund(
+        strOrderId,
+        Number(updatedOrder.grandTotal) || 0,
+        reason || 'Customer cancellation',
+        `cancel:${strOrderId}`,
+        user,
+        req
       );
-      await orderRef.update({ refundDetails: refundRes });
+
+      if (refundResult.order) {
+        updatedOrder = refundResult.order;
+      }
 
       await logAuditEvent(
         user.uid,
@@ -2241,7 +2602,7 @@ export function createExpressApp(deps: ServerDependencies = {}): Express {
         req
       );
 
-      res.status(200).json({ success: true, orderId: strOrderId, order: { ...updatedOrder, refundDetails: refundRes } });
+      res.status(200).json({ success: true, orderId: strOrderId, order: updatedOrder, refundResult });
     } catch (err: any) {
       res.status(500).json({ error: `Order cancellation failed: ${err.message}` });
     }
@@ -2441,20 +2802,17 @@ export function createExpressApp(deps: ServerDependencies = {}): Express {
             }
           }
 
-        transaction.update(orderRef, {
-          fulfillmentStatus: 'returned',
-          paymentStatus: 'refunded',
-          refundedAmount: Number(txOrderData.grandTotal) || 0,
-          remainingRefundableBalance: 0,
-          returnDetails: {
-            ...txOrderData.returnDetails,
-            processedAt: nowIso,
-            status: 'approved',
-            notes: notes || 'Return approved by staff',
-          },
-          updatedAt: nowIso
+          transaction.update(orderRef, {
+            fulfillmentStatus: 'returned',
+            returnDetails: {
+              ...txOrderData.returnDetails,
+              processedAt: nowIso,
+              status: 'approved',
+              notes: notes || 'Return approved by staff',
+            },
+            updatedAt: nowIso
+          });
         });
-      });
       } else {
         await orderRef.update({
           fulfillmentStatus: 'completed',
@@ -2471,17 +2829,18 @@ export function createExpressApp(deps: ServerDependencies = {}): Express {
       const updatedSnap = await orderRef.get();
       let updatedOrder = updatedSnap.data();
 
-      let refundRes: any;
       if (decision === 'approve') {
-        // Payment refund side effect executed OUTSIDE Firestore transaction
-        const paymentAdapter = PaymentAdapterRegistry.getAdapter(updatedOrder.paymentMethod || 'cash_on_delivery');
-        refundRes = await paymentAdapter.processRefund(
-          updatedOrder.paymentIntent?.paymentId || strOrderId,
-          updatedOrder.grandTotal,
-          notes || 'Return approved'
+        const refundResult = await executeSafeRefund(
+          strOrderId,
+          Number(updatedOrder.grandTotal) || 0,
+          notes || 'Return approved',
+          `return:${strOrderId}`,
+          user,
+          req
         );
-        await orderRef.update({ refundDetails: refundRes });
-        updatedOrder = { ...updatedOrder, refundDetails: refundRes };
+        if (refundResult.order) {
+          updatedOrder = refundResult.order;
+        }
       }
 
       await logAuditEvent(
@@ -2528,8 +2887,6 @@ export function createExpressApp(deps: ServerDependencies = {}): Express {
       return;
     }
 
-    const keyDocId = `${strOrderId}_${idempotencyKey}`;
-
     try {
       const orderRef = db.collection('orders').doc(strOrderId);
       const snap = await orderRef.get();
@@ -2548,123 +2905,33 @@ export function createExpressApp(deps: ServerDependencies = {}): Express {
       }
 
       const refundAmount = Number(amount);
-      if (isNaN(refundAmount) || refundAmount <= 0) {
-        res.status(400).json({ error: 'Refund amount must be greater than 0.' });
-        return;
-      }
 
-      const currentRefunded = Number(orderData.refundedAmount) || (orderData.paymentStatus === 'refunded' ? Number(orderData.grandTotal) : 0);
-      const remainingBalance = Number(orderData.remainingRefundableBalance ?? (Number(orderData.grandTotal) - currentRefunded));
+      const refundResult = await executeSafeRefund(
+        strOrderId,
+        refundAmount,
+        reason || 'Manual staff refund',
+        `manual:${strOrderId}:${idempotencyKey}`,
+        user,
+        req
+      );
 
-      if (remainingBalance <= 0 || orderData.paymentStatus === 'refunded') {
-        res.status(400).json({ error: 'Order is already fully refunded.' });
-        return;
-      }
-
-      if (refundAmount > remainingBalance) {
-        res.status(400).json({ error: `Refund amount PHP ${refundAmount} exceeds remaining refundable balance PHP ${remainingBalance}.` });
-        return;
-      }
-
-      const nowIso = new Date().toISOString();
-      let refundRecord: any;
-      let updatedOrder: any;
-      let isReplay = false;
-
-      await db.runTransaction(async (transaction: any) => {
-        const keyRef = db.collection('idempotency_keys').doc(keyDocId);
-        const keySnap = await transaction.get(keyRef);
-
-        if (keySnap && keySnap.exists) {
-          const existingData = typeof keySnap.data === 'function' ? keySnap.data() : keySnap.data;
-          refundRecord = existingData.refundRecord;
-          updatedOrder = existingData.updatedOrder;
-          isReplay = true;
+      if (!refundResult.success) {
+        if (refundResult.error?.includes('exceeds remaining') || refundResult.error?.includes('already fully refunded') || refundResult.error?.includes('greater than 0')) {
+          res.status(400).json({ error: refundResult.error });
           return;
         }
-
-        const txOrderSnap = await transaction.get(orderRef);
-        const txOrderData = typeof txOrderSnap.data === 'function' ? txOrderSnap.data() : txOrderSnap.data;
-
-        const txCurrentRefunded = Number(txOrderData.refundedAmount) || (txOrderData.paymentStatus === 'refunded' ? Number(txOrderData.grandTotal) : 0);
-        const txRemainingBalance = Number(txOrderData.remainingRefundableBalance ?? (Number(txOrderData.grandTotal) - txCurrentRefunded));
-
-        if (txRemainingBalance <= 0 || txOrderData.paymentStatus === 'refunded') {
-          throw new Error('Order is already fully refunded.');
-        }
-
-        if (refundAmount > txRemainingBalance) {
-          throw new Error(`Refund amount PHP ${refundAmount} exceeds remaining refundable balance PHP ${txRemainingBalance}.`);
-        }
-
-        const newRefundedAmount = txCurrentRefunded + refundAmount;
-        const newRemainingBalance = txRemainingBalance - refundAmount;
-        const newPaymentStatus = newRemainingBalance <= 0 ? 'refunded' : 'partially_refunded';
-
-        const refundId = `RFND-${strOrderId}-${Date.now().toString().slice(-4)}`;
-        refundRecord = {
-          refundId,
-          orderId: strOrderId,
-          amount: refundAmount,
-          reason: reason || 'Manual staff refund',
-          refundedBy: user.uid,
-          refundedAt: nowIso,
-          idempotencyKey,
-        };
-
-        updatedOrder = {
-          ...txOrderData,
-          paymentStatus: newPaymentStatus,
-          refundedAmount: newRefundedAmount,
-          remainingRefundableBalance: newRemainingBalance,
-          updatedAt: nowIso,
-        };
-
-        transaction.update(orderRef, {
-          paymentStatus: newPaymentStatus,
-          refundedAmount: newRefundedAmount,
-          remainingRefundableBalance: newRemainingBalance,
-          updatedAt: nowIso,
-        });
-
-        transaction.set(keyRef, {
-          userId: user.uid,
-          idempotencyKey,
-          orderId: strOrderId,
-          refundRecord,
-          updatedOrder,
-          createdAt: nowIso,
-        });
-      });
-
-      if (!isReplay) {
-        // Payment refund provider side effect executed OUTSIDE Firestore transaction
-        const paymentAdapter = PaymentAdapterRegistry.getAdapter(orderData.paymentMethod || 'cash_on_delivery');
-        const refundRes = await paymentAdapter.processRefund(
-          orderData.paymentIntent?.paymentId || strOrderId,
-          refundAmount,
-          reason || 'Manual staff refund'
-        );
-
-        await logAuditEvent(
-          user.uid,
-          user.role,
-          updatedOrder.branchId,
-          'order_refund_processed',
-          'orders',
-          strOrderId,
-          true,
-          { refundAmount, reason, idempotencyKey },
-          req
-        );
-      }
-
-      res.status(200).json({ success: true, orderId: strOrderId, refund: refundRecord, order: updatedOrder, idempotentReplay: isReplay });
-    } catch (err: any) {
-      if (err.message.includes('exceeds remaining') || err.message.includes('already fully refunded')) {
-        res.status(400).json({ error: err.message });
+        res.status(500).json({ error: refundResult.error || 'Refund processing failed.' });
         return;
       }
+
+      res.status(200).json({
+        success: true,
+        orderId: strOrderId,
+        refund: refundResult.refundRecord,
+        order: refundResult.order,
+        idempotentReplay: refundResult.isReplay
+      });
+    } catch (err: any) {
       res.status(500).json({ error: `Refund processing failed: ${err.message}` });
     }
   });

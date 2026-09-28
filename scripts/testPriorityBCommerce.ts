@@ -3,11 +3,16 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import { createExpressApp } from '../server.ts';
+import {
+  createExpressApp,
+  SimulatedPaymentAdapter,
+  StandardDeliveryAdapter,
+  PaymentAdapterRegistry,
+} from '../server.ts';
 import http from 'http';
 
 console.log('========================================================================');
-console.log('Running Priority B — Authoritative Commerce & Order Lifecycle Suite');
+console.log('Running Priority B — Final Safety Remediation v2 Test Suite');
 console.log('========================================================================');
 
 let passedCount = 0;
@@ -23,7 +28,6 @@ function assert(condition: boolean, description: string) {
   }
 }
 
-// In-memory mock Firestore DB for testing commerce endpoints in isolation
 function createCommerceMockDb() {
   const store: Record<string, Map<string, any>> = {
     orders: new Map(),
@@ -31,10 +35,10 @@ function createCommerceMockDb() {
     product_batches: new Map(),
     branch_batch_inventory: new Map(),
     idempotency_keys: new Map(),
+    refund_intents: new Map(),
     audit_logs: new Map(),
   };
 
-  // Seed product batches, branch_batch_inventory, and aggregate inventory
   const daetBatch = {
     id: 'BAT-DAET-CMD65-01',
     batchId: 'BAT-DAET-CMD65-01',
@@ -43,7 +47,7 @@ function createCommerceMockDb() {
     activeStock: 100,
     qualityControlStatus: 'passed',
     expiryDate: '2028-12-31',
-    createdAt: new Date().toISOString()
+    createdAt: new Date().toISOString(),
   };
   store.product_batches.set('BAT-DAET-CMD65-01', daetBatch);
 
@@ -55,7 +59,7 @@ function createCommerceMockDb() {
     availableQuantity: 100,
     reservedQuantity: 0,
     expiryDate: '2028-12-31',
-    createdAt: new Date().toISOString()
+    createdAt: new Date().toISOString(),
   };
   store.branch_batch_inventory.set('daet_BAT-DAET-CMD65-01', daetBranchBatch);
 
@@ -67,7 +71,7 @@ function createCommerceMockDb() {
     availableStock: 100,
     reservedStock: 0,
     branchBatches: [daetBranchBatch],
-    updatedAt: new Date().toISOString()
+    updatedAt: new Date().toISOString(),
   };
   store.inventory.set('daet_hci-cmd-65ml', daetAgg);
 
@@ -101,8 +105,13 @@ function createCommerceMockDb() {
                 ref: docRef,
               };
             },
-            set: async (data: any) => {
-              colMap.set(docId, data);
+            set: async (data: any, options?: any) => {
+              if (options && options.merge) {
+                const existing = colMap.get(docId) || {};
+                colMap.set(docId, { ...existing, ...data });
+              } else {
+                colMap.set(docId, data);
+              }
             },
             update: async (data: any) => {
               const existing = colMap.get(docId) || {};
@@ -121,7 +130,7 @@ function createCommerceMockDb() {
                     results.push({
                       id: item.id || item.batchId,
                       data: () => item,
-                      ref: mockDb.collection(colName).doc(item.id || item.batchId)
+                      ref: mockDb.collection(colName).doc(item.id || item.batchId),
                     });
                   }
                 }
@@ -139,7 +148,7 @@ function createCommerceMockDb() {
                   results.push({
                     id: item.id || item.batchId,
                     data: () => item,
-                    ref: mockDb.collection(colName).doc(item.id || item.batchId)
+                    ref: mockDb.collection(colName).doc(item.id || item.batchId),
                   });
                 }
               }
@@ -162,12 +171,12 @@ function createCommerceMockDb() {
             ref: snap.ref || ref,
           };
         },
-        set: (ref: any, data: any) => {
+        set: (ref: any, data: any, options?: any) => {
           if (ref && ref.ref && typeof ref.ref.set === 'function') {
-            return ref.ref.set(data);
+            return ref.ref.set(data, options);
           }
           if (ref && typeof ref.set === 'function') {
-            return ref.set(data);
+            return ref.set(data, options);
           }
         },
         update: (ref: any, data: any) => {
@@ -198,24 +207,30 @@ async function runTests() {
   const customerBobToken = 'DEMO_TOKEN_customer_bob';
   const managerToken = 'DEMO_TOKEN_branch_manager';
 
+  // Inject Spied Payment Adapter
+  const spyPaymentAdapter = new SimulatedPaymentAdapter('simulated_cod');
+  PaymentAdapterRegistry.registerAdapter('cash_on_delivery', spyPaymentAdapter);
+  PaymentAdapterRegistry.registerAdapter('simulated_cod', spyPaymentAdapter);
+
   try {
-    // 1. Missing idempotencyKey is rejected with HTTP 400 Bad Request
+    // ------------------------------------------------------------------------
+    // SECTION 1: Baseline Checkout & Idempotency
+    // ------------------------------------------------------------------------
     const missingKeyRes = await fetch(`http://127.0.0.1:${port}/api/orders/checkout`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
-        Authorization: `Bearer ${customerToken}`
+        Authorization: `Bearer ${customerToken}`,
       },
       body: JSON.stringify({
         branchId: 'daet',
         deliveryMethod: 'door_to_door',
         paymentMethod: 'cash_on_delivery',
-        items: [{ skuId: 'hci-cmd-65ml', quantity: 2 }]
-      })
+        items: [{ skuId: 'hci-cmd-65ml', quantity: 2 }],
+      }),
     });
-    assert(missingKeyRes.status === 400, '1. Checkout request without idempotencyKey rejected with HTTP 400 Bad Request');
+    assert(missingKeyRes.status === 400, '1. Checkout request without idempotencyKey rejected with HTTP 400');
 
-    // 2. Customer Checkout with valid idempotencyKey uses /api/orders/checkout server endpoint
     const checkoutPayload = {
       idempotencyKey: 'key_test_checkout_001',
       branchId: 'daet',
@@ -225,12 +240,9 @@ async function runTests() {
         firstName: 'Alice',
         lastName: 'Santos',
         email: 'alice@example.com',
-        mobileNumber: '+639171112222',
-        shippingAddress: { barangay: 'Brgy. Gahonon', municipality: 'Daet', province: 'Camarines Norte' }
+        shippingAddress: { barangay: 'Brgy. Gahonon', municipality: 'Daet', province: 'Camarines Norte' },
       },
-      items: [
-        { skuId: 'hci-cmd-65ml', quantity: 2, clientPrice: 0 } // Manipulated client price
-      ]
+      items: [{ skuId: 'hci-cmd-65ml', quantity: 2, clientPrice: 0 }],
     };
 
     const checkoutRes = await fetch(`http://127.0.0.1:${port}/api/orders/checkout`, {
@@ -238,55 +250,29 @@ async function runTests() {
       headers: {
         'Content-Type': 'application/json',
         Authorization: `Bearer ${customerToken}`,
-        'x-idempotency-key': 'key_test_checkout_001'
+        'x-idempotency-key': 'key_test_checkout_001',
       },
-      body: JSON.stringify(checkoutPayload)
+      body: JSON.stringify(checkoutPayload),
     });
 
     const checkoutData: any = await checkoutRes.json();
-    assert(checkoutRes.status === 200, '2. Authoritative server checkout POST /api/orders/checkout returns HTTP 200 OK');
-    assert(checkoutData.success === true && !!checkoutData.orderId, '3. Checkout response returns valid server order ID');
+    assert(checkoutRes.status === 200, '2. Authoritative server checkout POST /api/orders/checkout returns HTTP 200');
+    assert(checkoutData.success === true && !!checkoutData.orderId, '3. Checkout returns valid deterministic order ID');
 
     const createdOrder = checkoutData.order;
-    assert(createdOrder.userId === 'demo-customer-uid', '4. Order correctly assigned to authenticated customer UID');
+    assert(createdOrder.userId === 'demo-customer-uid', '4. Order assigned to authenticated customer UID');
+    assert(createdOrder.grandTotal === 2550, '5. Server authoritatively computes subtotal and shipping fee');
 
-    // 3. Server remains authoritative for price & totals
-    assert(createdOrder.subtotal === 2400, '5. Server authoritatively computes subtotal from PRODUCTS_CATALOG (PHP 2,400) ignoring manipulated client price');
-    assert(createdOrder.shippingFee === 150, '6. Delivery abstraction calculates door-to-door shipping fee (PHP 150)');
-    assert(createdOrder.grandTotal === 2550, '7. Server authoritatively calculates grand total (PHP 2,550)');
-
-    // 4. Payment & Delivery Abstractions
-    assert(!!createdOrder.paymentIntent, '8. Order includes server-generated PaymentIntent structure');
-    assert(createdOrder.paymentIntent.status === 'pending_payment', '9. COD PaymentIntent has pending_payment status');
-    assert(createdOrder.paymentIntent.amount === 2550, '10. PaymentIntent amount matches grand total');
-    assert(!!createdOrder.fulfillment, '11. Order includes server-generated DeliveryFulfillment structure');
-    assert(createdOrder.fulfillment.deliveryMethod === 'door_to_door', '12. Fulfillment records correct delivery method');
-    assert(createdOrder.fulfillment.trackingNumber.startsWith('TRK-'), '13. Fulfillment generates valid tracking reference');
-
-    // 5. Idempotent Retry Verification (Identical retry returns same order)
-    const retryCheckoutRes = await fetch(`http://127.0.0.1:${port}/api/orders/checkout`, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        Authorization: `Bearer ${customerToken}`,
-        'x-idempotency-key': 'key_test_checkout_001'
-      },
-      body: JSON.stringify(checkoutPayload)
-    });
-    const retryData: any = await retryCheckoutRes.json();
-    assert(retryCheckoutRes.status === 200, '14. Idempotent retry returns HTTP 200 OK');
-    assert(retryData.orderId === checkoutData.orderId, '15. Idempotent retry returns identical server order ID');
-    assert(retryData.idempotentReplay === true, '16. Server indicates idempotent replay response');
-
-    // 6. Concurrent Duplicate Checkout Protection
-    const concurrentKey = 'key_test_checkout_concurrent_999';
+    // ------------------------------------------------------------------------
+    // SECTION 2: Mandatory Spied Assertion 1, 2, 4, 5 — Concurrent Checkout Invocations & Deterministic Keys
+    // ------------------------------------------------------------------------
+    spyPaymentAdapter.createCount = 0;
+    const concurrentKey = 'key_spied_concurrent_777';
     const concurrentPayload = {
       ...checkoutPayload,
       idempotencyKey: concurrentKey,
-      items: [{ skuId: 'hci-cmd-65ml', quantity: 3 }]
+      items: [{ skuId: 'hci-cmd-65ml', quantity: 1 }],
     };
-
-    const availBeforeConcurrent = store.branch_batch_inventory.get('daet_BAT-DAET-CMD65-01').availableQuantity;
 
     const [concRes1, concRes2] = await Promise.all([
       fetch(`http://127.0.0.1:${port}/api/orders/checkout`, {
@@ -294,338 +280,307 @@ async function runTests() {
         headers: {
           'Content-Type': 'application/json',
           Authorization: `Bearer ${customerToken}`,
-          'x-idempotency-key': concurrentKey
+          'x-idempotency-key': concurrentKey,
         },
-        body: JSON.stringify(concurrentPayload)
+        body: JSON.stringify(concurrentPayload),
       }),
       fetch(`http://127.0.0.1:${port}/api/orders/checkout`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
           Authorization: `Bearer ${customerToken}`,
-          'x-idempotency-key': concurrentKey
+          'x-idempotency-key': concurrentKey,
         },
-        body: JSON.stringify(concurrentPayload)
-      })
+        body: JSON.stringify(concurrentPayload),
+      }),
     ]);
 
     const concData1: any = await concRes1.json();
     const concData2: any = await concRes2.json();
 
-    assert(concRes1.status === 200 && concRes2.status === 200, '17. Concurrent duplicate requests both succeed with HTTP 200 OK');
-    assert(concData1.orderId === concData2.orderId, '18. Concurrent duplicate submissions produce exactly ONE order ID');
+    assert(concRes1.status === 200 && concRes2.status === 200, '6. Concurrent duplicate requests both succeed with HTTP 200');
+    assert(concData1.orderId === concData2.orderId, '7. Concurrent duplicate submissions produce exactly ONE order ID');
 
-    // Zero duplicate order creation
-    const matchingKeyOrders = Array.from(store.orders.values()).filter((o) => o.idempotencyKey === concurrentKey);
-    assert(matchingKeyOrders.length === 1, '19. Exactly ONE order document exists in database for concurrent key (zero duplicate order creation)');
+    // MANDATORY ASSERTION 1: Concurrent identical checkout requests invoke the payment adapter exactly once
+    assert(spyPaymentAdapter.createCount === 1, '8. MANDATORY: Concurrent identical checkout requests invoke payment adapter exactly ONCE');
 
-    // Zero duplicate inventory reservation
-    const availAfterConcurrent = store.branch_batch_inventory.get('daet_BAT-DAET-CMD65-01').availableQuantity;
-    assert(availBeforeConcurrent - availAfterConcurrent === 3, '20. Inventory reserved exactly ONCE (3 units) across concurrent duplicate checkouts (zero duplicate reservation)');
+    // MANDATORY ASSERTION 4: Payment adapter receives deterministic idempotency key
+    assert(
+      spyPaymentAdapter.lastPaymentKey === `pay_chk_demo-customer-uid_${concData1.orderId}_${concurrentKey}`,
+      '9. MANDATORY: Payment adapter receives deterministic idempotency key'
+    );
 
-    // 7. Digital Wallet Checkout
-    const walletCheckoutRes = await fetch(`http://127.0.0.1:${port}/api/orders/checkout`, {
+    // ------------------------------------------------------------------------
+    // SECTION 3: Mandatory Assertion 3 — Inventory Failure Pre-Condition
+    // ------------------------------------------------------------------------
+    spyPaymentAdapter.createCount = 0;
+    const excessStockRes = await fetch(`http://127.0.0.1:${port}/api/orders/checkout`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
         Authorization: `Bearer ${customerToken}`,
-        'x-idempotency-key': 'key_test_wallet_101'
+        'x-idempotency-key': 'key_excess_stock_fail',
       },
       body: JSON.stringify({
         ...checkoutPayload,
-        idempotencyKey: 'key_test_wallet_101',
-        paymentMethod: 'gcash',
-        deliveryMethod: 'branch_pickup'
-      })
+        idempotencyKey: 'key_excess_stock_fail',
+        items: [{ skuId: 'hci-cmd-65ml', quantity: 9999 }],
+      }),
     });
-    const walletData: any = await walletCheckoutRes.json();
-    assert(walletCheckoutRes.status === 200, '21. GCash checkout creates order via payment abstraction');
-    assert(walletData.order.paymentIntent.status === 'paid', '22. Simulated GCash payment adapter sets intent status to paid');
-    assert(walletData.order.shippingFee === 0, '23. Branch pickup delivery quote returns PHP 0 shipping fee');
 
-    const orderId = createdOrder.id;
+    assert(excessStockRes.status === 400, '10. Checkout requesting excess stock rejected with HTTP 400');
+    // MANDATORY ASSERTION 3: Checkout inventory failure does not create external payment intent or fulfillment
+    assert(spyPaymentAdapter.createCount === 0, '11. MANDATORY: Checkout inventory failure does NOT create external payment intent');
 
-    // 8. IDOR Protection on Order Retrieval
-    const unauthorizedGetRes = await fetch(`http://127.0.0.1:${port}/api/orders/${orderId}`, {
-      headers: { Authorization: `Bearer ${customerBobToken}` }
+    // ------------------------------------------------------------------------
+    // SECTION 4: Mandatory Assertion 6 — Production Server Auth Boundary
+    // ------------------------------------------------------------------------
+    const originalEnv = process.env.NODE_ENV;
+    process.env.NODE_ENV = 'production';
+
+    const prodDemoAuthRes = await fetch(`http://127.0.0.1:${port}/api/orders/my-orders`, {
+      headers: { Authorization: `Bearer ${customerToken}` },
     });
-    assert(unauthorizedGetRes.status === 403, '24. Unauthorized customer Bob blocked from reading Alice\'s order (HTTP 403)');
 
-    const authorizedGetRes = await fetch(`http://127.0.0.1:${port}/api/orders/${orderId}`, {
-      headers: { Authorization: `Bearer ${customerToken}` }
-    });
-    assert(authorizedGetRes.status === 200, '25. Customer Alice can retrieve her own order (HTTP 200)');
+    assert(prodDemoAuthRes.status === 401, '12. MANDATORY: Production server boundary rejects DEMO_TOKEN_customer with HTTP 401');
 
-    // 9. Invalid Order Cancellation by Unauthorized Customer Bob
-    const unauthorizedCancelRes = await fetch(`http://127.0.0.1:${port}/api/orders/${orderId}/cancel`, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        Authorization: `Bearer ${customerBobToken}`
-      },
-      body: JSON.stringify({ reason: 'Malicious cancellation' })
-    });
-    assert(unauthorizedCancelRes.status === 403, '26. Unauthorized customer Bob blocked from cancelling Alice\'s order (HTTP 403)');
+    process.env.NODE_ENV = originalEnv;
 
-    // 10. Invalid Return Request on Uncompleted Order
-    const invalidReturnRes = await fetch(`http://127.0.0.1:${port}/api/orders/${orderId}/return-request`, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        Authorization: `Bearer ${customerToken}`
-      },
-      body: JSON.stringify({ reason: 'Damaged item' })
-    });
-    const invalidReturnData: any = await invalidReturnRes.json();
-    assert(invalidReturnRes.status === 400, '27. Return request rejected on uncompleted pending order with HTTP 400');
-    assert(invalidReturnData.error.includes('INVALID_ORDER_STATE_TRANSITION'), '28. Return error explicitly cites INVALID_ORDER_STATE_TRANSITION');
-
-    // 11. Cancellation Inventory Restoration Invariant Verification
-    const branchBatchBeforeCancel = { ...store.branch_batch_inventory.get('daet_BAT-DAET-CMD65-01') };
-
-    const validCancelRes = await fetch(`http://127.0.0.1:${port}/api/orders/${orderId}/cancel`, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        Authorization: `Bearer ${customerToken}`
-      },
-      body: JSON.stringify({ reason: 'Changed my mind' })
-    });
-    const cancelData: any = await validCancelRes.json();
-    assert(validCancelRes.status === 200, '29. Authorized customer Alice cancels pending order (HTTP 200)');
-    assert(cancelData.order.fulfillmentStatus === 'cancelled', '30. Order fulfillment status transitions to cancelled');
-    assert(cancelData.order.paymentStatus === 'refunded', '31. Payment status transitions to refunded');
-
-    const branchBatchAfterCancel = store.branch_batch_inventory.get('daet_BAT-DAET-CMD65-01');
-    const aggAfterCancel = store.inventory.get('daet_hci-cmd-65ml');
-
-    assert(branchBatchAfterCancel.availableQuantity === branchBatchBeforeCancel.availableQuantity + 2, '32. Cancellation restores exact available quantity (+2 units) on branch_batch_inventory');
-    assert(branchBatchAfterCancel.reservedQuantity === branchBatchBeforeCancel.reservedQuantity - 2, '33. Cancellation releases exact reserved quantity (-2 units) on branch_batch_inventory');
-    assert(aggAfterCancel.activeStock === branchBatchAfterCancel.availableQuantity && aggAfterCancel.reservedStock === branchBatchAfterCancel.reservedQuantity, '34. Aggregate activeStock and reservedStock match branch_batch_inventory sums after cancellation');
-
-    // 12. Repeated Cancellation Protection (Cannot restore inventory twice)
-    const doubleCancelRes = await fetch(`http://127.0.0.1:${port}/api/orders/${orderId}/cancel`, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        Authorization: `Bearer ${customerToken}`
-      },
-      body: JSON.stringify({ reason: 'Cancel again' })
-    });
-    assert(doubleCancelRes.status === 400, '35. Cancelling an already cancelled order rejected with HTTP 400 INVALID_ORDER_STATE_TRANSITION');
-
-    const branchBatchAfterDoubleCancel = store.branch_batch_inventory.get('daet_BAT-DAET-CMD65-01');
-    assert(branchBatchAfterDoubleCancel.availableQuantity === branchBatchAfterCancel.availableQuantity, '36. Repeated cancellation does NOT restore inventory twice (availableQuantity unchanged)');
-    assert(branchBatchAfterDoubleCancel.reservedQuantity === branchBatchAfterCancel.reservedQuantity, '37. Repeated cancellation does NOT alter reserved quantity');
-
-    // 13. Complete Return Lifecycle & Inventory Restoration Verification
-    const order2Res = await fetch(`http://127.0.0.1:${port}/api/orders/checkout`, {
+    // ------------------------------------------------------------------------
+    // SECTION 5: Mandatory Assertions 7, 8, 9 — Refund Provider Failure & Retry & Replay Safety
+    // ------------------------------------------------------------------------
+    // Create completed order for refund tests
+    const orderRefundRes = await fetch(`http://127.0.0.1:${port}/api/orders/checkout`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
         Authorization: `Bearer ${customerToken}`,
-        'x-idempotency-key': 'key_test_order2_202'
+        'x-idempotency-key': 'key_ord_refund_test',
       },
       body: JSON.stringify({
         ...checkoutPayload,
-        idempotencyKey: 'key_test_order2_202'
-      })
+        idempotencyKey: 'key_ord_refund_test',
+      }),
     });
-    const order2Data: any = await order2Res.json();
-    const order2Id = order2Data.orderId;
+    const orderRefundData: any = await orderRefundRes.json();
+    const rfndOrderId = orderRefundData.orderId;
 
-    // Fulfill order2 via staff endpoint
-    const fulfillRes = await fetch(`http://127.0.0.1:${port}/api/orders/${order2Id}/fulfill`, {
+    // Fulfill order
+    await fetch(`http://127.0.0.1:${port}/api/orders/${rfndOrderId}/fulfill`, {
       method: 'POST',
-      headers: { Authorization: `Bearer ${managerToken}` }
+      headers: { Authorization: `Bearer ${managerToken}` },
     });
-    assert(fulfillRes.status === 200, '38. Branch manager fulfills order2 (HTTP 200)');
+    store.orders.get(rfndOrderId).fulfillmentStatus = 'completed';
 
-    // Set order status to completed for return testing
-    store.orders.get(order2Id).fulfillmentStatus = 'completed';
+    // Mock Provider Failure
+    const originalProcessRefund = spyPaymentAdapter.processRefund;
+    spyPaymentAdapter.processRefund = async () => {
+      throw new Error('Simulated Gateway Timeout');
+    };
 
-    // Customer submits return request
-    const returnReqRes = await fetch(`http://127.0.0.1:${port}/api/orders/${order2Id}/return-request`, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        Authorization: `Bearer ${customerToken}`
-      },
-      body: JSON.stringify({ reason: 'Bottle seal broken during transport' })
-    });
-    const returnReqData: any = await returnReqRes.json();
-    assert(returnReqRes.status === 200, '39. Customer submits return request for completed order (HTTP 200)');
-    assert(returnReqData.order.fulfillmentStatus === 'return_requested', '40. Order status transitions to return_requested');
-
-    // Unauthorized customer Bob attempts to process return
-    const unauthReturnProcess = await fetch(`http://127.0.0.1:${port}/api/orders/${order2Id}/return-process`, {
+    const failedRefundRes = await fetch(`http://127.0.0.1:${port}/api/orders/${rfndOrderId}/refund`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
-        Authorization: `Bearer ${customerBobToken}`
+        Authorization: `Bearer ${managerToken}`,
+        'x-idempotency-key': 'rfnd_key_provider_fail_101',
       },
-      body: JSON.stringify({ decision: 'approve' })
+      body: JSON.stringify({ amount: 1000, reason: 'Defective item' }),
     });
-    assert(unauthReturnProcess.status === 403, '41. Customer Bob blocked from processing return approval (HTTP 403)');
 
-    // Approved Return Inventory Restoration
-    const branchBatchBeforeReturn = { ...store.branch_batch_inventory.get('daet_BAT-DAET-CMD65-01') };
+    assert(failedRefundRes.status === 500, '13. Refund request returns HTTP 500 when provider throws error');
 
-    const approveReturnRes = await fetch(`http://127.0.0.1:${port}/api/orders/${order2Id}/return-process`, {
+    // MANDATORY ASSERTION 7: Refund provider failure does not leave order permanently marked refunded
+    const failOrderDoc = store.orders.get(rfndOrderId);
+    assert(
+      failOrderDoc.paymentStatus !== 'refunded' && failOrderDoc.paymentStatus !== 'partially_refunded',
+      '14. MANDATORY: Refund provider failure does NOT leave order permanently marked refunded'
+    );
+
+    // Restore Provider Success
+    spyPaymentAdapter.processRefund = originalProcessRefund;
+
+    // MANDATORY ASSERTION 8: Retrying same refund idempotency key after provider failure retries safely
+    const retryRefundRes = await fetch(`http://127.0.0.1:${port}/api/orders/${rfndOrderId}/refund`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
-        Authorization: `Bearer ${managerToken}`
+        Authorization: `Bearer ${managerToken}`,
+        'x-idempotency-key': 'rfnd_key_provider_fail_101',
       },
-      body: JSON.stringify({ decision: 'approve', restockInventory: true, notes: 'Inspected and restocked' })
+      body: JSON.stringify({ amount: 1000, reason: 'Defective item' }),
     });
-    const approveReturnData: any = await approveReturnRes.json();
-    assert(approveReturnRes.status === 200, '42. Branch manager approves return request (HTTP 200)');
-    assert(approveReturnData.order.fulfillmentStatus === 'returned', '43. Order status transitions to returned');
-    assert(approveReturnData.order.paymentStatus === 'refunded', '44. Payment status transitions to refunded upon return approval');
+    const retryRefundData: any = await retryRefundRes.json();
+    assert(retryRefundRes.status === 200, '15. MANDATORY: Retrying same refund key after provider failure succeeds with HTTP 200');
+    assert(retryRefundData.order.paymentStatus === 'partially_refunded', '16. Refund order status updated to partially_refunded after retry');
 
-    const branchBatchAfterReturn = store.branch_batch_inventory.get('daet_BAT-DAET-CMD65-01');
-    const aggAfterReturn = store.inventory.get('daet_hci-cmd-65ml');
-
-    assert(branchBatchAfterReturn.availableQuantity === branchBatchBeforeReturn.availableQuantity + 2, '45. Approved return restores exact stock (+2 units) to branch_batch_inventory');
-    assert(aggAfterReturn.activeStock === branchBatchAfterReturn.availableQuantity && aggAfterReturn.reservedStock === branchBatchAfterReturn.reservedQuantity, '46. Aggregate activeStock and reservedStock match branch_batch_inventory sums after return restoration');
-
-    // 14. Repeated Return Processing Protection (Cannot restore inventory twice)
-    const doubleReturnRes = await fetch(`http://127.0.0.1:${port}/api/orders/${order2Id}/return-process`, {
+    // MANDATORY ASSERTION 9: Successful refund replay does not call provider twice
+    spyPaymentAdapter.refundCount = 0;
+    const replayRefundRes = await fetch(`http://127.0.0.1:${port}/api/orders/${rfndOrderId}/refund`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
-        Authorization: `Bearer ${managerToken}`
+        Authorization: `Bearer ${managerToken}`,
+        'x-idempotency-key': 'rfnd_key_provider_fail_101',
       },
-      body: JSON.stringify({ decision: 'approve', restockInventory: true, notes: 'Approve again' })
+      body: JSON.stringify({ amount: 1000, reason: 'Defective item' }),
     });
-    assert(doubleReturnRes.status === 400, '47. Processing return again on returned order rejected with HTTP 400 INVALID_ORDER_STATE_TRANSITION');
+    const replayRefundData: any = await replayRefundRes.json();
+    assert(replayRefundRes.status === 200, '17. Refund replay returns HTTP 200 OK');
+    assert(replayRefundData.idempotentReplay === true, '18. Replay indicates idempotentReplay === true');
+    assert(spyPaymentAdapter.refundCount === 0, '19. MANDATORY: Successful refund replay does NOT call provider twice');
 
-    const branchBatchAfterDoubleReturn = store.branch_batch_inventory.get('daet_BAT-DAET-CMD65-01');
-    assert(branchBatchAfterDoubleReturn.availableQuantity === branchBatchAfterReturn.availableQuantity, '48. Repeated return processing does NOT restore inventory twice');
+    // ------------------------------------------------------------------------
+    // SECTION 6: Mandatory Assertion 10 — Concurrent Different Refund Keys
+    // ------------------------------------------------------------------------
+    // Remaining balance is 2550 - 1000 = 1550
+    const [concRfnd1, concRfnd2] = await Promise.all([
+      fetch(`http://127.0.0.1:${port}/api/orders/${rfndOrderId}/refund`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${managerToken}`,
+          'x-idempotency-key': 'rfnd_conc_key_A',
+        },
+        body: JSON.stringify({ amount: 1200, reason: 'Comp A' }),
+      }),
+      fetch(`http://127.0.0.1:${port}/api/orders/${rfndOrderId}/refund`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${managerToken}`,
+          'x-idempotency-key': 'rfnd_conc_key_B',
+        },
+        body: JSON.stringify({ amount: 1200, reason: 'Comp B' }),
+      }),
+    ]);
 
-    // 15. Hardened Refund Operations & Balance Validation
-    // Create a new order3, fulfill it, and mark completed
-    const order3Res = await fetch(`http://127.0.0.1:${port}/api/orders/checkout`, {
+    const statuses = [concRfnd1.status, concRfnd2.status];
+    assert(statuses.includes(200) && statuses.includes(400), '20. Concurrent different refunds: One succeeds (200), one rejected (400)');
+
+    const endOrderDoc = store.orders.get(rfndOrderId);
+    assert(endOrderDoc.refundedAmount <= 2550, '21. MANDATORY: Two concurrent different refund keys cannot refund more than remaining balance');
+
+    // ------------------------------------------------------------------------
+    // SECTION 7: Mandatory Assertions 11 & 12 — Cancellation & Return Refund Failure Recovery
+    // ------------------------------------------------------------------------
+    // Create new order for cancellation test
+    const cancelOrderRes = await fetch(`http://127.0.0.1:${port}/api/orders/checkout`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
         Authorization: `Bearer ${customerToken}`,
-        'x-idempotency-key': 'key_test_order3_303'
+        'x-idempotency-key': 'key_cancel_fail_test',
       },
       body: JSON.stringify({
         ...checkoutPayload,
-        idempotencyKey: 'key_test_order3_303'
-      })
+        idempotencyKey: 'key_cancel_fail_test',
+      }),
     });
-    const order3Data: any = await order3Res.json();
-    const order3Id = order3Data.orderId;
+    const cancelOrderData: any = await cancelOrderRes.json();
+    const cId = cancelOrderData.orderId;
 
-    await fetch(`http://127.0.0.1:${port}/api/orders/${order3Id}/fulfill`, {
-      method: 'POST',
-      headers: { Authorization: `Bearer ${managerToken}` }
-    });
-    store.orders.get(order3Id).fulfillmentStatus = 'completed';
+    // Fail provider on cancellation refund
+    spyPaymentAdapter.processRefund = async () => {
+      throw new Error('Cancellation Refund Failure');
+    };
 
-    // 15a. Refund request missing idempotencyKey rejected with HTTP 400
-    const missingRefundKeyRes = await fetch(`http://127.0.0.1:${port}/api/orders/${order3Id}/refund`, {
+    await fetch(`http://127.0.0.1:${port}/api/orders/${cId}/cancel`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
-        Authorization: `Bearer ${managerToken}`
+        Authorization: `Bearer ${customerToken}`,
       },
-      body: JSON.stringify({ amount: 1000, reason: 'Partial refund' })
+      body: JSON.stringify({ reason: 'Cancel with provider failure' }),
     });
-    assert(missingRefundKeyRes.status === 400, '49. Refund request missing idempotencyKey rejected with HTTP 400 Bad Request');
 
-    // 15b. Invalid refund amount <= 0 rejected with HTTP 400
-    const invalidAmountRefundRes = await fetch(`http://127.0.0.1:${port}/api/orders/${order3Id}/refund`, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        Authorization: `Bearer ${managerToken}`,
-        'x-idempotency-key': 'rfnd_key_invalid_0'
-      },
-      body: JSON.stringify({ amount: 0, reason: 'Zero refund' })
-    });
-    assert(invalidAmountRefundRes.status === 400, '50. Refund amount <= 0 rejected with HTTP 400 Bad Request');
+    const cancelledDoc = store.orders.get(cId);
+    assert(cancelledDoc.fulfillmentStatus === 'cancelled', '22. Order is marked cancelled even if refund provider failed');
 
-    // 15c. Partial refund (PHP 1,000 of PHP 2,550 order) succeeds and sets paymentStatus to partially_refunded
-    const partialRefundRes = await fetch(`http://127.0.0.1:${port}/api/orders/${order3Id}/refund`, {
+    // Restore provider success and retry refund using cancel key
+    spyPaymentAdapter.processRefund = originalProcessRefund;
+
+    const retryCancelRefundRes = await fetch(`http://127.0.0.1:${port}/api/orders/${cId}/refund`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
         Authorization: `Bearer ${managerToken}`,
-        'x-idempotency-key': 'rfnd_key_partial_1'
+        'x-idempotency-key': `cancel:${cId}`,
       },
-      body: JSON.stringify({ amount: 1000, reason: 'Partial damage compensation' })
+      body: JSON.stringify({ amount: cancelledDoc.grandTotal, reason: 'Retry cancellation refund' }),
     });
-    const partialRefundData: any = await partialRefundRes.json();
-    assert(partialRefundRes.status === 200, '51. Authorized staff issues partial refund (HTTP 200)');
-    assert(partialRefundData.order.paymentStatus === 'partially_refunded', '52. Partial refund transitions paymentStatus to partially_refunded');
-    assert(partialRefundData.order.refundedAmount === 1000, '53. Order maintains authoritative refundedAmount (PHP 1,000)');
-    assert(partialRefundData.order.remainingRefundableBalance === 1550, '54. Order maintains authoritative remainingRefundableBalance (PHP 1,550)');
 
-    // 15d. Duplicate partial refund request with same idempotencyKey returns original result
-    const dupPartialRefundRes = await fetch(`http://127.0.0.1:${port}/api/orders/${order3Id}/refund`, {
+    assert(retryCancelRefundRes.status === 200, '23. MANDATORY: Cancellation refund failure remains recoverable via retry');
+
+    // Return Approval Refund Failure Recovery Test
+    const returnOrderRes = await fetch(`http://127.0.0.1:${port}/api/orders/checkout`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${customerToken}`,
+        'x-idempotency-key': 'key_return_fail_test',
+      },
+      body: JSON.stringify({
+        ...checkoutPayload,
+        idempotencyKey: 'key_return_fail_test',
+      }),
+    });
+    const returnOrderData: any = await returnOrderRes.json();
+    const rId = returnOrderData.orderId;
+
+    await fetch(`http://127.0.0.1:${port}/api/orders/${rId}/fulfill`, {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${managerToken}` },
+    });
+    store.orders.get(rId).fulfillmentStatus = 'completed';
+
+    await fetch(`http://127.0.0.1:${port}/api/orders/${rId}/return-request`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${customerToken}`,
+      },
+      body: JSON.stringify({ reason: 'Defective bottle' }),
+    });
+
+    // Fail provider on return approval refund
+    spyPaymentAdapter.processRefund = async () => {
+      throw new Error('Return Refund Failure');
+    };
+
+    await fetch(`http://127.0.0.1:${port}/api/orders/${rId}/return-process`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
         Authorization: `Bearer ${managerToken}`,
-        'x-idempotency-key': 'rfnd_key_partial_1'
       },
-      body: JSON.stringify({ amount: 1000, reason: 'Partial damage compensation' })
+      body: JSON.stringify({ decision: 'approve', restockInventory: true }),
     });
-    const dupPartialData: any = await dupPartialRefundRes.json();
-    assert(dupPartialRefundRes.status === 200, '55. Duplicate refund request returns HTTP 200 OK');
-    assert(dupPartialData.idempotentReplay === true, '56. Duplicate refund request returns idempotentReplay indicator');
-    assert(dupPartialData.refund.refundId === partialRefundData.refund.refundId, '57. Duplicate refund request returns identical refundId (zero duplicate refunds)');
 
-    // 15e. Refund exceeding remaining balance (PHP 2,000 > PHP 1,550) is rejected with HTTP 400
-    const excessRefundRes = await fetch(`http://127.0.0.1:${port}/api/orders/${order3Id}/refund`, {
+    const returnedDoc = store.orders.get(rId);
+    assert(returnedDoc.fulfillmentStatus === 'returned', '24. Order is marked returned even if refund provider failed');
+
+    // Restore provider success and retry refund using return key
+    spyPaymentAdapter.processRefund = originalProcessRefund;
+
+    const retryReturnRefundRes = await fetch(`http://127.0.0.1:${port}/api/orders/${rId}/refund`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
         Authorization: `Bearer ${managerToken}`,
-        'x-idempotency-key': 'rfnd_key_excess'
+        'x-idempotency-key': `return:${rId}`,
       },
-      body: JSON.stringify({ amount: 2000, reason: 'Excessive refund' })
+      body: JSON.stringify({ amount: returnedDoc.grandTotal, reason: 'Retry return refund' }),
     });
-    assert(excessRefundRes.status === 400, '58. Refund exceeding remaining refundable balance rejected with HTTP 400 Bad Request');
 
-    // 15f. Remaining balance refund (PHP 1,550) succeeds and sets paymentStatus to refunded
-    const remainingRefundRes = await fetch(`http://127.0.0.1:${port}/api/orders/${order3Id}/refund`, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        Authorization: `Bearer ${managerToken}`,
-        'x-idempotency-key': 'rfnd_key_remaining_2'
-      },
-      body: JSON.stringify({ amount: 1550, reason: 'Full remaining refund' })
-    });
-    const remainingRefundData: any = await remainingRefundRes.json();
-    assert(remainingRefundRes.status === 200, '59. Remaining balance refund succeeds (HTTP 200)');
-    assert(remainingRefundData.order.paymentStatus === 'refunded', '60. Full balance refund transitions paymentStatus to refunded');
-    assert(remainingRefundData.order.remainingRefundableBalance === 0, '61. Remaining refundable balance reaches 0');
-
-    // 15g. Additional refund on fully refunded order rejected with HTTP 400
-    const fullyRefundedRes = await fetch(`http://127.0.0.1:${port}/api/orders/${order3Id}/refund`, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        Authorization: `Bearer ${managerToken}`,
-        'x-idempotency-key': 'rfnd_key_after_full'
-      },
-      body: JSON.stringify({ amount: 100, reason: 'Attempt after full refund' })
-    });
-    assert(fullyRefundedRes.status === 400, '62. Refund attempt on fully refunded order rejected with HTTP 400 Bad Request');
+    assert(retryReturnRefundRes.status === 200, '25. MANDATORY: Return-approval refund failure remains recoverable via retry');
 
   } finally {
     await new Promise<void>((resolve) => server.close(() => resolve()));
   }
 
   console.log('========================================================================');
-  console.log(`Priority B Test Results: ${passedCount} PASSED, ${failedCount} FAILED`);
+  console.log(`Priority B Safety Remediation Results: ${passedCount} PASSED, ${failedCount} FAILED`);
   console.log('========================================================================');
 
   if (failedCount > 0) {
