@@ -11,10 +11,75 @@ import { getAuth } from 'firebase-admin/auth';
 import { initializeApp, getApps } from 'firebase-admin/app';
 import crypto from 'crypto';
 import path from 'path';
+import fs from 'fs';
 import { fileURLToPath } from 'url';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
+
+export interface LogMeta {
+  event?: string;
+  method?: string;
+  path?: string;
+  statusCode?: number;
+  correlationId?: string;
+  durationMs?: number;
+  error?: string;
+  [key: string]: any;
+}
+
+const SENSITIVE_LOG_KEYS = [
+  'token', 'authorization', 'password', 'secret', 'hmac', 'kms',
+  'key', 'ciphertext', 'clinical', 'intake', 'dietary', 'water',
+  'condition', 'card', 'cvv', 'ssn', 'bearer'
+];
+
+function sanitizeLogMeta(obj: Record<string, any>): Record<string, any> {
+  const clean: Record<string, any> = {};
+  for (const [key, val] of Object.entries(obj)) {
+    const lower = key.toLowerCase();
+    if (SENSITIVE_LOG_KEYS.some(s => lower.includes(s))) {
+      clean[key] = '[REDACTED]';
+      continue;
+    }
+    if (val && typeof val === 'object' && !Array.isArray(val)) {
+      clean[key] = sanitizeLogMeta(val);
+    } else {
+      clean[key] = val;
+    }
+  }
+  return clean;
+}
+
+export const logger = {
+  info(message: string, meta: LogMeta = {}) {
+    const logEntry = {
+      timestamp: new Date().toISOString(),
+      level: 'info',
+      message,
+      ...sanitizeLogMeta(meta)
+    };
+    console.log(JSON.stringify(logEntry));
+  },
+  warn(message: string, meta: LogMeta = {}) {
+    const logEntry = {
+      timestamp: new Date().toISOString(),
+      level: 'warn',
+      message,
+      ...sanitizeLogMeta(meta)
+    };
+    console.warn(JSON.stringify(logEntry));
+  },
+  error(message: string, meta: LogMeta = {}) {
+    const logEntry = {
+      timestamp: new Date().toISOString(),
+      level: 'error',
+      message,
+      ...sanitizeLogMeta(meta)
+    };
+    console.error(JSON.stringify(logEntry));
+  }
+};
 
 // Initialize Firebase Admin if not already initialized
 if (getApps().length === 0) {
@@ -1143,18 +1208,63 @@ export function createExpressApp(deps: ServerDependencies = {}): Express {
   app.use(express.json());
 
   app.use((req, res, next) => {
+    const startTime = Date.now();
     const incomingTrace = req.headers['x-correlation-id'] || req.headers['x-request-id'];
     const correlationId = (typeof incomingTrace === 'string' && incomingTrace.trim())
       ? incomingTrace.trim()
       : (crypto.randomUUID ? crypto.randomUUID() : `TRACE-${Date.now()}-${crypto.randomBytes(4).toString('hex')}`);
     (req as any).correlationId = correlationId;
+    (req as any).requestId = correlationId;
     res.setHeader('x-correlation-id', correlationId);
+    res.setHeader('X-Request-Id', correlationId);
+
+    res.on('finish', () => {
+      const durationMs = Date.now() - startTime;
+      if (req.path !== '/healthz' && req.path !== '/readyz') {
+        logger.info('HTTP request completed', {
+          method: req.method,
+          path: req.path,
+          statusCode: res.statusCode,
+          correlationId,
+          durationMs
+        });
+      }
+    });
+
     next();
   });
 
   const db = deps.db || getFirestore('ai-studio-cmddigitalcommer-8d70f45b-1636-42ba-9e2d-f063a7b0e086');
   const auth = deps.auth || getAuth();
   const kmsClient = deps.kmsClient || new KeyManagementServiceClient();
+
+  // 1. Health Liveness Check Endpoint
+  app.get('/healthz', (_req: Request, res: Response) => {
+    res.status(200).json({ status: 'ok', timestamp: new Date().toISOString() });
+  });
+
+  // 2. Readiness Probe Endpoint
+  app.get('/readyz', async (_req: Request, res: Response) => {
+    try {
+      getHmacSecret();
+
+      if (db && typeof db.collection === 'function') {
+        await db.collection('_health').doc('readyz').get();
+      }
+
+      res.status(200).json({ status: 'ready', timestamp: new Date().toISOString() });
+    } catch (err: any) {
+      logger.error('Readiness probe failed', { error: err?.message || String(err) });
+      res.status(503).json({ status: 'not_ready', error: 'Service initialization or dependency unavailable' });
+    }
+  });
+
+  if (process.env.NODE_ENV === 'test' || process.env.ENABLE_TEST_ROUTES === 'true') {
+    app.get('/api/test-uncaught-error', (_req: Request, _res: Response, next: any) => {
+      const err = new Error('TEST_UNCAUGHT_DATABASE_SECRET_LEAK_ERROR: sensitive_internal_db_password_12345');
+      next(err);
+    });
+  }
 
   async function logAuditEvent(
     actorUid: string | null,
@@ -5697,6 +5807,33 @@ export function createExpressApp(deps: ServerDependencies = {}): Express {
     }
   });
 
+  // Centralized Express Error Handler
+  app.use((err: any, req: Request, res: Response, _next: any) => {
+    const correlationId = (req as any).correlationId || 'unknown';
+    const statusCode = err.status || err.statusCode || 500;
+    const isProd = process.env.NODE_ENV === 'production';
+
+    const safeErrorMessage = isProd && statusCode === 500
+      ? 'An unexpected internal error occurred'
+      : (err.message || 'Internal Server Error');
+
+    logger.error('Unhandled server error', {
+      method: req.method,
+      path: req.path,
+      statusCode,
+      correlationId,
+      error: err?.message || String(err),
+      stack: isProd ? undefined : err?.stack
+    });
+
+    if (!res.headersSent) {
+      res.status(statusCode).json({
+        error: safeErrorMessage,
+        correlationId
+      });
+    }
+  });
+
   return app;
 }
 
@@ -5705,10 +5842,11 @@ async function startServer() {
   if (process.env.NODE_ENV === 'production') {
     // Fail-closed security validation on boot
     getHmacSecret();
+    logger.info('Production boot environment validation succeeded');
   }
 
   const app = createExpressApp();
-  const PORT = 3000;
+  const PORT = process.env.PORT ? parseInt(process.env.PORT, 10) : 3000;
 
   if (process.env.NODE_ENV !== 'production') {
     const vite = await createViteServer({
@@ -5717,14 +5855,17 @@ async function startServer() {
     });
     app.use(vite.middlewares);
   } else {
-    app.use(express.static(path.resolve(__dirname, 'dist')));
+    const distPath = fs.existsSync(path.resolve(process.cwd(), 'dist'))
+      ? path.resolve(process.cwd(), 'dist')
+      : path.resolve(__dirname, '..', 'dist');
+    app.use(express.static(distPath));
     app.get('*', (_req, res) => {
-      res.sendFile(path.resolve(__dirname, 'dist', 'index.html'));
+      res.sendFile(path.resolve(distPath, 'index.html'));
     });
   }
 
   app.listen(PORT, '0.0.0.0', () => {
-    console.log(`HCI CMD Platform server listening on port ${PORT}`);
+    logger.info(`HCI CMD Platform server listening on port ${PORT}`, { port: PORT });
   });
 }
 

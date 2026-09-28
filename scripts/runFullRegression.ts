@@ -20,6 +20,7 @@ const testFiles = [
   'scripts/testPhase7Milestone6B2B.ts',
   'scripts/testPhase7Milestone7Security.ts',
   'scripts/testPhase7Milestone8Concurrency.ts',
+  'scripts/testPriorityAFoundation.ts',
 ];
 
 console.log('========================================================================');
