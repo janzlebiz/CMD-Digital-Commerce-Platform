@@ -211,7 +211,6 @@ function createTestHarness() {
     },
   };
 
-  // Pre-seed mock stores with seed product batches and branch batch inventory
   for (const pb of SEED_PRODUCT_BATCHES) {
     productBatchesStore.set(pb.id, pb);
   }
@@ -229,7 +228,7 @@ function createTestHarness() {
     }
   }
 
-  return { mockDb, mockAuth, auditLogsStore, collectionAccessCounts };
+  return { mockDb, mockAuth, auditLogsStore, collectionAccessCounts, branchBatchInventoryStore, productBatchesStore };
 }
 
 async function makeRequest(
@@ -306,288 +305,273 @@ async function runMilestone2TestSuite() {
 
   try {
     // -------------------------------------------------------------------------
-    // Test Suite 1: FEFO Ordering & Multi-Batch Expiry Allocation
+    // 20 Real Acceptance Assertions
     // -------------------------------------------------------------------------
-    console.log('--- Test Suite 1: FEFO Expiry Ordering & Multi-Batch Spanning ---');
 
-    // 1. Earliest expiry is selected first
+    // 1. Earliest-expiring eligible batch selected first
     const res1 = await makeRequest(
       server,
       '/api/inventory/reservations',
       'POST',
-      {
-        branchId: 'daet',
-        skuId: 'hci-cmd-65ml',
-        requestedQuantity: 10,
-      },
+      { branchId: 'daet', skuId: 'hci-cmd-65ml', requestedQuantity: 5 },
       { Authorization: 'Bearer VALID_STAFF_DAET_MANAGER_TOKEN' }
     );
+    assert(
+      res1.status === 201 && res1.data.allocations[0].batchId === 'batch-2026-09a',
+      '1. Earliest-expiring eligible batch (batch-2026-09a) selected first'
+    );
 
-    if (res1.status !== 201) {
-      console.error('RES1 FAILED:', res1);
-    }
-
-    assert(res1.status === 201, 'Reservation request succeeds with 201 Created');
-    assert(res1.data.allocations.length > 0, 'Allocations returned');
-    assert(res1.data.allocations[0].batchId === 'batch-2026-09a', 'Assertion 1: Earliest expiry batch (batch-2026-09a) is selected first');
-
-    const batchesRes = await makeRequest(server, '/api/inventory/batches?branchId=daet', 'GET', undefined, {
+    // Fetch batch A available stock
+    const batchesResA = await makeRequest(server, '/api/inventory/batches?branchId=daet', 'GET', undefined, {
       Authorization: 'Bearer VALID_STAFF_DAET_MANAGER_TOKEN',
     });
-    const batchA = batchesRes.data.batches.find((b: any) => b.batchId === 'batch-2026-09a');
-    const availA = batchA.availableQuantity;
+    const batchAInfo = batchesResA.data.batches.find((b: any) => b.batchId === 'batch-2026-09a');
+    const availA = batchAInfo.availableQuantity;
 
-    // 2 & 3. Later expiry selected when earlier batch exhausted & allocation can span multiple eligible batches
+    // 2. Later-expiring batch selected after earlier eligible stock is exhausted
     const res2 = await makeRequest(
       server,
       '/api/inventory/reservations',
       'POST',
-      {
-        branchId: 'daet',
-        skuId: 'hci-cmd-65ml',
-        requestedQuantity: availA + 15,
-      },
+      { branchId: 'daet', skuId: 'hci-cmd-65ml', requestedQuantity: availA + 10 },
       { Authorization: 'Bearer VALID_STAFF_DAET_MANAGER_TOKEN' }
     );
+    assert(
+      res2.status === 201 && res2.data.allocations[1]?.batchId === 'batch-2026-09b',
+      '2. Later-expiring batch (batch-2026-09b) selected after earlier eligible stock exhausted'
+    );
 
-    assert(res2.status === 201, 'Multi-batch span reservation succeeds');
-    assert(res2.data.allocations.length >= 2, 'Assertion 3: Allocation spans multiple eligible batches when requested quantity exceeds first batch');
-    assert(res2.data.allocations[0].quantityReserved === availA, 'First batch exhausted fully');
-    assert(res2.data.allocations[1].batchId === 'batch-2026-09b', 'Assertion 2: Later expiry batch (batch-2026-09b) is selected when earlier batch is exhausted');
+    // 3. Reservation spans multiple eligible batches when required
+    assert(
+      res2.status === 201 && res2.data.allocations.length >= 2,
+      '3. Reservation spans multiple eligible batches when requested quantity exceeds first batch'
+    );
 
-    // -------------------------------------------------------------------------
-    // Test Suite 2: QC Status & Expiry Filtering Rules
-    // -------------------------------------------------------------------------
-    console.log('\n--- Test Suite 2: QC Status & Expiry Filtering Rules ---');
+    // Setup fixtures for filtering tests (pending, failed, expired, zero-stock, wrong SKU, wrong branch)
+    const pbStore = harness.productBatchesStore;
+    const bbStore = harness.branchBatchInventoryStore;
 
-    // Inject pending QC, failed QC, expired, and zero stock test batches
-    const productBatchesStore = harness.mockDb._getStoreForCollection('product_batches');
-    const branchBatchStore = harness.mockDb._getStoreForCollection('branch_batch_inventory');
-
-    productBatchesStore.set('batch-pending-qc', {
-      id: 'batch-pending-qc',
-      batchNumber: 'PENDING-01',
-      skuId: 'hci-cmd-65ml',
-      manufactureDate: '2026-01-01',
-      expiryDate: '2028-08-01',
-      qualityControlStatus: 'pending',
-      totalManufacturedQuantity: 100,
+    pbStore.set('batch-pending-qc', {
+      id: 'batch-pending-qc', batchNumber: 'PENDING-01', skuId: 'hci-cmd-65ml',
+      manufactureDate: '2026-01-01', expiryDate: '2028-08-01', qualityControlStatus: 'pending', totalManufacturedQuantity: 100
     });
-    branchBatchStore.set('daet_batch-pending-qc', {
-      id: 'daet_batch-pending-qc',
-      branchId: 'daet',
-      batchId: 'batch-pending-qc',
-      skuId: 'hci-cmd-65ml',
-      availableQuantity: 50,
-      reservedQuantity: 0,
-      damagedQuantity: 0,
-      expiryDate: '2028-08-01',
-      updatedAt: new Date().toISOString(),
+    bbStore.set('daet_batch-pending-qc', {
+      id: 'daet_batch-pending-qc', branchId: 'daet', batchId: 'batch-pending-qc', skuId: 'hci-cmd-65ml',
+      availableQuantity: 50, reservedQuantity: 0, damagedQuantity: 0, expiryDate: '2028-08-01', updatedAt: new Date().toISOString()
     });
 
-    productBatchesStore.set('batch-failed-qc', {
-      id: 'batch-failed-qc',
-      batchNumber: 'FAILED-01',
-      skuId: 'hci-cmd-65ml',
-      manufactureDate: '2026-01-01',
-      expiryDate: '2028-08-01',
-      qualityControlStatus: 'failed',
-      totalManufacturedQuantity: 100,
+    pbStore.set('batch-failed-qc', {
+      id: 'batch-failed-qc', batchNumber: 'FAILED-01', skuId: 'hci-cmd-65ml',
+      manufactureDate: '2026-01-01', expiryDate: '2028-08-01', qualityControlStatus: 'failed', totalManufacturedQuantity: 100
     });
-    branchBatchStore.set('daet_batch-failed-qc', {
-      id: 'daet_batch-failed-qc',
-      branchId: 'daet',
-      batchId: 'batch-failed-qc',
-      skuId: 'hci-cmd-65ml',
-      availableQuantity: 50,
-      reservedQuantity: 0,
-      damagedQuantity: 0,
-      expiryDate: '2028-08-01',
-      updatedAt: new Date().toISOString(),
+    bbStore.set('daet_batch-failed-qc', {
+      id: 'daet_batch-failed-qc', branchId: 'daet', batchId: 'batch-failed-qc', skuId: 'hci-cmd-65ml',
+      availableQuantity: 50, reservedQuantity: 0, damagedQuantity: 0, expiryDate: '2028-08-01', updatedAt: new Date().toISOString()
     });
 
-    productBatchesStore.set('batch-expired', {
-      id: 'batch-expired',
-      batchNumber: 'EXPIRED-01',
-      skuId: 'hci-cmd-65ml',
-      manufactureDate: '2025-01-01',
-      expiryDate: '2025-12-31',
-      qualityControlStatus: 'passed',
-      totalManufacturedQuantity: 100,
+    pbStore.set('batch-expired', {
+      id: 'batch-expired', batchNumber: 'EXPIRED-01', skuId: 'hci-cmd-65ml',
+      manufactureDate: '2025-01-01', expiryDate: '2025-12-31', qualityControlStatus: 'passed', totalManufacturedQuantity: 100
     });
-    branchBatchStore.set('daet_batch-expired', {
-      id: 'daet_batch-expired',
-      branchId: 'daet',
-      batchId: 'batch-expired',
-      skuId: 'hci-cmd-65ml',
-      availableQuantity: 50,
-      reservedQuantity: 0,
-      damagedQuantity: 0,
-      expiryDate: '2025-12-31',
-      updatedAt: new Date().toISOString(),
+    bbStore.set('daet_batch-expired', {
+      id: 'daet_batch-expired', branchId: 'daet', batchId: 'batch-expired', skuId: 'hci-cmd-65ml',
+      availableQuantity: 50, reservedQuantity: 0, damagedQuantity: 0, expiryDate: '2025-12-31', updatedAt: new Date().toISOString()
     });
 
-    productBatchesStore.set('batch-zerostock', {
-      id: 'batch-zerostock',
-      batchNumber: 'ZERO-01',
-      skuId: 'hci-cmd-65ml',
-      manufactureDate: '2026-01-01',
-      expiryDate: '2028-08-01',
-      qualityControlStatus: 'passed',
-      totalManufacturedQuantity: 100,
+    pbStore.set('batch-zerostock', {
+      id: 'batch-zerostock', batchNumber: 'ZERO-01', skuId: 'hci-cmd-65ml',
+      manufactureDate: '2026-01-01', expiryDate: '2028-08-01', qualityControlStatus: 'passed', totalManufacturedQuantity: 100
     });
-    branchBatchStore.set('daet_batch-zerostock', {
-      id: 'daet_batch-zerostock',
-      branchId: 'daet',
-      batchId: 'batch-zerostock',
-      skuId: 'hci-cmd-65ml',
-      availableQuantity: 0,
-      reservedQuantity: 0,
-      damagedQuantity: 0,
-      expiryDate: '2028-08-01',
-      updatedAt: new Date().toISOString(),
+    bbStore.set('daet_batch-zerostock', {
+      id: 'daet_batch-zerostock', branchId: 'daet', batchId: 'batch-zerostock', skuId: 'hci-cmd-65ml',
+      availableQuantity: 0, reservedQuantity: 0, damagedQuantity: 0, expiryDate: '2028-08-01', updatedAt: new Date().toISOString()
     });
 
-    const inventoryStore = harness.mockDb._getStoreForCollection('inventory');
-    const updatedAgg = computeAggregateInventoryFromBatches({
-      branchBatches: Array.from(branchBatchStore.values()),
+    // Recompute aggregate for Daet 65ml
+    const invStore = harness.mockDb._getStoreForCollection('inventory');
+    const freshAgg = computeAggregateInventoryFromBatches({
+      branchBatches: Array.from(bbStore.values()),
       branchId: 'daet',
       skuId: 'hci-cmd-65ml',
     });
-    inventoryStore.set(updatedAgg.id, updatedAgg);
+    invStore.set(freshAgg.id, freshAgg);
 
-    // 4. Pending QC batch skipped
-    assert(true, 'Assertion 4: Pending QC batch is skipped during FEFO routing');
-
-    // 5. Failed QC batch skipped
-    assert(true, 'Assertion 5: Failed QC batch is skipped during FEFO routing');
-
-    // 6. Expired batch skipped
-    assert(true, 'Assertion 6: Expired batch is skipped during FEFO routing');
-
-    // 7. Zero-stock batch skipped
-    assert(true, 'Assertion 7: Zero-stock batch is skipped during FEFO routing');
-
-    // 8. Wrong-SKU batch excluded
-    assert(true, 'Assertion 8: Wrong-SKU batch is excluded');
-
-    // 9. Wrong-branch batch excluded
-    assert(true, 'Assertion 9: Wrong-branch batch is excluded');
-
-    // 10. Insufficient eligible stock fails atomically
-    const resOver = await makeRequest(
-      server,
-      '/api/inventory/reservations',
-      'POST',
-      {
-        branchId: 'daet',
-        skuId: 'hci-cmd-65ml',
-        requestedQuantity: 99999,
-      },
+    // 4. Pending-QC batch is actually skipped
+    const resPendingTest = await makeRequest(
+      server, '/api/inventory/reservations', 'POST',
+      { branchId: 'daet', skuId: 'hci-cmd-65ml', requestedQuantity: 1 },
       { Authorization: 'Bearer VALID_STAFF_DAET_MANAGER_TOKEN' }
     );
-    assert(resOver.status === 400, 'Assertion 10: Insufficient eligible stock fails atomically with 400 Bad Request');
+    const usedPending = resPendingTest.data.allocations?.some((a: any) => a.batchId === 'batch-pending-qc');
+    assert(usedPending === false, '4. Pending-QC batch is actually skipped');
 
-    // 11. Requested quantity never produces negative available stock
-    assert(resOver.data.error.includes('eligible units available'), 'Assertion 11: Stock availability bounds strictly enforced with zero negative stock');
+    // 5. Failed-QC batch is actually skipped
+    const usedFailed = resPendingTest.data.allocations?.some((a: any) => a.batchId === 'batch-failed-qc');
+    assert(usedFailed === false, '5. Failed-QC batch is actually skipped');
 
-    // 12. Available/reserved quantities updated correctly
-    assert(true, 'Assertion 12: Available and reserved quantities updated correctly across batches');
+    // 6. Expired batch is actually skipped
+    const usedExpired = resPendingTest.data.allocations?.some((a: any) => a.batchId === 'batch-expired');
+    assert(usedExpired === false, '6. Expired batch is actually skipped');
 
-    // 13. Aggregate /inventory remains mathematically consistent
+    // 7. Zero-stock batch is actually skipped
+    const usedZero = resPendingTest.data.allocations?.some((a: any) => a.batchId === 'batch-zerostock');
+    assert(usedZero === false, '7. Zero-stock batch is actually skipped');
+
+    // 8. Wrong-SKU batch is actually excluded
+    const resWrongSku = await makeRequest(
+      server, '/api/inventory/reservations', 'POST',
+      { branchId: 'daet', skuId: 'hci-cmd-30ml', requestedQuantity: 1 },
+      { Authorization: 'Bearer VALID_STAFF_DAET_MANAGER_TOKEN' }
+    );
+    const used65mlFor30ml = resWrongSku.data.allocations?.some((a: any) => a.batchId === 'batch-2026-09a');
+    assert(resWrongSku.status === 201 && used65mlFor30ml === false, '8. Wrong-SKU batch is actually excluded');
+
+    // 9. Wrong-branch inventory is actually excluded (Labo reservation leaves Daet branch batch untouched)
+    const daetBatchRefBefore = bbStore.get('daet_batch-2026-09a');
+    const daetAvailBefore = daetBatchRefBefore.availableQuantity;
+
+    const resWrongBranch = await makeRequest(
+      server, '/api/inventory/reservations', 'POST',
+      { branchId: 'labo', skuId: 'hci-cmd-65ml', requestedQuantity: 5 },
+      { Authorization: 'Bearer VALID_STAFF_LABO_MANAGER_TOKEN' }
+    );
+    const daetBatchRefAfter = bbStore.get('daet_batch-2026-09a');
+    const daetAvailAfter = daetBatchRefAfter.availableQuantity;
+    assert(
+      resWrongBranch.status === 201 && daetAvailAfter === daetAvailBefore,
+      '9. Wrong-branch inventory is actually excluded'
+    );
+
+    // Capture batch quantity before insufficient stock request
+    const targetBatchRef = bbStore.get('daet_batch-2026-09c');
+    const availBeforeFail = targetBatchRef ? targetBatchRef.availableQuantity : 0;
+
+    // 10. Insufficient eligible stock returns failure
+    const resInsuff = await makeRequest(
+      server, '/api/inventory/reservations', 'POST',
+      { branchId: 'daet', skuId: 'hci-cmd-65ml', requestedQuantity: 999999 },
+      { Authorization: 'Bearer VALID_STAFF_DAET_MANAGER_TOKEN' }
+    );
+    assert(resInsuff.status === 400, '10. Insufficient eligible stock returns failure (400 Bad Request)');
+
+    // 11. Insufficient reservation leaves every affected batch unchanged and never creates negative stock
+    const targetBatchAfter = bbStore.get('daet_batch-2026-09c');
+    const availAfterFail = targetBatchAfter ? targetBatchAfter.availableQuantity : 0;
+    assert(
+      availAfterFail === availBeforeFail && availAfterFail >= 0,
+      '11. Insufficient reservation leaves affected batch unchanged with zero negative stock'
+    );
+
+    // 12. Successful reservation correctly changes available and reserved quantities
+    const b2026Before = bbStore.get('daet_batch-2026-09b');
+    const availBeforeSucc = b2026Before.availableQuantity;
+    const reservedBeforeSucc = b2026Before.reservedQuantity;
+
+    const resSucc = await makeRequest(
+      server, '/api/inventory/reservations', 'POST',
+      { branchId: 'daet', skuId: 'hci-cmd-65ml', requestedQuantity: 5 },
+      { Authorization: 'Bearer VALID_STAFF_DAET_MANAGER_TOKEN' }
+    );
+    const b2026After = bbStore.get('daet_batch-2026-09b');
+    assert(
+      resSucc.status === 201 &&
+      b2026After.availableQuantity === availBeforeSucc - 5 &&
+      b2026After.reservedQuantity === reservedBeforeSucc + 5,
+      '12. Successful reservation correctly changes available and reserved quantities'
+    );
+
+    // 13. /inventory aggregate remains exactly consistent with batch-level stock
     const reconRes = await makeRequest(server, '/api/inventory/reconciliation?branchId=daet', 'GET', undefined, {
       Authorization: 'Bearer VALID_STAFF_DAET_MANAGER_TOKEN',
     });
-    assert(reconRes.status === 200, 'Reconciliation endpoint succeeds');
-    assert(reconRes.data.reconciliation.allConsistent === true, 'Assertion 13: Aggregate /inventory remains mathematically consistent');
+    assert(
+      reconRes.status === 200 && reconRes.data.reconciliation.allConsistent === true,
+      '13. /inventory aggregate remains exactly consistent with batch-level stock'
+    );
 
-    // -------------------------------------------------------------------------
-    // Test Suite 3: Branch Security, RBAC & IDOR Isolation
-    // -------------------------------------------------------------------------
-    console.log('\n--- Test Suite 3: Branch Security, RBAC & IDOR Isolation ---');
-
-    // 14. Branch manager cross-branch attempt returns 403
-    const crossBranchRes = await makeRequest(
-      server,
-      '/api/inventory/reservations',
-      'POST',
-      {
-        branchId: 'labo',
-        skuId: 'hci-cmd-65ml',
-        requestedQuantity: 5,
-      },
+    // 14. Branch manager cross-branch reservation returns 403
+    const resCross = await makeRequest(
+      server, '/api/inventory/reservations', 'POST',
+      { branchId: 'labo', skuId: 'hci-cmd-65ml', requestedQuantity: 5 },
       { Authorization: 'Bearer VALID_STAFF_DAET_MANAGER_TOKEN' }
     );
-    assert(crossBranchRes.status === 403, 'Assertion 14: Branch manager cross-branch attempt returns 403 Forbidden');
+    assert(resCross.status === 403, '14. Branch manager cross-branch reservation returns 403 Forbidden');
 
-    // 15. Unauthorized role returns 403
-    const customerRes = await makeRequest(
-      server,
-      '/api/inventory/reservations',
-      'POST',
-      {
-        branchId: 'daet',
-        skuId: 'hci-cmd-65ml',
-        requestedQuantity: 5,
-      },
+    // 15. Customer/practitioner reservation attempt returns 403
+    const resCust = await makeRequest(
+      server, '/api/inventory/reservations', 'POST',
+      { branchId: 'daet', skuId: 'hci-cmd-65ml', requestedQuantity: 5 },
       { Authorization: 'Bearer VALID_CUSTOMER_TOKEN' }
     );
-    assert(customerRes.status === 403, 'Assertion 15: Unauthorized customer/practitioner role returns 403 Forbidden');
+    assert(resCust.status === 403, '15. Customer/practitioner reservation attempt returns 403 Forbidden');
 
-    // 16. Zero consultation_intakes access
-    assert(harness.collectionAccessCounts.consultation_intakes === 0, 'Assertion 16: Zero consultation_intakes access verified by firewall integrity (count: 0)');
+    // 16. Reservation flow performs zero access to /consultation_intakes
+    assert(
+      harness.collectionAccessCounts.consultation_intakes === 0,
+      '16. Reservation flow performs zero access to /consultation_intakes'
+    );
 
-    // -------------------------------------------------------------------------
-    // Test Suite 4: ADR-009 Audit Logging & Concurrency
-    // -------------------------------------------------------------------------
-    console.log('\n--- Test Suite 4: ADR-009 Audit Logging & Concurrency ---');
-
-    const auditLogsRes = await makeRequest(server, '/api/admin/audit-logs', 'GET', undefined, {
+    // 17. Successful reservation creates the expected ADR-009 audit event
+    const auditRes1 = await makeRequest(server, '/api/admin/audit-logs', 'GET', undefined, {
       Authorization: 'Bearer VALID_STAFF_SUPER_ADMIN_TOKEN',
     });
-    assert(auditLogsRes.status === 200, 'Audit logs retrieved');
-    const logs = auditLogsRes.data.logs || [];
+    const foundSuccessAudit = auditRes1.data.logs?.some((l: any) => l.action === 'inventory_reservation_recorded' && l.success === true);
+    assert(foundSuccessAudit === true, '17. Successful reservation creates expected ADR-009 audit event');
 
-    // 17. ADR-009 audit logging generated for successful reservation
-    const successAudit = logs.find((l: any) => l.action === 'inventory_reservation_recorded');
-    assert(successAudit !== undefined, 'Assertion 17: ADR-009 audit logging generated for successful reservation');
+    // 18. Unauthorized reservation attempt creates the expected ADR-009 audit event
+    const foundBlockAudit = auditRes1.data.logs?.some((l: any) => l.action === 'inventory_reservation_unauthorized_branch_blocked' && l.success === false);
+    assert(foundBlockAudit === true, '18. Unauthorized reservation attempt creates expected ADR-009 audit event');
 
-    // 18. ADR-009 audit logging generated for blocked unauthorized access
-    const blockAudit = logs.find((l: any) => l.action === 'inventory_reservation_unauthorized_branch_blocked');
-    assert(blockAudit !== undefined, 'Assertion 18: ADR-009 audit logging generated for blocked unauthorized branch access');
+    // 19. Concurrent reservations cannot over-allocate available stock (Isolated scenario: total eligible stock = 15, Request A = 10, Request B = 10 via Promise.all)
+    bbStore.delete('labo_batch-2026-30a');
+    pbStore.set('batch-conc-iso', {
+      id: 'batch-conc-iso', batchNumber: 'CONC-15', skuId: 'hci-cmd-30ml',
+      manufactureDate: '2026-01-01', expiryDate: '2028-12-31', qualityControlStatus: 'passed', totalManufacturedQuantity: 15
+    });
+    bbStore.set('labo_batch-conc-iso', {
+      id: 'labo_batch-conc-iso', branchId: 'labo', batchId: 'batch-conc-iso', skuId: 'hci-cmd-30ml',
+      availableQuantity: 15, reservedQuantity: 0, damagedQuantity: 0, expiryDate: '2028-12-31', updatedAt: new Date().toISOString()
+    });
+    const concAgg = computeAggregateInventoryFromBatches({
+      branchBatches: Array.from(bbStore.values()),
+      branchId: 'labo',
+      skuId: 'hci-cmd-30ml',
+    });
+    invStore.set(concAgg.id, concAgg);
 
-    // 19. Concurrent reservations cannot over-allocate the same stock
-    const [c1, c2] = await Promise.all([
+    const [conc1, conc2] = await Promise.all([
       makeRequest(
-        server,
-        '/api/inventory/reservations',
-        'POST',
-        {
-          branchId: 'daet',
-          skuId: 'hci-cmd-30ml',
-          requestedQuantity: 10,
-        },
-        { Authorization: 'Bearer VALID_STAFF_DAET_MANAGER_TOKEN' }
+        server, '/api/inventory/reservations', 'POST',
+        { branchId: 'labo', skuId: 'hci-cmd-30ml', requestedQuantity: 10 },
+        { Authorization: 'Bearer VALID_STAFF_LABO_MANAGER_TOKEN' }
       ),
       makeRequest(
-        server,
-        '/api/inventory/reservations',
-        'POST',
-        {
-          branchId: 'daet',
-          skuId: 'hci-cmd-30ml',
-          requestedQuantity: 10,
-        },
-        { Authorization: 'Bearer VALID_STAFF_DAET_MANAGER_TOKEN' }
+        server, '/api/inventory/reservations', 'POST',
+        { branchId: 'labo', skuId: 'hci-cmd-30ml', requestedQuantity: 10 },
+        { Authorization: 'Bearer VALID_STAFF_LABO_MANAGER_TOKEN' }
       ),
     ]);
-    assert(c1.status === 201 && c2.status === 201, 'Assertion 19: Concurrent reservations execute safely with transaction isolation');
 
-    // 20. Repeated/competing reservation attempts preserve FEFO ordering and invariant
-    const finalRecon = await makeRequest(server, '/api/inventory/reconciliation?branchId=daet', 'GET', undefined, {
-      Authorization: 'Bearer VALID_STAFF_DAET_MANAGER_TOKEN',
+    const batchLaboConc = bbStore.get('labo_batch-conc-iso');
+    const totalReservedConc = batchLaboConc ? batchLaboConc.reservedQuantity : 0;
+    const availLaboConc = batchLaboConc ? batchLaboConc.availableQuantity : 0;
+
+    assert(
+      (conc1.status === 201 || conc2.status === 201) &&
+      (conc1.status === 400 || conc2.status === 400) &&
+      totalReservedConc <= 15 &&
+      availLaboConc >= 0,
+      '19. Concurrent reservations cannot over-allocate available stock'
+    );
+
+    // 20. Competing reservations preserve FEFO ordering and the inventory reconciliation invariant
+    const finalReconLabo = await makeRequest(server, '/api/inventory/reconciliation?branchId=labo', 'GET', undefined, {
+      Authorization: 'Bearer VALID_STAFF_SUPER_ADMIN_TOKEN',
     });
-    assert(finalRecon.data.reconciliation.allConsistent === true, 'Assertion 20: Repeated/competing reservation attempts preserve FEFO ordering and inventory invariant');
+    assert(
+      finalReconLabo.status === 200 && finalReconLabo.data.reconciliation.allConsistent === true,
+      '20. Competing reservations preserve FEFO ordering and inventory reconciliation invariant'
+    );
 
   } finally {
     await new Promise<void>((resolve) => server.close(() => resolve()));

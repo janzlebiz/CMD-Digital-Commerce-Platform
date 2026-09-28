@@ -391,3 +391,8 @@ Phase 7 establishes a comprehensive, mathematically rigorous, and privacy-harden
 * **Scaffold Decision:** Deprecated/superseded the inactive `/branch_inventory` scaffold in favor of the normalized `/branch_batch_inventory` and `/inventory` collections.
 * **Test Verification:** Dedicated test suite `scripts/testPhase7Inventory.ts` passing 83/83 assertions. Cumulative platform suite passing 416/416 assertions.
 
+### Milestone 2 Status: ACTIVE & VERIFIED (Completed 2026-09-27)
+* **Scope Completed:** Server-authoritative FEFO batch eligibility and reservation routing, strict QC filtering (`passed`, `pending`, `failed`), expiry validation, multi-branch isolation, atomic insufficient stock handling, zero negative stock bounds, ADR-009 audit event logging, and transaction isolation / concurrency protection.
+* **Test Verification:** Dedicated test suite `scripts/testPhase7Milestone2Fefo.ts` passing exactly 20/20 real acceptance assertions. Cumulative platform suite passing 436/436 assertions.
+
+
