@@ -295,45 +295,42 @@ async function runPerformanceTests() {
   assert(resMetrics.p95 < 300, '2.3 Inventory reservation p95 latency threshold (<300ms) met');
   assert(resMetrics.p99 < 500, '2.4 Inventory reservation p99 latency threshold (<500ms) met');
 
-  console.log('\n--- Test Group 3: Concurrent Refund Contention & Transaction Safety ---');
-  // Directly seed 3 test orders in ordersStore for concurrent refund testing
-  const testOrderIds = ['REFORD-1', 'REFORD-2', 'REFORD-3'];
-  for (const oid of testOrderIds) {
-    ordersStore.set(oid, {
-      id: oid,
-      userId: 'customer-uid',
-      branchId: 'daet',
-      grandTotal: 700,
-      remainingRefundableBalance: 700,
-      refundedAmount: 0,
-      reservedRefundAmount: 0,
-      paymentStatus: 'paid',
-      status: 'completed',
-      fulfillmentStatus: 'completed',
-    });
-  }
-  assert(testOrderIds.length === 3, '3 test orders successfully seeded for concurrent refund test');
+  console.log('\n--- Test Group 3: Concurrent Refund Contention, OCC Conflicts & Transaction Safety ---');
+  // Seed a single target order in ordersStore for concurrent refund contention & OCC retry testing
+  const targetOid = 'REFORD-1';
+  ordersStore.set(targetOid, {
+    id: targetOid,
+    userId: 'customer-uid',
+    branchId: 'daet',
+    grandTotal: 700,
+    remainingRefundableBalance: 700,
+    refundedAmount: 0,
+    reservedRefundAmount: 0,
+    paymentStatus: 'paid',
+    status: 'completed',
+    fulfillmentStatus: 'completed',
+  });
 
   const refStartTime = Date.now();
   const refPromises = [];
   const refLatencies: number[] = [];
   let refSuccessCount = 0;
 
-  for (let i = 0; i < 3; i++) {
-    const oid = testOrderIds[i];
+  // Send 3 concurrent refund attempts against the SAME order to force OCC conflicts and automatic retries
+  for (let i = 1; i <= 3; i++) {
     const reqStart = Date.now();
     refPromises.push(
-      fetch(`${baseUrl}/api/orders/${oid}/refund`, {
+      fetch(`${baseUrl}/api/orders/${targetOid}/refund`, {
         method: 'POST',
         headers: {
           Authorization: `Bearer ${adminToken}`,
           'Content-Type': 'application/json',
-          'X-Idempotency-Key': `REFUND-KEY-${i+1}`,
+          'X-Idempotency-Key': `REFUND-KEY-${i}`,
         },
         body: JSON.stringify({
           amount: 100,
-          reason: 'Performance verification refund',
-          refundKey: `ref-key-${i+1}`,
+          reason: 'Performance verification refund under OCC contention',
+          refundKey: `ref-key-${i}`,
         }),
       }).then(async (res) => {
         const dur = Date.now() - reqStart;
@@ -355,11 +352,18 @@ async function runPerformanceTests() {
   const refMetrics = calculatePercentiles(refLatencies);
   const refThroughput = Number((3 / (refDurationTotal / 1000)).toFixed(2));
 
+  // Verify final order state balance integrity
+  const finalOrderState = ordersStore.get(targetOid);
   console.log(`  [Metrics] Throughput: ${refThroughput} req/sec | Success: ${refSuccessCount}/3 | p50: ${refMetrics.p50}ms | p95: ${refMetrics.p95}ms | p99: ${refMetrics.p99}ms`);
-  assert(refSuccessCount === 3, '3.1 Concurrent refund requests process safely under transactional OCC rules');
-  assert(refMetrics.p50 < 150, '3.2 Concurrent refund p50 latency threshold (<150ms) met');
-  assert(refMetrics.p95 < 350, '3.3 Concurrent refund p95 latency threshold (<350ms) met');
-  assert(refMetrics.p99 < 500, '3.4 Concurrent refund p99 latency threshold (<500ms) met');
+  console.log(`  [Order Balance] refundedAmount: ${finalOrderState?.refundedAmount} | remainingRefundableBalance: ${finalOrderState?.remainingRefundableBalance} | reservedRefundAmount: ${finalOrderState?.reservedRefundAmount}`);
+
+  assert(refSuccessCount === 3, '3.1 Concurrent refund requests against same order succeed under OCC conflict retry');
+  assert(finalOrderState?.refundedAmount === 300, '3.2 Final refundedAmount is exactly 300 (no double-refund)');
+  assert(finalOrderState?.remainingRefundableBalance === 400, '3.3 Final remainingRefundableBalance is exactly 400');
+  assert((finalOrderState?.reservedRefundAmount || 0) === 0, '3.4 No leaked reservedRefundAmount (fully cleared)');
+  assert(refMetrics.p50 < 150, `3.5 Concurrent refund p50 latency threshold (<150ms) met (actual: ${refMetrics.p50}ms)`);
+  assert(refMetrics.p95 < 350, `3.6 Concurrent refund p95 latency threshold (<350ms) met (actual: ${refMetrics.p95}ms)`);
+  assert(refMetrics.p99 < 500, `3.7 Concurrent refund p99 latency threshold (<500ms) met (actual: ${refMetrics.p99}ms)`);
 
   console.log('\n--- Test Group 4: Idempotent Checkout Contention & Rate Limiting ---');
   const rateLimitTests = [];

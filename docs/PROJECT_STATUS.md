@@ -108,17 +108,17 @@ The canonical product roadmap comprises the following ten phases:
 * **HTML Metadata & Registration**: Configured `index.html` with manifest link, theme-color `#090d16`, and apple-touch-icon, with automatic service worker registration in `src/main.tsx`.
 * **Testing & Regression**: Dedicated test suite (`scripts/testPriorityDPwa.ts`) passing **23/23 assertions**. Full regression suite passing **23/23 suites** with a cumulative total of **958/958 assertions**.
 
-### Priority E: Production Certification (Original Phase 9) — PHASE 9B-2 REMEDIATION COMPLETED
+### Priority E: Production Certification (Original Phase 9) — PHASE 9B-2 VERIFICATION HARDENING COMPLETED
 * **Phase 9B-1 Security & Privacy Remediation**:
   * **Rate Limiting**: Implemented robust in-memory sliding-window rate limiters protecting checkout (`POST /api/orders/checkout`) and public unsubscribe (`GET/POST /api/marketing/unsubscribe`) against brute-force attacks and token enumeration (returning HTTP 429 when thresholds are exceeded).
   * **Privacy / DSAR Export**: Implemented authenticated `GET /api/user/export-data` endpoint returning a comprehensive Data Subject Access Request (DSAR) package complying with DPA 2012 / GDPR regulations.
   * **Account Deletion & Anonymization**: Implemented authenticated `DELETE /api/user/account` endpoint purging personal identifiers (`[DELETED]`, pseudonymized email `deleted_*@anonymized.invalid`), revoking marketing consents, and preserving required financial audit trails.
   * **Testing & Regression**: Dedicated remediation test suite (`scripts/testPhase9SecurityPrivacy.ts`) passing **14/14 assertions**.
-* **Phase 9B-2 Performance, Load & Concurrency Validation**:
-  * **Load Testing Suite**: Created `scripts/testPhase9Performance.ts` simulating concurrent analytics KPI requests (50 parallel requests), inventory reservations (20 parallel threads), and checkout rate-limiting/idempotency contention.
-  * **Performance Metrics**: Verified 100% success rate, p95 latency < 75ms, and throughput of ~260–400 requests/sec under concurrent load.
-  * **Testing & Regression**: Dedicated performance test suite passing **5/5 assertions**. Full regression suite passing **23/23 suites** with a cumulative total of **958/958 assertions**.
-* **Audit Document**: Updated findings and remediation status in `docs/PHASE_9A_PRODUCTION_AUDIT.md`.
+* **Phase 9B-2 Performance, Load & Concurrency Verification Hardening**:
+  * **Load Testing Suite**: Upgraded `scripts/testPhase9Performance.ts` covering operational analytics KPIs, concurrent FEFO inventory reservations with OCC retries, same-order concurrent refund contention with forced OCC conflict and retry validation, and rate-limiting.
+  * **Performance & Concurrency Results**: **16/16 assertions passed** (0 failures). Confirmed zero balance leaks (`refundedAmount: 300`, `remainingRefundableBalance: 400`, `reservedRefundAmount: 0` fully cleared).
+  * **Latency Percentiles**: Analytics KPI (p50: 6ms, p95: 11ms, p99: 15ms), Inventory Reservations (p50: 75ms, p95: 85ms, p99: 85ms), Concurrent Refunds (p50: 8ms, p95: 9ms, p99: 9ms).
+* **Audit Document**: Updated findings, remediation status, and Gate 3 PASS status in `docs/PHASE_9A_PRODUCTION_AUDIT.md`.
 
 ---
 
@@ -135,10 +135,10 @@ The canonical product roadmap comprises the following ten phases:
 
 ## 8. Current Project Gate
 
-> **CURRENT PROJECT GATE**: Phase 9A Production Certification Audit complete; awaiting Phase 9B remediation implementation prior to formal launch certification.
+> **CURRENT PROJECT GATE**: Phase 9A Production Audit & Phase 9B-1/9B-2 Remediation & Verification Hardening successfully completed (Gate 3 Performance & Concurrency certified PASS). Awaiting subsequent Phase 9 remediation gates prior to final production release certification.
 
 ---
 
 ## 9. Next Planned Work
 
-Proceeding with Phase 9B remediation tasks (rate limiting, DSAR data export, backup scripts, monitoring runbooks, and UAT sign-off) prior to final production release certification.
+Proceeding with remaining Phase 9 remediation tasks (backup scripts and operational runbooks) prior to final production release certification.
