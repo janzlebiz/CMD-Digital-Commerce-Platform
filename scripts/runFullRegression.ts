@@ -25,6 +25,7 @@ const testFiles = [
   'scripts/testPriorityCAutomation.ts',
   'scripts/testPriorityC2Lifecycle.ts',
   'scripts/testPriorityC3MarketingConsent.ts',
+  'scripts/testPriorityC4Analytics.ts',
 ];
 
 console.log('========================================================================');

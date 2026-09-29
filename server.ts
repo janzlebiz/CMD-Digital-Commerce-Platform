@@ -3089,6 +3089,451 @@ export async function dispatchMarketingCampaign(
   };
 }
 
+// ============================================================================
+// PRIORITY C — MILESTONE C4: OPERATIONAL ANALYTICS & EXPORT ENGINE HELPERS
+// ============================================================================
+
+export interface OperationalKpis {
+  dateRange: {
+    startDate?: string;
+    endDate?: string;
+  };
+  branchId: string;
+  generatedAt: string;
+  ecommerce: {
+    gmv: number;
+    aov: number;
+    totalOrders: number;
+    completedOrders: number;
+    cancelledOrders: number;
+    refundedOrders: number;
+    refundedAmount: number;
+    refundRate: number;
+  };
+  consultations: {
+    totalBookings: number;
+    completed: number;
+    cancelled: number;
+    attendanceRate: number;
+    utilizationRate: number;
+  };
+  workshops: {
+    totalWorkshops: number;
+    totalRegistrations: number;
+    totalCapacity: number;
+    capacityUtilization: number;
+    waitlistCount: number;
+    waitlistPressure: number;
+  };
+  support: {
+    totalTickets: number;
+    resolvedTickets: number;
+    openTickets: number;
+    slaBreachedTickets: number;
+    slaComplianceRate: number;
+    avgResolutionHours: number;
+  };
+  inventory: {
+    totalSkus: number;
+    stockoutRiskSkusCount: number;
+    healthySkusCount: number;
+    transferInTransitVolume: number;
+    quarantineHoldUnits: number;
+  };
+}
+
+export async function calculateOperationalKpis(
+  db: any,
+  user: any,
+  params: {
+    startDate?: string;
+    endDate?: string;
+    branchId?: string;
+  } = {}
+): Promise<OperationalKpis> {
+  const userRole = String(user?.role || '').toLowerCase();
+  const assignedBranch = (
+    user?.assignedBranchId ||
+    (userRole.startsWith('branch_manager_') ? userRole.split('_')[2] : '') ||
+    'daet'
+  ).toLowerCase().trim();
+  let targetBranch = (params.branchId || 'all').toLowerCase().trim();
+
+  // Branch Manager RBAC & Branch Isolation Enforcement
+  if (userRole === 'branch_manager' || userRole.startsWith('branch_manager')) {
+    if (params.branchId && params.branchId !== 'all' && params.branchId.toLowerCase().trim() !== assignedBranch) {
+      throw new Error('PERMISSION_DENIED: Branch managers cannot access analytics for other branches.');
+    }
+    targetBranch = assignedBranch;
+  }
+
+  // Parse Date Range Boundaries
+  let startMs: number | undefined;
+  let endMs: number | undefined;
+
+  if (params.startDate) {
+    const s = String(params.startDate).trim();
+    if (/^\d{4}-\d{2}-\d{2}$/.test(s)) {
+      startMs = new Date(`${s}T00:00:00.000Z`).getTime();
+    } else {
+      const p = Date.parse(s);
+      if (!isNaN(p)) startMs = p;
+    }
+  }
+
+  if (params.endDate) {
+    const e = String(params.endDate).trim();
+    if (/^\d{4}-\d{2}-\d{2}$/.test(e)) {
+      endMs = new Date(`${e}T23:59:59.999Z`).getTime();
+    } else {
+      const p = Date.parse(e);
+      if (!isNaN(p)) endMs = p;
+    }
+  }
+
+  function matchesDate(dateStr?: string): boolean {
+    if (!dateStr) return true;
+    const ms = Date.parse(dateStr);
+    if (isNaN(ms)) return true;
+    if (startMs !== undefined && ms < startMs) return false;
+    if (endMs !== undefined && ms > endMs) return false;
+    return true;
+  }
+
+  function matchesBranch(branchVal?: string): boolean {
+    if (targetBranch === 'all') return true;
+    if (!branchVal) return false;
+    return String(branchVal).toLowerCase().trim() === targetBranch;
+  }
+
+  // Parallel Query Execution
+  const [
+    ordersSnap,
+    appointmentsSnap,
+    workshopsSnap,
+    registrationsSnap,
+    ticketsSnap,
+    inventorySnap,
+    transfersSnap,
+    batchesSnap,
+  ] = await Promise.all([
+    db.collection('orders').get().catch(() => ({ docs: [], empty: true })),
+    db.collection('consultation_appointments').get().catch(() => ({ docs: [], empty: true })),
+    db.collection('workshops').get().catch(() => ({ docs: [], empty: true })),
+    db.collection('workshop_registrations').get().catch(() => ({ docs: [], empty: true })),
+    db.collection('support_tickets').get().catch(() => ({ docs: [], empty: true })),
+    db.collection('inventory').get().catch(() => ({ docs: [], empty: true })),
+    db.collection('inventory_transfers').get().catch(() => ({ docs: [], empty: true })),
+    db.collection('product_batches').get().catch(() => ({ docs: [], empty: true })),
+  ]);
+
+  const extractDocs = (snap: any): any[] => {
+    if (!snap || snap.empty) return [];
+    return (snap.docs || []).map((d: any) => (typeof d.data === 'function' ? d.data() : d.data));
+  };
+
+  const allOrders = extractDocs(ordersSnap);
+  const allAppointments = extractDocs(appointmentsSnap);
+  const allWorkshops = extractDocs(workshopsSnap);
+  const allRegistrations = extractDocs(registrationsSnap);
+  const allTickets = extractDocs(ticketsSnap);
+  const allInventory = extractDocs(inventorySnap);
+  const allTransfers = extractDocs(transfersSnap);
+  const allBatches = extractDocs(batchesSnap);
+
+  // 1. E-Commerce KPI Calculations
+  const filteredOrders = allOrders.filter((ord: any) => {
+    if (!matchesBranch(ord.branchId)) return false;
+    return matchesDate(ord.placedAt || ord.createdAt);
+  });
+
+  let gmv = 0;
+  let completedOrders = 0;
+  let cancelledOrders = 0;
+  let refundedOrders = 0;
+  let refundedAmount = 0;
+
+  for (const ord of filteredOrders) {
+    const total = Number(ord.grandTotal || 0);
+    const status = String(ord.fulfillmentStatus || '').toLowerCase();
+    const payStatus = String(ord.paymentStatus || '').toLowerCase();
+
+    if (status === 'completed' || status === 'delivered') {
+      completedOrders++;
+      gmv += total;
+    } else if (status === 'cancelled') {
+      cancelledOrders++;
+    } else {
+      // Placed, processing, in_transit
+      gmv += total;
+    }
+
+    if (payStatus === 'refunded' || (ord.refundedAmount && Number(ord.refundedAmount) > 0)) {
+      refundedOrders++;
+      refundedAmount += Number(ord.refundedAmount || (payStatus === 'refunded' ? total : 0));
+    }
+  }
+
+  const totalOrders = filteredOrders.length;
+  const aov = completedOrders > 0 ? (gmv / completedOrders) : (totalOrders > 0 ? (gmv / totalOrders) : 0);
+  const refundRate = totalOrders > 0 ? (refundedOrders / totalOrders) : 0;
+
+  // 2. Consultations KPI Calculations
+  const filteredAppointments = allAppointments.filter((app: any) => {
+    if (!matchesBranch(app.branchId)) return false;
+    return matchesDate(app.scheduledDate || app.createdAt);
+  });
+
+  let appointmentsCompleted = 0;
+  let appointmentsCancelled = 0;
+
+  for (const app of filteredAppointments) {
+    const status = String(app.status || '').toLowerCase();
+    if (status === 'completed') {
+      appointmentsCompleted++;
+    } else if (status === 'cancelled') {
+      appointmentsCancelled++;
+    }
+  }
+
+  const totalBookings = filteredAppointments.length;
+  const nonCancelledBookings = Math.max(0, totalBookings - appointmentsCancelled);
+  const attendanceRate = nonCancelledBookings > 0 ? (appointmentsCompleted / nonCancelledBookings) : 0;
+  const utilizationRate = totalBookings > 0 ? (appointmentsCompleted / totalBookings) : 0;
+
+  // 3. Workshops KPI Calculations
+  const filteredWorkshops = allWorkshops.filter((w: any) => {
+    if (!matchesBranch(w.branchId)) return false;
+    return matchesDate(w.date || w.createdAt);
+  });
+
+  const validWorkshopIds = new Set(filteredWorkshops.map((w: any) => String(w.id || w.workshopId)));
+
+  let totalCapacity = 0;
+  for (const w of filteredWorkshops) {
+    totalCapacity += Number(w.capacity || 0);
+  }
+
+  const filteredRegistrations = allRegistrations.filter((reg: any) => {
+    const regWId = String(reg.workshopId || '');
+    if (!validWorkshopIds.has(regWId)) return false;
+    return matchesDate(reg.createdAt || reg.registeredAt);
+  });
+
+  let totalRegistrations = 0;
+  let waitlistCount = 0;
+
+  for (const reg of filteredRegistrations) {
+    const status = String(reg.status || '').toLowerCase();
+    if (status !== 'cancelled') {
+      totalRegistrations++;
+    }
+    if (status === 'waitlisted') {
+      waitlistCount++;
+    }
+  }
+
+  const capacityUtilization = totalCapacity > 0 ? Math.min(1.0, totalRegistrations / totalCapacity) : 0;
+  const waitlistPressure = totalCapacity > 0 ? (waitlistCount / totalCapacity) : 0;
+
+  // 4. Support & Redress (RA 11967) KPI Calculations
+  const filteredTickets = allTickets.filter((t: any) => {
+    if (!matchesBranch(t.branchId)) return false;
+    return matchesDate(t.createdAt);
+  });
+
+  let resolvedTickets = 0;
+  let openTickets = 0;
+  let slaBreachedTickets = 0;
+  let totalResolutionHours = 0;
+  let countWithResolutionTime = 0;
+
+  for (const t of filteredTickets) {
+    const status = String(t.status || '').toLowerCase();
+    const isResolved = status === 'resolved' || status === 'closed';
+    let isBreached = false;
+
+    if (t.slaBreached === true) {
+      isBreached = true;
+    }
+
+    if (isResolved) {
+      resolvedTickets++;
+      if (t.createdAt && t.resolvedAt) {
+        const createMs = Date.parse(t.createdAt);
+        const resolveMs = Date.parse(t.resolvedAt);
+        if (!isNaN(createMs) && !isNaN(resolveMs) && resolveMs >= createMs) {
+          const hours = (resolveMs - createMs) / (1000 * 60 * 60);
+          totalResolutionHours += hours;
+          countWithResolutionTime++;
+          if (hours > 48) {
+            isBreached = true;
+          }
+        }
+      }
+    } else {
+      openTickets++;
+      if (t.createdAt) {
+        const createMs = Date.parse(t.createdAt);
+        if (!isNaN(createMs) && (Date.now() - createMs) > (48 * 60 * 60 * 1000)) {
+          isBreached = true;
+        }
+      }
+    }
+
+    if (isBreached) {
+      slaBreachedTickets++;
+    }
+  }
+
+  const totalTickets = filteredTickets.length;
+  const slaComplianceRate = totalTickets > 0 ? Math.max(0, (totalTickets - slaBreachedTickets) / totalTickets) : 1.0;
+  const avgResolutionHours = countWithResolutionTime > 0 ? Number((totalResolutionHours / countWithResolutionTime).toFixed(1)) : 0;
+
+  // 5. Inventory Operations KPI Calculations
+  const filteredInventory = allInventory.filter((inv: any) => {
+    return matchesBranch(inv.branchId);
+  });
+
+  let stockoutRiskSkusCount = 0;
+  const totalSkus = filteredInventory.length;
+
+  for (const inv of filteredInventory) {
+    const stock = Number(inv.stockCount || inv.quantity || 0);
+    const rop = Number(inv.rop || inv.reorderPoint || 20);
+    if (stock <= rop) {
+      stockoutRiskSkusCount++;
+    }
+  }
+
+  const healthySkusCount = Math.max(0, totalSkus - stockoutRiskSkusCount);
+
+  // Transfers in transit
+  let transferInTransitVolume = 0;
+  for (const trf of allTransfers) {
+    const status = String(trf.status || '').toLowerCase();
+    if (status === 'in_transit') {
+      const srcBranch = String(trf.sourceBranchId || '').toLowerCase();
+      const dstBranch = String(trf.destinationBranchId || '').toLowerCase();
+      if (targetBranch === 'all' || srcBranch === targetBranch || dstBranch === targetBranch) {
+        transferInTransitVolume += Number(trf.quantity || trf.totalQuantity || 0);
+      }
+    }
+  }
+
+  // Quarantined / Expired Holds
+  let quarantineHoldUnits = 0;
+  for (const batch of allBatches) {
+    const status = String(batch.status || '').toLowerCase();
+    const qualityStatus = String(batch.qualityStatus || '').toLowerCase();
+    const isQuarantined = status === 'quarantine' || status === 'expired' || qualityStatus === 'quarantine';
+
+    if (isQuarantined) {
+      const batchBranch = String(batch.branchId || '').toLowerCase();
+      if (targetBranch === 'all' || batchBranch === targetBranch) {
+        quarantineHoldUnits += Number(batch.quantity || batch.stockCount || 0);
+      }
+    }
+  }
+
+  return {
+    dateRange: {
+      startDate: params.startDate,
+      endDate: params.endDate,
+    },
+    branchId: targetBranch,
+    generatedAt: new Date().toISOString(),
+    ecommerce: {
+      gmv: Number(gmv.toFixed(2)),
+      aov: Number(aov.toFixed(2)),
+      totalOrders,
+      completedOrders,
+      cancelledOrders,
+      refundedOrders,
+      refundedAmount: Number(refundedAmount.toFixed(2)),
+      refundRate: Number(refundRate.toFixed(4)),
+    },
+    consultations: {
+      totalBookings,
+      completed: appointmentsCompleted,
+      cancelled: appointmentsCancelled,
+      attendanceRate: Number(attendanceRate.toFixed(4)),
+      utilizationRate: Number(utilizationRate.toFixed(4)),
+    },
+    workshops: {
+      totalWorkshops: filteredWorkshops.length,
+      totalRegistrations,
+      totalCapacity,
+      capacityUtilization: Number(capacityUtilization.toFixed(4)),
+      waitlistCount,
+      waitlistPressure: Number(waitlistPressure.toFixed(4)),
+    },
+    support: {
+      totalTickets,
+      resolvedTickets,
+      openTickets,
+      slaBreachedTickets,
+      slaComplianceRate: Number(slaComplianceRate.toFixed(4)),
+      avgResolutionHours,
+    },
+    inventory: {
+      totalSkus,
+      stockoutRiskSkusCount,
+      healthySkusCount,
+      transferInTransitVolume,
+      quarantineHoldUnits,
+    },
+  };
+}
+
+export function generateOperationalKpisCsv(kpis: OperationalKpis): string {
+  const rows: Array<[string, string, string | number, string]> = [
+    ['Metric Group', 'Metric Name', 'Value', 'Unit / Details'],
+    // Metadata
+    ['Scope', 'Branch Scope', kpis.branchId.toUpperCase(), 'Target branch or ALL'],
+    ['Scope', 'Date Range Start', kpis.dateRange.startDate || 'All-Time', 'Filter boundary'],
+    ['Scope', 'Date Range End', kpis.dateRange.endDate || 'Present', 'Filter boundary'],
+    ['Scope', 'Report Generated At', kpis.generatedAt, 'ISO Timestamp'],
+    // E-Commerce
+    ['E-Commerce', 'Gross Merchandise Value (GMV)', kpis.ecommerce.gmv.toFixed(2), 'PHP (Philippine Peso)'],
+    ['E-Commerce', 'Average Order Value (AOV)', kpis.ecommerce.aov.toFixed(2), 'PHP per completed order'],
+    ['E-Commerce', 'Total Orders Placed', kpis.ecommerce.totalOrders, 'Orders'],
+    ['E-Commerce', 'Completed Orders', kpis.ecommerce.completedOrders, 'Delivered / completed orders'],
+    ['E-Commerce', 'Cancelled Orders', kpis.ecommerce.cancelledOrders, 'Cancelled orders'],
+    ['E-Commerce', 'Refunded Orders', kpis.ecommerce.refundedOrders, 'Refunded orders'],
+    ['E-Commerce', 'Total Refunded Amount', kpis.ecommerce.refundedAmount.toFixed(2), 'PHP'],
+    ['E-Commerce', 'Refund Rate', `${(kpis.ecommerce.refundRate * 100).toFixed(2)}%`, 'Percentage of total orders'],
+    // Consultations
+    ['Consultations', 'Total Bookings', kpis.consultations.totalBookings, 'Appointments'],
+    ['Consultations', 'Completed Sessions', kpis.consultations.completed, 'Sessions completed'],
+    ['Consultations', 'Cancelled Sessions', kpis.consultations.cancelled, 'Appointments cancelled'],
+    ['Consultations', 'Attendance Rate', `${(kpis.consultations.attendanceRate * 100).toFixed(1)}%`, 'Completed / non-cancelled bookings'],
+    ['Consultations', 'Utilization Rate', `${(kpis.consultations.utilizationRate * 100).toFixed(1)}%`, 'Completed / total bookings'],
+    // Workshops
+    ['Workshops', 'Total Workshops', kpis.workshops.totalWorkshops, 'Events'],
+    ['Workshops', 'Total Seat Capacity', kpis.workshops.totalCapacity, 'Seats'],
+    ['Workshops', 'Total Registrations', kpis.workshops.totalRegistrations, 'Attendees registered'],
+    ['Workshops', 'Capacity Utilization', `${(kpis.workshops.capacityUtilization * 100).toFixed(1)}%`, 'Registrations / capacity'],
+    ['Workshops', 'Waitlist Count', kpis.workshops.waitlistCount, 'Users waitlisted'],
+    ['Workshops', 'Waitlist Pressure', `${(kpis.workshops.waitlistPressure * 100).toFixed(1)}%`, 'Waitlist / capacity'],
+    // Support
+    ['Support', 'Total Support Tickets', kpis.support.totalTickets, 'Consumer disputes & inquiries (RA 11967)'],
+    ['Support', 'Resolved Tickets', kpis.support.resolvedTickets, 'Tickets resolved / closed'],
+    ['Support', 'Open Tickets', kpis.support.openTickets, 'Active pending tickets'],
+    ['Support', 'SLA Breached Tickets', kpis.support.slaBreachedTickets, 'Tickets exceeding 48h resolution SLA'],
+    ['Support', 'SLA Compliance Rate', `${(kpis.support.slaComplianceRate * 100).toFixed(1)}%`, 'Percentage meeting 48h SLA'],
+    ['Support', 'Average Resolution Time', `${kpis.support.avgResolutionHours} hrs`, 'Mean hours to resolution'],
+    // Inventory
+    ['Inventory', 'Total Tracked SKUs', kpis.inventory.totalSkus, 'Product SKUs'],
+    ['Inventory', 'Healthy Stock SKUs', kpis.inventory.healthySkusCount, 'Above Reorder Point (ROP)'],
+    ['Inventory', 'Stockout Risk SKUs', kpis.inventory.stockoutRiskSkusCount, 'At or below Reorder Point (ROP)'],
+    ['Inventory', 'Transfer In-Transit Volume', kpis.inventory.transferInTransitVolume, 'Units in transit'],
+    ['Inventory', 'Quarantine Hold Units', kpis.inventory.quarantineHoldUnits, 'Units on quality / expiry hold'],
+  ];
+
+  return rows.map((r) => r.map((cell) => `"${String(cell).replace(/"/g, '""')}"`).join(',')).join('\r\n');
+}
+
 export interface ServerDependencies {
   db?: any;
   auth?: any;
@@ -8050,6 +8495,121 @@ export function createExpressApp(deps: ServerDependencies = {}): Express {
         res.status(403).json({ error: err.message });
       } else if (err.message.includes('not found')) {
         res.status(404).json({ error: err.message });
+      } else {
+        res.status(500).json({ error: err.message });
+      }
+    }
+  });
+
+  // ============================================================================
+  // PRIORITY C — MILESTONE C4: OPERATIONAL ANALYTICS & EXPORT ENGINE ENDPOINTS
+  // ============================================================================
+
+  // 1. GET /api/analytics/operational-kpis - Unified Operational Analytics KPIs
+  app.get('/api/analytics/operational-kpis', async (req: Request, res: Response): Promise<void> => {
+    const user = await requireAuth(req, res);
+    if (!user) return;
+
+    const isStaff = user.role === 'branch_manager' || user.role.startsWith('branch_manager') || user.role === 'regional_director' || user.role === 'super_admin';
+    if (!isStaff) {
+      res.status(403).json({ error: 'Access Denied: Only staff can access operational analytics.' });
+      return;
+    }
+
+    const { startDate, endDate, branchId } = req.query;
+
+    try {
+      const kpis = await calculateOperationalKpis(db, user, {
+        startDate: startDate ? String(startDate) : undefined,
+        endDate: endDate ? String(endDate) : undefined,
+        branchId: branchId ? String(branchId) : undefined,
+      });
+
+      await logAuditEvent(
+        user.uid,
+        user.role,
+        kpis.branchId === 'all' ? null : kpis.branchId,
+        'operational_kpis_viewed',
+        'analytics',
+        null,
+        true,
+        {
+          startDate: kpis.dateRange.startDate,
+          endDate: kpis.dateRange.endDate,
+          branchId: kpis.branchId,
+        },
+        req
+      );
+
+      res.status(200).json({ success: true, kpis });
+    } catch (err: any) {
+      if (err.message.includes('PERMISSION_DENIED')) {
+        res.status(403).json({ error: err.message });
+      } else {
+        res.status(500).json({ error: err.message });
+      }
+    }
+  });
+
+  // 2. GET /api/analytics/export - Export Operational KPIs (CSV & JSON)
+  app.get('/api/analytics/export', async (req: Request, res: Response): Promise<void> => {
+    const user = await requireAuth(req, res);
+    if (!user) return;
+
+    const isStaff = user.role === 'branch_manager' || user.role.startsWith('branch_manager') || user.role === 'regional_director' || user.role === 'super_admin';
+    if (!isStaff) {
+      res.status(403).json({ error: 'Access Denied: Only staff can export operational analytics.' });
+      return;
+    }
+
+    const { format = 'json', startDate, endDate, branchId } = req.query;
+    const exportFormat = String(format).toLowerCase().trim();
+
+    try {
+      const kpis = await calculateOperationalKpis(db, user, {
+        startDate: startDate ? String(startDate) : undefined,
+        endDate: endDate ? String(endDate) : undefined,
+        branchId: branchId ? String(branchId) : undefined,
+      });
+
+      await logAuditEvent(
+        user.uid,
+        user.role,
+        kpis.branchId === 'all' ? null : kpis.branchId,
+        'operational_kpis_exported',
+        'analytics',
+        null,
+        true,
+        {
+          format: exportFormat,
+          startDate: kpis.dateRange.startDate,
+          endDate: kpis.dateRange.endDate,
+          branchId: kpis.branchId,
+        },
+        req
+      );
+
+      if (exportFormat === 'csv') {
+        const csvContent = generateOperationalKpisCsv(kpis);
+        const filename = `operational-kpis-${kpis.branchId}-${kpis.dateRange.startDate || 'all'}-${kpis.dateRange.endDate || 'all'}.csv`;
+        res.setHeader('Content-Type', 'text/csv; charset=utf-8');
+        res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
+        res.status(200).send(csvContent);
+      } else {
+        res.status(200).json({
+          success: true,
+          metadata: {
+            scope: kpis.branchId,
+            dateRange: kpis.dateRange,
+            generatedAt: kpis.generatedAt,
+            exportedBy: user.email || user.uid,
+          },
+          kpis,
+        });
+      }
+    } catch (err: any) {
+      if (err.message.includes('PERMISSION_DENIED')) {
+        res.status(403).json({ error: err.message });
       } else {
         res.status(500).json({ error: err.message });
       }

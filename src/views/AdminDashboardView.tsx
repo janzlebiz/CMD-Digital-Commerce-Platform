@@ -6,12 +6,22 @@
 import React, { useState, useEffect } from 'react';
 import { PageView, ExpenseCategory, ExpenseStatus, ExpenseRecord, FinanceMetricsSummary, CommodityProfitabilityRecord } from '../types';
 import { useAuth } from '../context/AuthContext';
-import { ShieldCheck, Package, RefreshCw, AlertCircle, FileText, UserCheck, DollarSign, TrendingUp, PlusCircle, CheckCircle, Wheat, Calendar, Layers, Clock } from 'lucide-react';
+import { ShieldCheck, Package, RefreshCw, AlertCircle, FileText, UserCheck, DollarSign, TrendingUp, PlusCircle, CheckCircle, Wheat, Calendar, Layers, Clock, BarChart3, Download, ShoppingCart, Stethoscope, GraduationCap, Headphones, Boxes, Users, CheckCircle2, AlertTriangle, TrendingDown } from 'lucide-react';
 import { openOfflineDatabase, cacheFinanceMetrics, getCachedFinanceMetrics, saveOfflineExpense } from '../utils/indexedDb';
 
 export const AdminDashboardView: React.FC<{ onNavigate: (view: PageView) => void }> = ({ onNavigate }) => {
   const { user, profile } = useAuth();
-  const [activeTab, setActiveTab] = useState<'orders' | 'inventory' | 'audit' | 'crm' | 'financials'>('orders');
+  const [activeTab, setActiveTab] = useState<'kpis' | 'orders' | 'inventory' | 'audit' | 'crm' | 'financials'>('kpis');
+
+  // Milestone C4 Operational KPIs State
+  const [operationalKpis, setOperationalKpis] = useState<any | null>(null);
+  const [kpiLoading, setKpiLoading] = useState<boolean>(false);
+  const [kpiError, setKpiError] = useState<string | null>(null);
+  const [kpiBranchFilter, setKpiBranchFilter] = useState<string>('all');
+  const [kpiDatePreset, setKpiDatePreset] = useState<'all' | 'today' | '7d' | '30d' | 'mtd' | 'custom'>('all');
+  const [kpiCustomStart, setKpiCustomStart] = useState<string>('');
+  const [kpiCustomEnd, setKpiCustomEnd] = useState<string>('');
+  const [exportingFormat, setExportingFormat] = useState<'csv' | 'json' | null>(null);
 
   const [orders, setOrders] = useState<any[]>([]);
   const [auditLogs, setAuditLogs] = useState<any[]>([]);
@@ -86,6 +96,133 @@ export const AdminDashboardView: React.FC<{ onNavigate: (view: PageView) => void
       endDate = customEndDate;
     }
     return { startDate, endDate };
+  };
+
+  const fetchOperationalKpis = async () => {
+    if (!user) return;
+    setKpiLoading(true);
+    setKpiError(null);
+    try {
+      const token = await user.getIdToken();
+      let startDate = '';
+      let endDate = '';
+      const now = new Date();
+
+      if (kpiDatePreset === 'today') {
+        const todayStr = formatLocalIsoDate(now);
+        startDate = todayStr;
+        endDate = todayStr;
+      } else if (kpiDatePreset === '7d') {
+        const past = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000);
+        startDate = formatLocalIsoDate(past);
+        endDate = formatLocalIsoDate(now);
+      } else if (kpiDatePreset === '30d') {
+        const past = new Date(now.getTime() - 30 * 24 * 60 * 60 * 1000);
+        startDate = formatLocalIsoDate(past);
+        endDate = formatLocalIsoDate(now);
+      } else if (kpiDatePreset === 'mtd') {
+        startDate = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-01`;
+        endDate = formatLocalIsoDate(now);
+      } else if (kpiDatePreset === 'custom') {
+        startDate = kpiCustomStart;
+        endDate = kpiCustomEnd;
+      }
+
+      const branchParam = profile?.role === 'branch_manager' ? (profile.assignedBranchId || 'daet') : kpiBranchFilter;
+      const params = new URLSearchParams();
+      if (startDate) params.set('startDate', startDate);
+      if (endDate) params.set('endDate', endDate);
+      if (branchParam) params.set('branchId', branchParam);
+
+      const res = await fetch(`/api/analytics/operational-kpis?${params.toString()}`, {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+
+      if (!res.ok) {
+        const errData = await res.json().catch(() => ({}));
+        throw new Error(errData.error || `HTTP ${res.status}`);
+      }
+
+      const data = await res.json();
+      setOperationalKpis(data.kpis);
+    } catch (err: any) {
+      console.error('Failed to fetch operational KPIs:', err);
+      setKpiError(err.message || 'Failed to load operational KPIs');
+    } finally {
+      setKpiLoading(false);
+    }
+  };
+
+  const handleExport = async (format: 'csv' | 'json') => {
+    if (!user) return;
+    setExportingFormat(format);
+    try {
+      const token = await user.getIdToken();
+      let startDate = '';
+      let endDate = '';
+      const now = new Date();
+
+      if (kpiDatePreset === 'today') {
+        const todayStr = formatLocalIsoDate(now);
+        startDate = todayStr;
+        endDate = todayStr;
+      } else if (kpiDatePreset === '7d') {
+        const past = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000);
+        startDate = formatLocalIsoDate(past);
+        endDate = formatLocalIsoDate(now);
+      } else if (kpiDatePreset === '30d') {
+        const past = new Date(now.getTime() - 30 * 24 * 60 * 60 * 1000);
+        startDate = formatLocalIsoDate(past);
+        endDate = formatLocalIsoDate(now);
+      } else if (kpiDatePreset === 'mtd') {
+        startDate = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-01`;
+        endDate = formatLocalIsoDate(now);
+      } else if (kpiDatePreset === 'custom') {
+        startDate = kpiCustomStart;
+        endDate = kpiCustomEnd;
+      }
+
+      const branchParam = profile?.role === 'branch_manager' ? (profile.assignedBranchId || 'daet') : kpiBranchFilter;
+      const params = new URLSearchParams({ format });
+      if (startDate) params.set('startDate', startDate);
+      if (endDate) params.set('endDate', endDate);
+      if (branchParam) params.set('branchId', branchParam);
+
+      const res = await fetch(`/api/analytics/export?${params.toString()}`, {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+
+      if (!res.ok) {
+        throw new Error('Failed to export operational analytics');
+      }
+
+      if (format === 'csv') {
+        const blob = await res.blob();
+        const url = window.URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = `operational-kpis-${branchParam}-${startDate || 'all'}-${endDate || 'all'}.csv`;
+        document.body.appendChild(a);
+        a.click();
+        a.remove();
+        window.URL.revokeObjectURL(url);
+      } else {
+        const data = await res.json();
+        const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
+        const url = window.URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = `operational-kpis-${branchParam}-${startDate || 'all'}-${endDate || 'all'}.json`;
+        document.body.appendChild(a);
+        a.click();
+        a.remove();
+        window.URL.revokeObjectURL(url);
+      }
+    } catch (err: any) {
+      alert(`Export error: ${err.message}`);
+    } finally {
+      setExportingFormat(null);
+    }
   };
 
   const fetchAdminOrders = async () => {
@@ -317,6 +454,7 @@ export const AdminDashboardView: React.FC<{ onNavigate: (view: PageView) => void
       // Ensure IndexedDB v3 is initialized
       openOfflineDatabase().catch((e) => console.warn('IndexedDB initialization note:', e));
 
+      if (activeTab === 'kpis') fetchOperationalKpis();
       if (activeTab === 'orders') fetchAdminOrders();
       if (activeTab === 'audit') fetchAuditLogs();
       if (activeTab === 'crm') {
@@ -328,7 +466,7 @@ export const AdminDashboardView: React.FC<{ onNavigate: (view: PageView) => void
         fetchFinancialsData();
       }
     }
-  }, [activeTab, isStaff, dateRangePreset, customStartDate, customEndDate]);
+  }, [activeTab, isStaff, dateRangePreset, customStartDate, customEndDate, kpiDatePreset, kpiCustomStart, kpiCustomEnd, kpiBranchFilter]);
 
   if (!isStaff) {
     return (
@@ -358,7 +496,7 @@ export const AdminDashboardView: React.FC<{ onNavigate: (view: PageView) => void
             <span>Staff Operations Center</span>
           </div>
           <h1 className="text-2xl font-extrabold text-white">
-            Branch Operations & Financial Console
+            Branch Operations & Executive Console
           </h1>
           <p className="text-xs text-slate-400 mt-1">
             Signed in as <span className="text-white font-bold">{profile?.email}</span> (
@@ -369,6 +507,15 @@ export const AdminDashboardView: React.FC<{ onNavigate: (view: PageView) => void
 
         {/* Tab Navigation */}
         <div className="flex flex-wrap items-center gap-2 bg-slate-950 p-1.5 rounded-xl border border-slate-800">
+          <button
+            onClick={() => setActiveTab('kpis')}
+            className={`px-3.5 py-2 rounded-lg text-xs font-bold transition flex items-center gap-1.5 ${
+              activeTab === 'kpis' ? 'bg-amber-500 text-slate-950 shadow' : 'text-slate-400 hover:text-white'
+            }`}
+          >
+            <BarChart3 className="w-3.5 h-3.5" />
+            Executive KPIs
+          </button>
           <button
             onClick={() => setActiveTab('orders')}
             className={`px-3.5 py-2 rounded-lg text-xs font-bold transition ${
@@ -412,6 +559,373 @@ export const AdminDashboardView: React.FC<{ onNavigate: (view: PageView) => void
           </button>
         </div>
       </div>
+
+      {/* EXECUTIVE OPERATIONAL KPIS TAB */}
+      {activeTab === 'kpis' && (
+        <div className="space-y-6">
+          {/* Controls Bar */}
+          <div className="flex flex-col lg:flex-row justify-between items-start lg:items-center gap-4 bg-slate-900 border border-slate-800 rounded-2xl p-5">
+            <div className="flex flex-wrap items-center gap-3">
+              {/* Branch Filter */}
+              <div className="flex items-center gap-2">
+                <span className="text-xs font-semibold text-slate-400">Branch:</span>
+                {profile?.role === 'branch_manager' ? (
+                  <span className="px-3 py-1 bg-amber-500/10 border border-amber-500/30 text-amber-300 text-xs font-bold rounded-lg">
+                    {profile.assignedBranchId?.toUpperCase() || 'DAET'} (Assigned)
+                  </span>
+                ) : (
+                  <select
+                    value={kpiBranchFilter}
+                    onChange={(e) => setKpiBranchFilter(e.target.value)}
+                    className="bg-slate-950 border border-slate-800 text-white text-xs rounded-lg px-3 py-1.5 font-medium"
+                  >
+                    <option value="all">All Branches (Regional)</option>
+                    <option value="daet">Daet Hub</option>
+                    <option value="naga">Naga Branch</option>
+                    <option value="legazpi">Legazpi Branch</option>
+                  </select>
+                )}
+              </div>
+
+              {/* Date Presets */}
+              <div className="flex flex-wrap items-center gap-1.5 border-l border-slate-800 pl-3">
+                <span className="text-xs font-semibold text-slate-400 flex items-center gap-1">
+                  <Calendar className="w-3.5 h-3.5 text-amber-400" />
+                  Range:
+                </span>
+                {(['all', 'today', '7d', '30d', 'mtd', 'custom'] as const).map((preset) => (
+                  <button
+                    key={preset}
+                    onClick={() => setKpiDatePreset(preset)}
+                    className={`px-2.5 py-1 rounded-lg text-xs font-semibold transition ${
+                      kpiDatePreset === preset
+                        ? 'bg-amber-500 text-slate-950 font-bold'
+                        : 'bg-slate-950 text-slate-400 hover:text-white border border-slate-800'
+                    }`}
+                  >
+                    {preset === 'all' ? 'All Time' : preset === '7d' ? '7 Days' : preset === '30d' ? '30 Days' : preset === 'mtd' ? 'MTD' : preset === 'today' ? 'Today' : 'Custom'}
+                  </button>
+                ))}
+
+                {kpiDatePreset === 'custom' && (
+                  <div className="flex items-center gap-1.5 ml-2">
+                    <input
+                      type="date"
+                      value={kpiCustomStart}
+                      onChange={(e) => setKpiCustomStart(e.target.value)}
+                      className="bg-slate-950 border border-slate-800 rounded-lg px-2 py-1 text-xs text-white"
+                    />
+                    <span className="text-xs text-slate-500">-</span>
+                    <input
+                      type="date"
+                      value={kpiCustomEnd}
+                      onChange={(e) => setKpiCustomEnd(e.target.value)}
+                      className="bg-slate-950 border border-slate-800 rounded-lg px-2 py-1 text-xs text-white"
+                    />
+                  </div>
+                )}
+              </div>
+            </div>
+
+            {/* Actions: Refresh & Exports */}
+            <div className="flex items-center gap-2">
+              <button
+                onClick={fetchOperationalKpis}
+                disabled={kpiLoading}
+                className="p-2 bg-slate-950 hover:bg-slate-800 border border-slate-800 text-slate-300 hover:text-white rounded-lg transition"
+                title="Refresh Analytics"
+              >
+                <RefreshCw className={`w-4 h-4 ${kpiLoading ? 'animate-spin text-amber-400' : ''}`} />
+              </button>
+
+              <button
+                onClick={() => handleExport('csv')}
+                disabled={exportingFormat !== null}
+                className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-slate-950 hover:bg-slate-800 border border-slate-800 text-slate-200 text-xs font-bold rounded-lg transition"
+              >
+                <Download className="w-3.5 h-3.5 text-amber-400" />
+                {exportingFormat === 'csv' ? 'Exporting...' : 'Export CSV'}
+              </button>
+
+              <button
+                onClick={() => handleExport('json')}
+                disabled={exportingFormat !== null}
+                className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-slate-950 hover:bg-slate-800 border border-slate-800 text-slate-200 text-xs font-bold rounded-lg transition"
+              >
+                <Download className="w-3.5 h-3.5 text-blue-400" />
+                {exportingFormat === 'json' ? 'Exporting...' : 'Export JSON'}
+              </button>
+            </div>
+          </div>
+
+          {/* Error Banner */}
+          {kpiError && (
+            <div className="bg-red-500/10 border border-red-500/30 rounded-xl p-4 flex items-center justify-between text-red-400 text-xs">
+              <div className="flex items-center gap-2">
+                <AlertTriangle className="w-4 h-4 text-red-400 flex-shrink-0" />
+                <span>{kpiError}</span>
+              </div>
+              <button
+                onClick={fetchOperationalKpis}
+                className="underline hover:text-red-300 font-bold"
+              >
+                Retry
+              </button>
+            </div>
+          )}
+
+          {/* Loading State */}
+          {kpiLoading && !operationalKpis && (
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6 animate-pulse">
+              {[1, 2, 3, 4, 5].map((i) => (
+                <div key={i} className="bg-slate-900/60 border border-slate-800/80 rounded-2xl p-6 h-56 space-y-4">
+                  <div className="h-4 bg-slate-800 rounded w-1/3"></div>
+                  <div className="h-8 bg-slate-800/80 rounded w-2/3"></div>
+                  <div className="h-20 bg-slate-950/60 rounded"></div>
+                </div>
+              ))}
+            </div>
+          )}
+
+          {/* Empty State */}
+          {!kpiLoading && !operationalKpis && !kpiError && (
+            <div className="bg-slate-900 border border-slate-800 rounded-2xl p-12 text-center space-y-3">
+              <BarChart3 className="w-12 h-12 text-slate-600 mx-auto" />
+              <h3 className="text-base font-bold text-white">No Operational KPI Data Available</h3>
+              <p className="text-xs text-slate-400 max-w-md mx-auto">
+                No analytics metrics were found for the selected branch and date range. Try selecting another date preset or clearing filters.
+              </p>
+              <button
+                onClick={fetchOperationalKpis}
+                className="px-4 py-2 bg-amber-500 hover:bg-amber-400 text-slate-950 text-xs font-bold rounded-xl transition inline-flex items-center gap-2"
+              >
+                <RefreshCw className="w-3.5 h-3.5" />
+                Load Operational KPIs
+              </button>
+            </div>
+          )}
+
+          {/* Operational KPI Grid */}
+          {operationalKpis && (
+            <div className="space-y-6">
+              {/* Pillar 1: E-Commerce & Order Lifecycle */}
+              <div className="bg-slate-900 border border-slate-800 rounded-2xl p-6 space-y-4">
+                <div className="flex items-center justify-between border-b border-slate-800 pb-3">
+                  <div className="flex items-center gap-2 text-white font-extrabold text-sm">
+                    <ShoppingCart className="w-4 h-4 text-amber-400" />
+                    <span>E-Commerce & Commercial Fulfillment</span>
+                  </div>
+                  <span className="text-xs text-slate-400 font-mono">
+                    {operationalKpis.ecommerce.totalOrders} Orders Total
+                  </span>
+                </div>
+
+                <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
+                  <div className="bg-slate-950 p-4 rounded-xl border border-slate-800/60">
+                    <div className="text-xs text-slate-400">Gross Value (GMV)</div>
+                    <div className="text-xl font-extrabold text-white mt-1">
+                      ₱{operationalKpis.ecommerce.gmv.toLocaleString('en-US', { minimumFractionDigits: 2 })}
+                    </div>
+                    <div className="text-[10px] text-amber-400 mt-0.5">Delivered & active orders</div>
+                  </div>
+
+                  <div className="bg-slate-950 p-4 rounded-xl border border-slate-800/60">
+                    <div className="text-xs text-slate-400">Average Order Value (AOV)</div>
+                    <div className="text-xl font-extrabold text-white mt-1">
+                      ₱{operationalKpis.ecommerce.aov.toLocaleString('en-US', { minimumFractionDigits: 2 })}
+                    </div>
+                    <div className="text-[10px] text-slate-500 mt-0.5">Per completed order</div>
+                  </div>
+
+                  <div className="bg-slate-950 p-4 rounded-xl border border-slate-800/60">
+                    <div className="text-xs text-slate-400">Completed Orders</div>
+                    <div className="text-xl font-extrabold text-emerald-400 mt-1">
+                      {operationalKpis.ecommerce.completedOrders}
+                    </div>
+                    <div className="text-[10px] text-slate-500 mt-0.5">
+                      Cancelled: {operationalKpis.ecommerce.cancelledOrders}
+                    </div>
+                  </div>
+
+                  <div className="bg-slate-950 p-4 rounded-xl border border-slate-800/60">
+                    <div className="text-xs text-slate-400">Refunds & Returns</div>
+                    <div className="text-xl font-extrabold text-red-400 mt-1">
+                      {operationalKpis.ecommerce.refundedOrders}
+                    </div>
+                    <div className="text-[10px] text-slate-500 mt-0.5">
+                      ₱{operationalKpis.ecommerce.refundedAmount.toLocaleString()} ({((operationalKpis.ecommerce.refundRate || 0) * 100).toFixed(1)}%)
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              {/* Pillars 2 & 3: Consultations & Workshops */}
+              <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+                {/* Pillar 2: Consultations */}
+                <div className="bg-slate-900 border border-slate-800 rounded-2xl p-6 space-y-4">
+                  <div className="flex items-center justify-between border-b border-slate-800 pb-3">
+                    <div className="flex items-center gap-2 text-white font-extrabold text-sm">
+                      <Stethoscope className="w-4 h-4 text-emerald-400" />
+                      <span>Clinical Consultations</span>
+                    </div>
+                    <span className="text-xs text-slate-400 font-mono">
+                      {operationalKpis.consultations.totalBookings} Bookings
+                    </span>
+                  </div>
+
+                  <div className="grid grid-cols-2 sm:grid-cols-3 gap-4">
+                    <div className="bg-slate-950 p-3.5 rounded-xl border border-slate-800/60">
+                      <div className="text-xs text-slate-400">Completed Sessions</div>
+                      <div className="text-lg font-bold text-white mt-1">
+                        {operationalKpis.consultations.completed}
+                      </div>
+                      <div className="text-[10px] text-slate-500">Cancelled: {operationalKpis.consultations.cancelled}</div>
+                    </div>
+
+                    <div className="bg-slate-950 p-3.5 rounded-xl border border-slate-800/60">
+                      <div className="text-xs text-slate-400">Attendance Rate</div>
+                      <div className="text-lg font-bold text-emerald-400 mt-1">
+                        {((operationalKpis.consultations.attendanceRate || 0) * 100).toFixed(1)}%
+                      </div>
+                      <div className="text-[10px] text-slate-500">Non-cancelled sessions</div>
+                    </div>
+
+                    <div className="bg-slate-950 p-3.5 rounded-xl border border-slate-800/60 col-span-2 sm:col-span-1">
+                      <div className="text-xs text-slate-400">Utilization Rate</div>
+                      <div className="text-lg font-bold text-amber-400 mt-1">
+                        {((operationalKpis.consultations.utilizationRate || 0) * 100).toFixed(1)}%
+                      </div>
+                      <div className="text-[10px] text-slate-500">Booked capacity</div>
+                    </div>
+                  </div>
+                </div>
+
+                {/* Pillar 3: Workshops */}
+                <div className="bg-slate-900 border border-slate-800 rounded-2xl p-6 space-y-4">
+                  <div className="flex items-center justify-between border-b border-slate-800 pb-3">
+                    <div className="flex items-center gap-2 text-white font-extrabold text-sm">
+                      <GraduationCap className="w-4 h-4 text-cyan-400" />
+                      <span>Wellness Education Workshops</span>
+                    </div>
+                    <span className="text-xs text-slate-400 font-mono">
+                      {operationalKpis.workshops.totalWorkshops} Events
+                    </span>
+                  </div>
+
+                  <div className="grid grid-cols-2 sm:grid-cols-3 gap-4">
+                    <div className="bg-slate-950 p-3.5 rounded-xl border border-slate-800/60">
+                      <div className="text-xs text-slate-400">Capacity Utilization</div>
+                      <div className="text-lg font-bold text-cyan-400 mt-1">
+                        {((operationalKpis.workshops.capacityUtilization || 0) * 100).toFixed(1)}%
+                      </div>
+                      <div className="text-[10px] text-slate-500">{operationalKpis.workshops.totalRegistrations} / {operationalKpis.workshops.totalCapacity} seats</div>
+                    </div>
+
+                    <div className="bg-slate-950 p-3.5 rounded-xl border border-slate-800/60">
+                      <div className="text-xs text-slate-400">Waitlist Pressure</div>
+                      <div className="text-lg font-bold text-amber-400 mt-1">
+                        {((operationalKpis.workshops.waitlistPressure || 0) * 100).toFixed(1)}%
+                      </div>
+                      <div className="text-[10px] text-slate-500">{operationalKpis.workshops.waitlistCount} on waitlist</div>
+                    </div>
+
+                    <div className="bg-slate-950 p-3.5 rounded-xl border border-slate-800/60 col-span-2 sm:col-span-1">
+                      <div className="text-xs text-slate-400">Total Attendees</div>
+                      <div className="text-lg font-bold text-white mt-1">
+                        {operationalKpis.workshops.totalRegistrations}
+                      </div>
+                      <div className="text-[10px] text-slate-500">Registered users</div>
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              {/* Pillars 4 & 5: Support / SLA & Inventory Operations */}
+              <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+                {/* Pillar 4: Support & Redress */}
+                <div className="bg-slate-900 border border-slate-800 rounded-2xl p-6 space-y-4">
+                  <div className="flex items-center justify-between border-b border-slate-800 pb-3">
+                    <div className="flex items-center gap-2 text-white font-extrabold text-sm">
+                      <Headphones className="w-4 h-4 text-purple-400" />
+                      <span>Consumer Redress & SLA (RA 11967)</span>
+                    </div>
+                    <span className="text-xs text-slate-400 font-mono">
+                      {operationalKpis.support.totalTickets} Tickets
+                    </span>
+                  </div>
+
+                  <div className="grid grid-cols-2 sm:grid-cols-3 gap-4">
+                    <div className="bg-slate-950 p-3.5 rounded-xl border border-slate-800/60">
+                      <div className="text-xs text-slate-400">SLA Compliance (48h)</div>
+                      <div className="text-lg font-bold text-emerald-400 mt-1">
+                        {((operationalKpis.support.slaComplianceRate || 0) * 100).toFixed(1)}%
+                      </div>
+                      <div className="text-[10px] text-slate-500">
+                        Breaches: {operationalKpis.support.slaBreachedTickets}
+                      </div>
+                    </div>
+
+                    <div className="bg-slate-950 p-3.5 rounded-xl border border-slate-800/60">
+                      <div className="text-xs text-slate-400">Avg Resolution Time</div>
+                      <div className="text-lg font-bold text-white mt-1">
+                        {operationalKpis.support.avgResolutionHours} hrs
+                      </div>
+                      <div className="text-[10px] text-slate-500">Target: &lt;48.0 hrs</div>
+                    </div>
+
+                    <div className="bg-slate-950 p-3.5 rounded-xl border border-slate-800/60 col-span-2 sm:col-span-1">
+                      <div className="text-xs text-slate-400">Resolution Status</div>
+                      <div className="text-lg font-bold text-purple-400 mt-1">
+                        {operationalKpis.support.resolvedTickets} / {operationalKpis.support.totalTickets}
+                      </div>
+                      <div className="text-[10px] text-slate-500">Open: {operationalKpis.support.openTickets}</div>
+                    </div>
+                  </div>
+                </div>
+
+                {/* Pillar 5: Inventory & Supply Chain */}
+                <div className="bg-slate-900 border border-slate-800 rounded-2xl p-6 space-y-4">
+                  <div className="flex items-center justify-between border-b border-slate-800 pb-3">
+                    <div className="flex items-center gap-2 text-white font-extrabold text-sm">
+                      <Boxes className="w-4 h-4 text-amber-400" />
+                      <span>Branch Inventory & Supply Chain</span>
+                    </div>
+                    <span className="text-xs text-slate-400 font-mono">
+                      {operationalKpis.inventory.totalSkus} SKUs Tracked
+                    </span>
+                  </div>
+
+                  <div className="grid grid-cols-2 sm:grid-cols-3 gap-4">
+                    <div className="bg-slate-950 p-3.5 rounded-xl border border-slate-800/60">
+                      <div className="text-xs text-slate-400">Stockout Risk SKUs</div>
+                      <div className={`text-lg font-bold mt-1 ${operationalKpis.inventory.stockoutRiskSkusCount > 0 ? 'text-red-400' : 'text-emerald-400'}`}>
+                        {operationalKpis.inventory.stockoutRiskSkusCount}
+                      </div>
+                      <div className="text-[10px] text-slate-500">At/below ROP threshold</div>
+                    </div>
+
+                    <div className="bg-slate-950 p-3.5 rounded-xl border border-slate-800/60">
+                      <div className="text-xs text-slate-400">In-Transit Stock</div>
+                      <div className="text-lg font-bold text-amber-400 mt-1">
+                        {operationalKpis.inventory.transferInTransitVolume} units
+                      </div>
+                      <div className="text-[10px] text-slate-500">Active branch transfers</div>
+                    </div>
+
+                    <div className="bg-slate-950 p-3.5 rounded-xl border border-slate-800/60 col-span-2 sm:col-span-1">
+                      <div className="text-xs text-slate-400">Quality Quarantine</div>
+                      <div className="text-lg font-bold text-slate-300 mt-1">
+                        {operationalKpis.inventory.quarantineHoldUnits} units
+                      </div>
+                      <div className="text-[10px] text-slate-500">Quarantine / expired hold</div>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </div>
+          )}
+        </div>
+      )}
 
       {/* FINANCIALS & ACCOUNTING TAB */}
       {activeTab === 'financials' && (
