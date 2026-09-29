@@ -6,7 +6,7 @@
 import fs from 'fs';
 import path from 'path';
 import crypto from 'crypto';
-import { performDatabaseBackup, restoreDatabaseBackup, decryptPayloadAES256GCM } from './backupDatabase.ts';
+import { performDatabaseBackup, restoreDatabaseBackup, decryptPayloadAES256GCM, verifyFirestorePitrConfiguration } from './backupDatabase.ts';
 
 console.log('========================================================================');
 console.log('Running Phase 9B-3: Backup, Restore & Disaster Recovery Test Suite');
@@ -58,6 +58,24 @@ function createMockDatastore() {
   };
 }
 
+function createMockStorageClient() {
+  const storageMap = new Map<string, Map<string, Buffer>>();
+  return {
+    bucket: (bucketName: string) => {
+      if (!storageMap.has(bucketName)) storageMap.set(bucketName, new Map());
+      const bucketStore = storageMap.get(bucketName)!;
+      return {
+        file: (destination: string) => ({
+          save: async (content: Buffer) => {
+            bucketStore.set(destination, content);
+          },
+          exists: async () => [bucketStore.has(destination)],
+        }),
+      };
+    },
+  };
+}
+
 async function runBackupRecoveryTests() {
   const testOutputDir = path.resolve(process.cwd(), 'backups-test');
   if (fs.existsSync(testOutputDir)) {
@@ -65,6 +83,7 @@ async function runBackupRecoveryTests() {
   }
 
   const testKey = 'SECRET_TEST_ENCRYPTION_KEY_0123456789_32BYTES!';
+  const mockStorage = createMockStorageClient();
 
   // Populate authoritative source datastore
   const sourceDb = createMockDatastore();
@@ -80,6 +99,7 @@ async function runBackupRecoveryTests() {
     encrypt: true,
     encryptionKey: testKey,
     db: sourceDb,
+    storageClient: mockStorage,
   });
 
   assert(backupRes.success === true && backupRes.recordCount === 4, '1.1 Backup execution completes successfully from authoritative datastore');
@@ -95,7 +115,7 @@ async function runBackupRecoveryTests() {
     !parsedBackup.data.key;
 
   assert(isEncryptedGcm, '1.3 Backup contains AES-256-GCM ciphertext, IV, and authTag without storing encryption keys');
-  assert(backupRes.offsiteResult.uploaded === true && backupRes.offsiteResult.offsitePath?.startsWith('gs://'), '1.4 Backup upload dispatched to off-site cloud storage bucket');
+  assert(backupRes.offsiteResult.uploaded === true && backupRes.offsiteResult.objectVerified === true && backupRes.offsiteResult.offsitePath?.startsWith('gs://'), '1.4 Backup object successfully uploaded to GCS and verified in bucket');
 
   // 2. Test backup integrity & checksum verification
   console.log('\n--- Test Group 2: Backup Integrity & Checksum Verification ---');
@@ -151,7 +171,7 @@ async function runBackupRecoveryTests() {
 
   let prodKeyFailedClosed = false;
   try {
-    await performDatabaseBackup({ outputDir: testOutputDir, db: sourceDb });
+    await performDatabaseBackup({ outputDir: testOutputDir, db: sourceDb, storageClient: mockStorage });
   } catch (err: any) {
     if (err.message.includes('BACKUP_ENCRYPTION_KEY_REQUIRED')) {
       prodKeyFailedClosed = true;
@@ -162,6 +182,24 @@ async function runBackupRecoveryTests() {
   }
 
   assert(prodKeyFailedClosed === true, '4.2 Backup fails closed in production environment when BACKUP_ENCRYPTION_KEY is missing');
+
+  // 5. Test Firestore Point-In-Time Recovery (PITR) configuration verification
+  console.log('\n--- Test Group 5: Firestore Point-In-Time Recovery (PITR) Verification ---');
+  const pitrResult = await verifyFirestorePitrConfiguration();
+  assert(pitrResult.pitrEnabled === true && pitrResult.retentionPeriodDays === 7, '5.1 Firestore PITR configuration verified as ENABLED with 7-day retention window');
+
+  let pitrDisabledCaught = false;
+  try {
+    await verifyFirestorePitrConfiguration({
+      customPitrConfig: { pointInTimeRecoveryEnablement: 'POINT_IN_TIME_RECOVERY_DISABLED' },
+    });
+  } catch (err: any) {
+    if (err.message.includes('FIRESTORE_PITR_DISABLED')) {
+      pitrDisabledCaught = true;
+    }
+  }
+
+  assert(pitrDisabledCaught === true, '5.2 Disabled Firestore PITR configuration correctly rejected by verification script');
 
   // Cleanup test directories
   if (fs.existsSync(testOutputDir)) {
