@@ -30,6 +30,7 @@ const testFiles = [
   'scripts/testPhase9SecurityPrivacy.ts',
   'scripts/testPhase9Performance.ts',
   'scripts/testPhase9BackupRecovery.ts',
+  'scripts/testPhase9Monitoring.ts',
 ];
 
 console.log('========================================================================');

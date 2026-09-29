@@ -10,6 +10,7 @@ import { getFirestore } from 'firebase-admin/firestore';
 import { initializeApp, getApps } from 'firebase-admin/app';
 import { Storage } from '@google-cloud/storage';
 import { GoogleAuth } from 'google-auth-library';
+import { dispatchAlert } from '../src/services/alertService.ts';
 
 export async function getGoogleAccessToken(): Promise<string | null> {
   try {
@@ -400,6 +401,13 @@ export async function performDatabaseBackup(options: BackupOptions = {}): Promis
     if (offsiteResult.uploaded && offsiteResult.offsitePath) {
       finalOutput.metadata.offsitePath = offsiteResult.offsitePath;
       fs.writeFileSync(backupPath, JSON.stringify(finalOutput, null, 2), 'utf8');
+    } else if (offsiteResult.error) {
+      await dispatchAlert({
+        category: 'backup_failure',
+        severity: 'SEV-1',
+        message: `Offsite backup storage upload failed for ${backupFilename}: ${offsiteResult.error}`,
+        details: { backupFilename, offsiteResult },
+      });
     }
   }
 

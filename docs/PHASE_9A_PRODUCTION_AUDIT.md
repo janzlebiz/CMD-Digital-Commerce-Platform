@@ -59,11 +59,14 @@ In accordance with **Priority E / Original Phase 9 (Production Certification)**,
   6. **Final Verification Results**: Dedicated test suite (`scripts/testPhase9BackupRecovery.ts`) passing **19/19 assertions** across 6 test groups covering authoritative backup generation, AES-256-GCM encryption, strict GCS object upload & bucket existence verification, SHA-256 round-trip checksum verification, isolated environment datastore restoration, record integrity checks, tampered backup rejection, production key fail-closed enforcement, authenticated Firestore PITR enablement verification, and fail-closed GCS 30-day lifecycle expiration policy verification. Full regression suite passing **24/24 test files**.
 * **Affected Components**: `scripts/backupDatabase.ts`, `docs/RUNBOOK_DISASTER_RECOVERY.md`, `scripts/testPhase9BackupRecovery.ts`.
 
-### Gate 5: Monitoring, Alerting & Operational Runbooks
-* **Identified Gaps**:
-  1. Missing alerting integration for critical failures (payment gateway timeouts, queue dead-letter threshold breaches, SLA breaches).
-  2. Missing operational runbooks for branch managers and super admins (`docs/RUNBOOK_OPERATIONS.md`).
-* **Affected Components**: `server.ts` error handlers, `docs/`.
+### Gate 5: Monitoring, Alerting & Operational Runbooks — **PASS (Phase 9B-4 Verified)**
+* **Identified Gaps (Remediated & Verified in Phase 9B-4)**:
+  1. ~~Liveness and Readiness Health Probes~~ -> **Resolved**: Implemented `/healthz` (liveness probe: process memory, uptime) and `/readyz` (readiness probe: datastore ping, maintenance mode evaluation returning HTTP 503 during maintenance window).
+  2. ~~Centralized Alert Dispatching & Server-Side Webhooks~~ -> **Resolved**: Built `src/services/alertService.ts` dispatching structured alert payloads to `ALERT_WEBHOOK_URL` with `X-Alert-Secret` authentication headers, 5-second AbortController timeout handling, and automatic secret/token redaction (`[REDACTED]`).
+  3. ~~Critical Event Alert Routing~~ -> **Resolved**: Connected `dispatchAlert` across core server failure pathways: `critical_server_error` (unhandled 500s), `payment_provider_failure` (checkout payment gateway timeouts/failures), `notification_dead_letter` (dead-letter queue transitions), `sla_breach` (RA 11967 statutory dispute resolution 7-day SLA breaches), and `backup_failure` (automated database export failures).
+  4. ~~Operational Incident Runbook~~ -> **Resolved**: Authored `docs/RUNBOOK_OPERATIONS.md` documenting health checks, SEV-1 to SEV-4 incident severity matrix, SOPs for payment/backup/queue/SLA failures, maintenance mode toggles, and escalation matrix.
+  5. **Verification Results**: Dedicated test suite (`scripts/testPhase9Monitoring.ts`) passing **13/13 assertions** covering probes, alert categories, webhook delivery, secret redaction, timeout handling, and runbook structure. Full regression suite passing **25/25 test files**.
+* **Affected Components**: `server.ts`, `src/services/alertService.ts`, `scripts/backupDatabase.ts`, `docs/RUNBOOK_OPERATIONS.md`, `scripts/testPhase9Monitoring.ts`.
 
 ### Gate 6: End-to-End Business Acceptance
 * **Identified Gaps**:

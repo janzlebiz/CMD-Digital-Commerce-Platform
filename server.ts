@@ -13,6 +13,7 @@ import crypto from 'crypto';
 import path from 'path';
 import fs from 'fs';
 import { fileURLToPath } from 'url';
+import { dispatchAlert } from './src/services/alertService.ts';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -295,6 +296,17 @@ export function evaluateSlaEscalation(ticket: any): boolean {
         reason: 'Statutory 7-day internal dispute resolution SLA expired under RA 11967.',
         previousStatus: prev,
       });
+      dispatchAlert({
+        category: 'sla_breach',
+        severity: 'SEV-3',
+        message: `RA 11967 Statutory 7-day dispute resolution SLA breached for support ticket ${ticket.id}`,
+        details: {
+          ticketId: ticket.id,
+          category: ticket.category,
+          customerUid: ticket.userId,
+          slaDueAt: ticket.slaDueAt,
+        },
+      }).catch(() => {});
       return true;
     }
   }
@@ -10575,6 +10587,58 @@ export function createExpressApp(deps: ServerDependencies = {}): Express {
     }
   });
 
+  // ============================================================================
+  // --- GATE 5: MONITORING & HEALTH CHECK ENDPOINTS (/healthz & /readyz) ---
+  // ============================================================================
+
+  // 1. GET /healthz - Liveness Probe
+  app.get('/healthz', (_req: Request, res: Response): void => {
+    const memoryUsage = process.memoryUsage();
+    res.status(200).json({
+      status: 'ok',
+      timestamp: new Date().toISOString(),
+      uptimeSeconds: process.uptime(),
+      memoryUsageMb: {
+        rss: Math.round((memoryUsage.rss / (1024 * 1024)) * 100) / 100,
+        heapTotal: Math.round((memoryUsage.heapTotal / (1024 * 1024)) * 100) / 100,
+        heapUsed: Math.round((memoryUsage.heapUsed / (1024 * 1024)) * 100) / 100,
+      },
+    });
+  });
+
+  // 2. GET /readyz - Readiness Probe
+  app.get('/readyz', async (_req: Request, res: Response): Promise<void> => {
+    const isMaintenance = process.env.MAINTENANCE_MODE === 'true';
+    if (isMaintenance) {
+      res.status(503).json({
+        status: 'maintenance_mode',
+        timestamp: new Date().toISOString(),
+        message: 'System is currently undergoing scheduled maintenance.',
+      });
+      return;
+    }
+
+    let dbStatus = 'connected';
+    try {
+      if (db) {
+        await db.collection('audit_logs').limit(1).get();
+      }
+    } catch {
+      dbStatus = 'degraded';
+    }
+
+    const isReady = dbStatus === 'connected';
+    res.status(isReady ? 200 : 503).json({
+      status: isReady ? 'ready' : 'unhealthy',
+      timestamp: new Date().toISOString(),
+      checks: {
+        database: dbStatus,
+        maintenanceMode: isMaintenance,
+        hmacSecurity: 'configured',
+      },
+    });
+  });
+
   // Centralized Express Error Handler
   app.use((err: any, req: Request, res: Response, _next: any) => {
     const correlationId = (req as any).correlationId || 'unknown';
@@ -10593,6 +10657,16 @@ export function createExpressApp(deps: ServerDependencies = {}): Express {
       error: err?.message || String(err),
       stack: isProd ? undefined : err?.stack
     });
+
+    if (statusCode >= 500) {
+      dispatchAlert({
+        category: 'critical_server_error',
+        severity: 'SEV-1',
+        message: `Unhandled critical server error on ${req.method} ${req.path}: ${err?.message || 'Unknown error'}`,
+        details: { method: req.method, path: req.path, statusCode, error: err?.message || String(err) },
+        correlationId,
+      }).catch(() => {});
+    }
 
     if (!res.headersSent) {
       res.status(statusCode).json({

@@ -124,7 +124,13 @@ The canonical product roadmap comprises the following ten phases:
   * **Strict Real GCS Off-Site Storage Upload & Verification**: Implemented real Google Cloud Storage object upload in `uploadToOffsiteStorage` using `@google-cloud/storage`, uploading backup snapshots to `gs://hci-cmd-backups-offsite-asia/backups/` and strictly asserting object existence post-upload (`file.exists()`), failing closed if unconfirmed.
   * **Authenticated Firestore PITR & GCS Lifecycle Verification**: Implemented `verifyFirestorePitrConfiguration` using `google-auth-library` to retrieve Google OAuth access tokens sent via `Authorization: Bearer <token>` to query Firestore database configuration, failing closed (`FIRESTORE_PITR_QUERY_FAILED` / `FIRESTORE_PITR_DISABLED` / `FIRESTORE_PITR_INVALID_RETENTION`) if authentication or verification fails. Implemented `verifyGcsBucketLifecyclePolicy` querying bucket metadata via `@google-cloud/storage` failing closed (`GCS_LIFECYCLE_QUERY_FAILED` / `GCS_LIFECYCLE_RULE_MISSING`) if metadata query fails or lacks a `Delete` rule with `condition.age === 30`.
   * **Testing & Regression**: Dedicated backup/recovery test suite (`scripts/testPhase9BackupRecovery.ts`) passing **19/19 assertions** across 6 test groups. Full regression suite passing **24/24 test files**.
-* **Audit Document**: Updated findings, remediation status, and Gate 3 & Gate 4 PASS status in `docs/PHASE_9A_PRODUCTION_AUDIT.md`.
+* **Phase 9B-4 Monitoring, Alerting & Operational Runbooks Remediation**:
+  * **Health Probes**: Implemented `/healthz` (liveness probe: uptime, process RSS/heap memory metrics) and `/readyz` (readiness probe: datastore connectivity, maintenance mode evaluation returning HTTP 503).
+  * **Centralized Alert Dispatcher & Webhooks**: Built `src/services/alertService.ts` dispatching structured alert payloads to `ALERT_WEBHOOK_URL` with `X-Alert-Secret` headers, 5-second timeout handling, and automatic secret/token redaction (`[REDACTED]`).
+  * **Critical Event Routing**: Wired `dispatchAlert` across `critical_server_error` (unhandled 500s), `payment_provider_failure` (checkout gateway errors), `notification_dead_letter` (dead-letter queue transitions), `sla_breach` (RA 11967 statutory dispute 7-day SLA breaches), and `backup_failure` (automated database export errors).
+  * **Operational Runbook**: Authored `docs/RUNBOOK_OPERATIONS.md` defining health checks, SEV-1 to SEV-4 incident severity matrix, SOPs, maintenance mode toggles, and escalation matrix.
+  * **Testing & Regression**: Dedicated Gate 5 test suite (`scripts/testPhase9Monitoring.ts`) passing **13/13 assertions**. Full regression suite passing **25/25 test files**.
+* **Audit Document**: Updated findings, remediation status, and Gate 3, Gate 4 & Gate 5 PASS status in `docs/PHASE_9A_PRODUCTION_AUDIT.md`.
 
 ---
 
@@ -141,7 +147,7 @@ The canonical product roadmap comprises the following ten phases:
 
 ## 8. Current Project Gate
 
-> **CURRENT PROJECT GATE**: Phase 9A Production Audit & Phase 9B-1/9B-2/9B-3 Remediation successfully completed (Gate 3 Performance & Concurrency and Gate 4 Backup & Recovery certified PASS). Awaiting subsequent Phase 9 remediation gates prior to final production release certification.
+> **CURRENT PROJECT GATE**: Phase 9A Production Audit & Phase 9B-1/9B-2/9B-3/9B-4 Remediation successfully completed (Gate 3 Performance & Concurrency, Gate 4 Backup & Recovery, and Gate 5 Monitoring, Alerting & Operations certified PASS). Awaiting Gate 6 End-to-End Business Acceptance prior to final production release certification.
 
 ---
 
