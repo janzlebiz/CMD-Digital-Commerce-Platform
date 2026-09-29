@@ -106,13 +106,17 @@ The canonical product roadmap comprises the following ten phases:
 * **HTML Metadata & Registration**: Configured `index.html` with manifest link, theme-color `#090d16`, and apple-touch-icon, with automatic service worker registration in `src/main.tsx`.
 * **Testing & Regression**: Dedicated test suite (`scripts/testPriorityDPwa.ts`) passing **23/23 assertions**. Full regression suite passing **21/21 suites** with a cumulative total of **939/939 assertions**.
 
-### Priority E: Production Certification (Original Phase 9)
-* Comprehensive security and penetration testing.
-* Privacy and compliance verification.
-* Performance, load, and concurrency stress testing.
-* Backup, restore, and disaster recovery rehearsal.
-* Monitoring, alerting, and operational runbooks.
-* End-to-end business acceptance and formal deployment sign-off / launch certification.
+### Priority E: Production Certification (Original Phase 9) — PHASE 9A AUDIT COMPLETED
+* **Phase 9A Production Certification Audit**: Conducted a formal system audit across all 6 required production gates (Security & Penetration Readiness, Privacy & Compliance, Performance & Load, Backup & Disaster Recovery, Monitoring & Runbooks, and End-to-End Business Acceptance).
+* **Audit Document**: Published detailed findings, gap analysis, and affected components in `docs/PHASE_9A_PRODUCTION_AUDIT.md`.
+* **Gate Status**: 
+  * Security & Penetration Readiness: **PARTIAL PASS** (Core auth & HMAC pass; DAST/fuzzing and rate limiting missing).
+  * Privacy & Compliance: **PASS** (Consent, unsubscribe, and DPA/RA 11967 fully operational).
+  * Performance, Load & Concurrency: **PARTIAL PASS** (Concurrency safety verified; high-load k6 stress testing missing).
+  * Backup, Restore & Disaster Recovery: **FAIL** (Automated PITR backup scripts and recovery runbooks missing).
+  * Monitoring, Alerting & Runbooks: **FAIL** (Automated alerting webhooks and operator runbooks missing).
+  * End-to-End Business Acceptance: **PARTIAL PASS** (939/939 assertions passing; formal UAT sign-off records missing).
+* **Next Steps**: Proceed to Phase 9B Remediation to address identified gaps before formal launch certification.
 
 ---
 
@@ -129,10 +133,10 @@ The canonical product roadmap comprises the following ten phases:
 
 ## 8. Current Project Gate
 
-> **CURRENT PROJECT GATE**: Architecture Reconciliation complete; do not begin production release certification yet.
+> **CURRENT PROJECT GATE**: Phase 9A Production Certification Audit complete; awaiting Phase 9B remediation implementation prior to formal launch certification.
 
 ---
 
 ## 9. Next Planned Work
 
-Proceeding from the reconciled architecture, the immediate next steps will address remaining launch-critical requirements (Priority A & B), followed by the structured completion of original Phase 7 (Automation & Analytics), Phase 8 (PWA Hardening), and Phase 9 (Production Certification).
+Proceeding with Phase 9B remediation tasks (rate limiting, DSAR data export, backup scripts, monitoring runbooks, and UAT sign-off) prior to final production release certification.
