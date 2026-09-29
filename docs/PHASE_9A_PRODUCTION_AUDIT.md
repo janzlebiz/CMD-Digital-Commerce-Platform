@@ -49,11 +49,12 @@ In accordance with **Priority E / Original Phase 9 (Production Certification)**,
   2. **Audit Verification Results**: 16/16 assertions passed. Confirmed OCC conflict & retry mechanics, zero balance leaks (`refundedAmount: 300`, `remainingRefundableBalance: 400`, `reservedRefundAmount: 0`), and strict latency percentiles (Analytics KPI p50: 6ms, p95: 11ms, p99: 15ms; Inventory p50: 75ms, p95: 85ms, p99: 85ms; Refunds p50: 8ms, p95: 9ms, p99: 9ms).
 * **Affected Components**: `server.ts`, `scripts/testPhase9Performance.ts`.
 
-### Gate 4: Backup, Restore & Disaster Recovery
-* **Identified Gaps**:
-  1. Complete absence of automated backup export scripts (e.g., Firestore export to Cloud Storage or PostgreSQL pg_dump cron jobs).
-  2. Missing disaster recovery runbook (`docs/RUNBOOK_DISASTER_RECOVERY.md`).
-* **Affected Components**: Infrastructure configuration, `docs/`.
+### Gate 4: Backup, Restore & Disaster Recovery — **PASS (Phase 9B-3 Verified)**
+* **Identified Gaps (Remediated in Phase 9B-3)**:
+  1. ~~Complete absence of automated backup export scripts~~ -> **Resolved**: Implemented `scripts/backupDatabase.ts` supporting timestamped JSON exports, SHA-256 checksum integrity verification, and encryption.
+  2. ~~Missing disaster recovery runbook~~ -> **Resolved**: Authored comprehensive `docs/RUNBOOK_DISASTER_RECOVERY.md` defining RPO/RTO objectives, automated backup procedures, restore instructions, recovery verification, and failure escalation.
+  3. **Audit Verification Results**: Dedicated test suite (`scripts/testPhase9BackupRecovery.ts`) passing **10/10 assertions** covering automated backup generation, checksum validation, isolated environment restore, and corrupted backup rejection.
+* **Affected Components**: `scripts/backupDatabase.ts`, `docs/RUNBOOK_DISASTER_RECOVERY.md`, `scripts/testPhase9BackupRecovery.ts`.
 
 ### Gate 5: Monitoring, Alerting & Operational Runbooks
 * **Identified Gaps**:
