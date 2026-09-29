@@ -28,6 +28,7 @@ const testFiles = [
   'scripts/testPriorityC4Analytics.ts',
   'scripts/testPriorityDPwa.ts',
   'scripts/testPhase9SecurityPrivacy.ts',
+  'scripts/testPhase9Performance.ts',
 ];
 
 console.log('========================================================================');
