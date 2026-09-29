@@ -1964,6 +1964,19 @@ export async function processNotificationQueue(
         };
         await queueDocRef.set(deadLetterItem);
 
+        await dispatchAlert({
+          category: 'notification_dead_letter',
+          severity: 'SEV-2',
+          message: `Notification ${item.id} transitioned to dead_letter queue after ${nextRetryCount} retries`,
+          details: {
+            queueItemId: item.id,
+            recipientId: item.recipientId,
+            channel: item.channel,
+            templateId: item.templateId,
+            lastError: errorMessage,
+          },
+        }).catch(() => {});
+
         if (item.metadata?.campaignId) {
           await syncMarketingCampaignQueueProgress(db, String(item.metadata.campaignId), false);
         }
@@ -3552,6 +3565,10 @@ export interface ServerDependencies {
   kmsClient?: any;
 }
 
+export function getFirestoreDatabase() {
+  return getFirestore('ai-studio-cmddigitalcommer-8d70f45b-1636-42ba-9e2d-f063a7b0e086');
+}
+
 export function createExpressApp(deps: ServerDependencies = {}): Express {
   const app = express();
   app.use(express.json());
@@ -3619,6 +3636,11 @@ export function createExpressApp(deps: ServerDependencies = {}): Express {
 
   // 2. Readiness Probe Endpoint
   app.get('/readyz', async (_req: Request, res: Response) => {
+    if (process.env.MAINTENANCE_MODE === 'true' || process.env.MAINTENANCE_MODE === '1') {
+      res.status(503).json({ status: 'maintenance_mode', message: 'Service undergoing scheduled maintenance' });
+      return;
+    }
+
     try {
       getHmacSecret();
 
@@ -4101,6 +4123,19 @@ export function createExpressApp(deps: ServerDependencies = {}): Express {
     try {
       refundRes = await paymentAdapter.processRefund(paymentId, refundAmount, reason, providerIdempotencyKey);
     } catch (providerErr: any) {
+      dispatchAlert({
+        category: 'payment_provider_failure',
+        severity: 'SEV-1',
+        message: `Refund provider failed for order ${orderId}: ${providerErr.message}`,
+        details: {
+          orderId,
+          paymentId,
+          refundAmount,
+          reason,
+          error: providerErr.message,
+        },
+      }).catch(() => {});
+
       // Release reserved refund amount on provider failure
       await db.runTransaction(async (transaction: any) => {
         const orderSnap = await transaction.get(orderRef);
@@ -4565,6 +4600,18 @@ export function createExpressApp(deps: ServerDependencies = {}): Express {
               }, { merge: true });
             });
 
+            await dispatchAlert({
+              category: 'payment_provider_failure',
+              severity: 'SEV-1',
+              message: `Checkout provider failed for order ${orderRecord.id}: ${providerErr.message}`,
+              details: {
+                orderId: orderRecord.id,
+                paymentMethod: orderRecord.paymentMethod,
+                grandTotal: orderRecord.grandTotal,
+                error: providerErr.message,
+              },
+            }).catch(() => {});
+
             res.status(500).json({ error: `Checkout provider failed: ${providerErr.message}` });
             return;
           }
@@ -4784,6 +4831,18 @@ export function createExpressApp(deps: ServerDependencies = {}): Express {
             updatedAt: nowIso,
           }, { merge: true });
         });
+
+        await dispatchAlert({
+          category: 'payment_provider_failure',
+          severity: 'SEV-1',
+          message: `Checkout provider failed for order ${orderId}: ${providerErr.message}`,
+          details: {
+            orderId,
+            paymentMethod: orderRecord.paymentMethod,
+            grandTotal: orderRecord.grandTotal,
+            error: providerErr.message,
+          },
+        }).catch(() => {});
 
         res.status(500).json({ error: `Checkout provider failed: ${providerErr.message}` });
         return;

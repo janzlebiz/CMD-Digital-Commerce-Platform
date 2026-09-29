@@ -105,27 +105,48 @@ export async function dispatchAlert(options: DispatchAlertOptions): Promise<Aler
     environment,
   };
 
-  const webhookUrl = options.webhookUrl || process.env.ALERT_WEBHOOK_URL || 'https://alerts.hcicmd.ph/webhook';
-  const webhookSecret = options.webhookSecret || process.env.ALERT_WEBHOOK_SECRET || 'SECRET_ALERT_WEBHOOK_TOKEN_0123456789';
+  const isProduction = process.env.NODE_ENV === 'production';
+  const webhookUrl = options.webhookUrl || process.env.ALERT_WEBHOOK_URL;
+  const webhookSecret = options.webhookSecret || process.env.ALERT_WEBHOOK_SECRET;
+
+  if (isProduction && (!webhookUrl || !webhookSecret)) {
+    throw new Error('ALERT_WEBHOOK_CONFIG_REQUIRED: ALERT_WEBHOOK_URL and ALERT_WEBHOOK_SECRET environment variables are required in production environment.');
+  }
+
+  const targetWebhookUrl = webhookUrl || (options.fetchHandler ? 'http://localhost/alert-webhook' : undefined);
 
   const startTime = Date.now();
+
+  if (!targetWebhookUrl) {
+    const unconfiguredResult: AlertResult = {
+      delivered: false,
+      alert: alertPayload,
+      error: 'ALERT_WEBHOOK_NOT_CONFIGURED: Missing ALERT_WEBHOOK_URL or webhookUrl option',
+      durationMs: 0,
+    };
+    alertHistoryBuffer.push(unconfiguredResult);
+    return unconfiguredResult;
+  }
+
   let result: AlertResult = {
     delivered: false,
     alert: alertPayload,
-    webhookUrl,
+    webhookUrl: targetWebhookUrl,
   };
 
   try {
     const headers: Record<string, string> = {
       'Content-Type': 'application/json',
-      'X-Alert-Secret': webhookSecret,
       'User-Agent': 'HCI-CMD-Platform-AlertDispatcher/1.0',
     };
+    if (webhookSecret) {
+      headers['X-Alert-Secret'] = webhookSecret;
+    }
 
     let fetchRes: any;
 
     if (options.fetchHandler) {
-      fetchRes = await options.fetchHandler(webhookUrl, {
+      fetchRes = await options.fetchHandler(targetWebhookUrl, {
         method: 'POST',
         headers,
         body: JSON.stringify(alertPayload),
@@ -136,7 +157,7 @@ export async function dispatchAlert(options: DispatchAlertOptions): Promise<Aler
       const timeoutId = setTimeout(() => controller.abort(), 5000);
 
       try {
-        const response = await fetch(webhookUrl, {
+        const response = await fetch(targetWebhookUrl, {
           method: 'POST',
           headers,
           body: JSON.stringify(alertPayload),
