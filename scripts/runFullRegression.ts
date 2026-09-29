@@ -22,6 +22,7 @@ const testFiles = [
   'scripts/testPhase7Milestone8Concurrency.ts',
   'scripts/testPriorityAFoundation.ts',
   'scripts/testPriorityBCommerce.ts',
+  'scripts/testPriorityCAutomation.ts',
 ];
 
 console.log('========================================================================');

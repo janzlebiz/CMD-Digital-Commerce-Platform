@@ -1521,6 +1521,473 @@ export class DeliveryAdapterRegistry {
   }
 }
 
+// ============================================================================
+// PRIORITY C MILESTONE C1: NOTIFICATION INFRASTRUCTURE & QUEUE
+// ============================================================================
+
+export type NotificationChannel = 'email' | 'sms' | 'in_app';
+
+export type NotificationStatus =
+  | 'pending'
+  | 'processing'
+  | 'dispatched'
+  | 'failed'
+  | 'dead_letter';
+
+export interface NotificationPayload {
+  recipientId: string;
+  recipientEmail?: string;
+  recipientPhone?: string;
+  channel: NotificationChannel;
+  templateId: string;
+  title: string;
+  body: string;
+  metadata?: Record<string, any>;
+}
+
+export interface NotificationDispatchResult {
+  dispatchId: string;
+  channel: NotificationChannel;
+  status: 'dispatched' | 'failed';
+  providerMessageId?: string;
+  error?: string;
+  dispatchedAt: string;
+}
+
+export interface NotificationProvider {
+  channel: NotificationChannel;
+  providerType: string;
+  send(notification: NotificationPayload, idempotencyKey?: string): Promise<NotificationDispatchResult>;
+}
+
+export interface EmailNotificationAdapter extends NotificationProvider {
+  channel: 'email';
+}
+
+export interface SmsNotificationAdapter extends NotificationProvider {
+  channel: 'sms';
+}
+
+export interface InAppNotificationAdapter extends NotificationProvider {
+  channel: 'in_app';
+}
+
+export class SimulatedNotificationAdapter implements NotificationProvider {
+  public sendCount = 0;
+  public lastIdempotencyKey = '';
+  public lastPayload: NotificationPayload | null = null;
+  public simulatedFailuresRemaining = 0;
+  public permanentFailure = false;
+  private dispatchedMap: Map<string, NotificationDispatchResult> = new Map();
+
+  constructor(
+    public channel: NotificationChannel = 'email',
+    public providerType: string = 'simulated_notification_provider'
+  ) {}
+
+  async send(payload: NotificationPayload, idempotencyKey?: string): Promise<NotificationDispatchResult> {
+    if (idempotencyKey) {
+      this.lastIdempotencyKey = idempotencyKey;
+      if (this.dispatchedMap.has(idempotencyKey)) {
+        return this.dispatchedMap.get(idempotencyKey)!;
+      }
+    }
+
+    this.sendCount++;
+    this.lastPayload = payload;
+
+    if (this.permanentFailure) {
+      throw new Error(`Simulated Permanent Provider Failure (${this.channel})`);
+    }
+
+    if (this.simulatedFailuresRemaining > 0) {
+      this.simulatedFailuresRemaining--;
+      throw new Error(`Simulated Transient Provider Failure (${this.channel})`);
+    }
+
+    const nowIso = new Date().toISOString();
+    const result: NotificationDispatchResult = {
+      dispatchId: `DISP-${Date.now().toString().slice(-6)}-${crypto.randomBytes(2).toString('hex').toUpperCase()}`,
+      channel: this.channel,
+      status: 'dispatched',
+      providerMessageId: idempotencyKey ? `MSG-${idempotencyKey}` : `MSG-${Date.now()}`,
+      dispatchedAt: nowIso,
+    };
+
+    if (idempotencyKey) {
+      this.dispatchedMap.set(idempotencyKey, result);
+    }
+    return result;
+  }
+}
+
+export class NotificationAdapterRegistry {
+  private static adapters: Map<NotificationChannel, NotificationProvider> = new Map();
+
+  static registerAdapter(channel: NotificationChannel, adapter: NotificationProvider) {
+    this.adapters.set(channel, adapter);
+  }
+
+  static getAdapter(channel: NotificationChannel): NotificationProvider {
+    if (this.adapters.has(channel)) {
+      return this.adapters.get(channel)!;
+    }
+    const defaultSim = new SimulatedNotificationAdapter(channel, `default_simulated_${channel}`);
+    this.adapters.set(channel, defaultSim);
+    return defaultSim;
+  }
+
+  static clear() {
+    this.adapters.clear();
+  }
+}
+
+export interface NotificationQueueItem {
+  id: string;
+  idempotencyKey: string;
+  recipientId: string;
+  recipientEmail?: string;
+  recipientPhone?: string;
+  channel: NotificationChannel;
+  templateId: string;
+  title: string;
+  body: string;
+  metadata?: Record<string, any>;
+  status: NotificationStatus;
+  retryCount: number;
+  maxRetries: number;
+  backoffMs: number;
+  nextAttemptAt: string;
+  lastError?: string;
+  providerResult?: any;
+  createdAt: string;
+  updatedAt: string;
+  dispatchedAt?: string;
+}
+
+export interface NotificationRecord {
+  id: string;
+  queueItemId: string;
+  idempotencyKey: string;
+  recipientId: string;
+  recipientEmail?: string;
+  recipientPhone?: string;
+  channel: NotificationChannel;
+  templateId: string;
+  title: string;
+  body: string;
+  metadata?: Record<string, any>;
+  providerMessageId?: string;
+  dispatchedAt: string;
+}
+
+/**
+ * Generates a deterministic notification idempotency key.
+ */
+export function generateNotificationIdempotencyKey(
+  channel: NotificationChannel,
+  recipientId: string,
+  eventTag: string,
+  uniqueRef: string = ''
+): string {
+  const cleanRef = uniqueRef ? `_${uniqueRef}` : '';
+  return `notif_${channel}_${recipientId}_${eventTag}${cleanRef}`;
+}
+
+export interface EnqueueNotificationParams {
+  idempotencyKey: string;
+  recipientId: string;
+  recipientEmail?: string;
+  recipientPhone?: string;
+  channel: NotificationChannel;
+  templateId?: string;
+  title: string;
+  body: string;
+  metadata?: Record<string, any>;
+  maxRetries?: number;
+  backoffMs?: number;
+}
+
+export interface EnqueueNotificationResult {
+  success: boolean;
+  queueItem: NotificationQueueItem;
+  idempotentReplay: boolean;
+  message?: string;
+  error?: string;
+}
+
+/**
+ * Enqueue a notification with deterministic idempotency.
+ */
+export async function enqueueNotification(
+  db: any,
+  params: EnqueueNotificationParams
+): Promise<EnqueueNotificationResult> {
+  const {
+    idempotencyKey,
+    recipientId,
+    recipientEmail,
+    recipientPhone,
+    channel,
+    templateId = 'default',
+    title,
+    body,
+    metadata = {},
+    maxRetries = 3,
+    backoffMs = 1000,
+  } = params;
+
+  if (!idempotencyKey || typeof idempotencyKey !== 'string') {
+    throw new Error('idempotencyKey is required and must be a string.');
+  }
+  if (!recipientId || typeof recipientId !== 'string') {
+    throw new Error('recipientId is required.');
+  }
+  if (!['email', 'sms', 'in_app'].includes(channel)) {
+    throw new Error(`Invalid channel: ${channel}. Must be email, sms, or in_app.`);
+  }
+  if (!title || !body) {
+    throw new Error('title and body are required.');
+  }
+
+  const hash = crypto.createHash('sha256').update(idempotencyKey).digest('hex').substring(0, 16).toUpperCase();
+  const queueDocId = `NQ-${hash}`;
+  const nowIso = new Date().toISOString();
+
+  const queueRef = db.collection('notification_queue').doc(queueDocId);
+  const existingSnap = await queueRef.get();
+
+  if (existingSnap && existingSnap.exists) {
+    const existing = (typeof existingSnap.data === 'function' ? existingSnap.data() : existingSnap.data) as NotificationQueueItem;
+    if (existing.status === 'dispatched') {
+      return {
+        success: true,
+        queueItem: existing,
+        idempotentReplay: true,
+        message: 'Notification already successfully dispatched.',
+      };
+    }
+    if (existing.status === 'dead_letter') {
+      return {
+        success: false,
+        queueItem: existing,
+        idempotentReplay: true,
+        error: 'Notification previously failed permanently (dead letter).',
+      };
+    }
+    return {
+      success: true,
+      queueItem: existing,
+      idempotentReplay: true,
+      message: `Notification already queued (status: ${existing.status}).`,
+    };
+  }
+
+  const newQueueItem: NotificationQueueItem = {
+    id: queueDocId,
+    idempotencyKey,
+    recipientId,
+    recipientEmail,
+    recipientPhone,
+    channel,
+    templateId,
+    title,
+    body,
+    metadata,
+    status: 'pending',
+    retryCount: 0,
+    maxRetries,
+    backoffMs,
+    nextAttemptAt: nowIso,
+    createdAt: nowIso,
+    updatedAt: nowIso,
+  };
+
+  await queueRef.set(newQueueItem);
+
+  return {
+    success: true,
+    queueItem: newQueueItem,
+    idempotentReplay: false,
+  };
+}
+
+export interface ProcessQueueOptions {
+  maxBatchSize?: number;
+  channel?: NotificationChannel;
+  forceImmediate?: boolean;
+}
+
+export interface ProcessQueueResult {
+  processedCount: number;
+  dispatchedCount: number;
+  failedCount: number;
+  deadLetterCount: number;
+  results: Array<{
+    id: string;
+    idempotencyKey: string;
+    status: NotificationStatus;
+    error?: string;
+  }>;
+}
+
+/**
+ * Process pending and retryable notification queue items.
+ */
+export async function processNotificationQueue(
+  db: any,
+  options: ProcessQueueOptions = {}
+): Promise<ProcessQueueResult> {
+  const { maxBatchSize = 10, channel, forceImmediate = false } = options;
+  const now = new Date();
+  const nowIso = now.toISOString();
+
+  const queueColl = db.collection('notification_queue');
+  const snap = await queueColl.get();
+
+  const candidateItems: NotificationQueueItem[] = [];
+  if (snap && !snap.empty) {
+    snap.forEach((doc: any) => {
+      const data = typeof doc.data === 'function' ? doc.data() : doc.data;
+      if (channel && data.channel !== channel) return;
+
+      const isPending = data.status === 'pending';
+      const isRetryable =
+        data.status === 'failed' &&
+        data.retryCount < data.maxRetries &&
+        (forceImmediate || !data.nextAttemptAt || data.nextAttemptAt <= nowIso);
+
+      if (isPending || isRetryable) {
+        candidateItems.push(data);
+      }
+    });
+  }
+
+  // Sort by createdAt ascending (FIFO)
+  candidateItems.sort((a, b) => (a.createdAt || '').localeCompare(b.createdAt || ''));
+  const batch = candidateItems.slice(0, maxBatchSize);
+
+  let dispatchedCount = 0;
+  let failedCount = 0;
+  let deadLetterCount = 0;
+  const results: ProcessQueueResult['results'] = [];
+
+  for (const item of batch) {
+    const queueDocRef = db.collection('notification_queue').doc(item.id);
+    const adapter = NotificationAdapterRegistry.getAdapter(item.channel);
+
+    // Mark as processing
+    await queueDocRef.update({
+      status: 'processing',
+      updatedAt: new Date().toISOString(),
+    });
+
+    const payload: NotificationPayload = {
+      recipientId: item.recipientId,
+      recipientEmail: item.recipientEmail,
+      recipientPhone: item.recipientPhone,
+      channel: item.channel,
+      templateId: item.templateId,
+      title: item.title,
+      body: item.body,
+      metadata: item.metadata,
+    };
+
+    try {
+      const dispatchResult = await adapter.send(payload, item.idempotencyKey);
+      const finishedIso = new Date().toISOString();
+
+      // Record successful dispatch
+      const updatedItem: NotificationQueueItem = {
+        ...item,
+        status: 'dispatched',
+        dispatchedAt: finishedIso,
+        updatedAt: finishedIso,
+        providerResult: dispatchResult,
+      };
+      await queueDocRef.set(updatedItem);
+
+      // Create permanent notification record
+      const notifDocId = `NTF-${crypto.createHash('sha256').update(`${item.id}_${item.idempotencyKey}`).digest('hex').substring(0, 16).toUpperCase()}`;
+      const notificationRecord: NotificationRecord = {
+        id: notifDocId,
+        queueItemId: item.id,
+        idempotencyKey: item.idempotencyKey,
+        recipientId: item.recipientId,
+        recipientEmail: item.recipientEmail,
+        recipientPhone: item.recipientPhone,
+        channel: item.channel,
+        templateId: item.templateId,
+        title: item.title,
+        body: item.body,
+        metadata: item.metadata,
+        providerMessageId: dispatchResult.providerMessageId,
+        dispatchedAt: finishedIso,
+      };
+      await db.collection('notifications').doc(notifDocId).set(notificationRecord);
+
+      dispatchedCount++;
+      results.push({
+        id: item.id,
+        idempotencyKey: item.idempotencyKey,
+        status: 'dispatched',
+      });
+    } catch (err: any) {
+      const errorIso = new Date().toISOString();
+      const nextRetryCount = (item.retryCount || 0) + 1;
+      const errorMessage = err?.message || String(err);
+
+      if (nextRetryCount >= item.maxRetries) {
+        // Terminal dead-letter state
+        const deadLetterItem: NotificationQueueItem = {
+          ...item,
+          status: 'dead_letter',
+          retryCount: nextRetryCount,
+          lastError: errorMessage,
+          updatedAt: errorIso,
+        };
+        await queueDocRef.set(deadLetterItem);
+        deadLetterCount++;
+        results.push({
+          id: item.id,
+          idempotencyKey: item.idempotencyKey,
+          status: 'dead_letter',
+          error: errorMessage,
+        });
+      } else {
+        // Recoverable failure with exponential backoff
+        const delayMs = (item.backoffMs || 1000) * Math.pow(2, nextRetryCount - 1);
+        const nextAttemptAt = new Date(Date.now() + delayMs).toISOString();
+
+        const failedItem: NotificationQueueItem = {
+          ...item,
+          status: 'failed',
+          retryCount: nextRetryCount,
+          nextAttemptAt,
+          lastError: errorMessage,
+          updatedAt: errorIso,
+        };
+        await queueDocRef.set(failedItem);
+        failedCount++;
+        results.push({
+          id: item.id,
+          idempotencyKey: item.idempotencyKey,
+          status: 'failed',
+          error: errorMessage,
+        });
+      }
+    }
+  }
+
+  return {
+    processedCount: batch.length,
+    dispatchedCount,
+    failedCount,
+    deadLetterCount,
+    results,
+  };
+}
+
 export interface ServerDependencies {
   db?: any;
   auth?: any;
@@ -7378,6 +7845,170 @@ export function createExpressApp(deps: ServerDependencies = {}): Express {
       entries.sort((a, b) => (a.timestamp || '').localeCompare(b.timestamp || ''));
 
       res.status(200).json({ success: true, stockistId: strStockistId, ledger: entries });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  // --- PHASE 7 MILESTONE C1: Notification Infrastructure & Queue Endpoints ---
+
+  // 1. POST /api/notifications/enqueue - Enqueue notification
+  app.post('/api/notifications/enqueue', async (req: Request, res: Response): Promise<void> => {
+    const user = await requireAuth(req, res);
+    if (!user) return;
+
+    const {
+      idempotencyKey,
+      recipientId,
+      recipientEmail,
+      recipientPhone,
+      channel,
+      templateId,
+      title,
+      body,
+      metadata,
+      maxRetries,
+      backoffMs,
+    } = req.body;
+
+    // Staff or user enqueueing for themselves
+    const isStaff = user.role === 'branch_manager' || user.role === 'regional_director' || user.role === 'super_admin';
+    if (!isStaff && recipientId && recipientId !== user.uid) {
+      res.status(403).json({ error: 'Access Denied: Customers can only enqueue notifications for themselves.' });
+      return;
+    }
+
+    try {
+      const targetRecipient = recipientId || user.uid;
+      const targetKey = idempotencyKey || generateNotificationIdempotencyKey(channel, targetRecipient, 'manual', Date.now().toString());
+
+      const result = await enqueueNotification(db, {
+        idempotencyKey: targetKey,
+        recipientId: targetRecipient,
+        recipientEmail,
+        recipientPhone,
+        channel,
+        templateId,
+        title,
+        body,
+        metadata,
+        maxRetries: maxRetries !== undefined ? Number(maxRetries) : undefined,
+        backoffMs: backoffMs !== undefined ? Number(backoffMs) : undefined,
+      });
+
+      res.status(result.idempotentReplay ? 200 : 201).json(result);
+    } catch (err: any) {
+      res.status(400).json({ error: err.message });
+    }
+  });
+
+  // 2. POST /api/notifications/process-queue - Process queue batch
+  app.post('/api/notifications/process-queue', async (req: Request, res: Response): Promise<void> => {
+    const user = await requireAuth(req, res);
+    if (!user) return;
+
+    if (user.role !== 'branch_manager' && user.role !== 'regional_director' && user.role !== 'super_admin') {
+      res.status(403).json({ error: 'Access Denied: Processing notification queue requires staff role.' });
+      return;
+    }
+
+    const { maxBatchSize, channel, forceImmediate } = req.body || {};
+
+    try {
+      const result = await processNotificationQueue(db, {
+        maxBatchSize: Number(maxBatchSize) || 10,
+        channel,
+        forceImmediate: !!forceImmediate,
+      });
+
+      res.status(200).json({ success: true, ...result });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  // 3. GET /api/notifications/queue/:id - Get queue item status
+  app.get('/api/notifications/queue/:id', async (req: Request, res: Response): Promise<void> => {
+    const user = await requireAuth(req, res);
+    if (!user) return;
+
+    try {
+      const snap = await db.collection('notification_queue').doc(req.params.id).get();
+      if (!snap || !snap.exists) {
+        res.status(404).json({ error: 'Queue item not found.' });
+        return;
+      }
+      const data = typeof snap.data === 'function' ? snap.data() : snap.data;
+
+      const isStaff = user.role === 'branch_manager' || user.role === 'regional_director' || user.role === 'super_admin';
+      if (!isStaff && data.recipientId !== user.uid) {
+        res.status(403).json({ error: 'Access Denied: Cannot view queue item of another recipient.' });
+        return;
+      }
+
+      res.status(200).json({ success: true, queueItem: data });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  // 4. GET /api/notifications/my-notifications - Customer notification feed
+  app.get('/api/notifications/my-notifications', async (req: Request, res: Response): Promise<void> => {
+    const user = await requireAuth(req, res);
+    if (!user) return;
+
+    try {
+      const snap = await db.collection('notifications')
+        .where('recipientId', '==', user.uid)
+        .get();
+
+      const notifications: NotificationRecord[] = [];
+      if (snap && !snap.empty) {
+        snap.forEach((doc: any) => {
+          notifications.push(typeof doc.data === 'function' ? doc.data() : doc.data);
+        });
+      }
+      notifications.sort((a, b) => (b.dispatchedAt || '').localeCompare(a.dispatchedAt || ''));
+
+      res.status(200).json({ success: true, notifications });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  // 5. GET /api/notifications/queue - Staff view queue items
+  app.get('/api/notifications/queue', async (req: Request, res: Response): Promise<void> => {
+    const user = await requireAuth(req, res);
+    if (!user) return;
+
+    if (user.role !== 'branch_manager' && user.role !== 'regional_director' && user.role !== 'super_admin') {
+      res.status(403).json({ error: 'Access Denied: Viewing notification queue requires staff role.' });
+      return;
+    }
+
+    try {
+      const snap = await db.collection('notification_queue').get();
+      const items: NotificationQueueItem[] = [];
+      if (snap && !snap.empty) {
+        snap.forEach((doc: any) => {
+          items.push(typeof doc.data === 'function' ? doc.data() : doc.data);
+        });
+      }
+
+      const statusFilter = req.query.status as string;
+      const channelFilter = req.query.channel as string;
+
+      let filtered = items;
+      if (statusFilter) {
+        filtered = filtered.filter((i) => i.status === statusFilter);
+      }
+      if (channelFilter) {
+        filtered = filtered.filter((i) => i.channel === channelFilter);
+      }
+
+      filtered.sort((a, b) => (b.createdAt || '').localeCompare(a.createdAt || ''));
+
+      res.status(200).json({ success: true, count: filtered.length, items: filtered });
     } catch (err: any) {
       res.status(500).json({ error: err.message });
     }

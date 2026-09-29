@@ -187,5 +187,25 @@ service cloud.firestore {
       );
       allow write: if false; // ADR-009: Server-authoritative writes
     }
+
+    // Priority C Milestone C1: Notification Infrastructure & Queue
+    match /notification_queue/{jobId} {
+      allow get, list: if isSignedIn() && (
+        isRegionalDirector() ||
+        isSuperAdmin() ||
+        isBranchManager()
+      );
+      allow write: if false; // ADR-009: Server-authoritative queue writes
+    }
+
+    match /notifications/{notifId} {
+      allow get, list: if isSignedIn() && (
+        isOwner(resource.data.recipientId) ||
+        isRegionalDirector() ||
+        isSuperAdmin() ||
+        isBranchManager()
+      );
+      allow write: if false; // ADR-009: Server-authoritative writes
+    }
   }
 }

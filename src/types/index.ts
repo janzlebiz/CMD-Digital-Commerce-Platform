@@ -487,4 +487,56 @@ export interface StockReconciliationReport {
   checkedAt: string;
 }
 
+// --- Phase 7 Milestone C1: Notification Infrastructure & Queue Types ---
+export type NotificationChannel = 'email' | 'sms' | 'in_app';
+export type NotificationStatus = 'pending' | 'processing' | 'dispatched' | 'failed' | 'dead_letter';
+
+export interface NotificationPayload {
+  recipientId: string;
+  recipientEmail?: string;
+  recipientPhone?: string;
+  channel: NotificationChannel;
+  templateId: string;
+  title: string;
+  body: string;
+  metadata?: Record<string, any>;
+}
+
+export interface NotificationQueueItem {
+  id: string;
+  idempotencyKey: string;
+  recipientId: string;
+  recipientEmail?: string;
+  recipientPhone?: string;
+  channel: NotificationChannel;
+  templateId: string;
+  title: string;
+  body: string;
+  metadata?: Record<string, any>;
+  status: NotificationStatus;
+  retryCount: number;
+  maxRetries: number;
+  backoffMs: number;
+  nextAttemptAt: string;
+  lastError?: string;
+  providerResult?: any;
+  createdAt: string;
+  updatedAt: string;
+  dispatchedAt?: string;
+}
+
+export interface NotificationRecord {
+  id: string;
+  queueItemId: string;
+  idempotencyKey: string;
+  recipientId: string;
+  channel: NotificationChannel;
+  templateId: string;
+  title: string;
+  body: string;
+  metadata?: Record<string, any>;
+  providerMessageId?: string;
+  dispatchedAt: string;
+}
+
 

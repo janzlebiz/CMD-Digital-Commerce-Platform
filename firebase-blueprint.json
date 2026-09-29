@@ -336,6 +336,50 @@
         "performedBy": { "type": "string" }
       },
       "required": ["id", "stockistId", "branchId", "type", "amount", "timestamp", "performedBy"]
+    },
+    "notification_queue_item": {
+      "title": "NotificationQueueItem",
+      "description": "Queued notification message with retry and dead-letter state machine.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "idempotencyKey": { "type": "string" },
+        "recipientId": { "type": "string" },
+        "recipientEmail": { "type": "string" },
+        "recipientPhone": { "type": "string" },
+        "channel": { "type": "string", "enum": ["email", "sms", "in_app"] },
+        "templateId": { "type": "string" },
+        "title": { "type": "string" },
+        "body": { "type": "string" },
+        "status": { "type": "string", "enum": ["pending", "processing", "dispatched", "failed", "dead_letter"] },
+        "retryCount": { "type": "number" },
+        "maxRetries": { "type": "number" },
+        "backoffMs": { "type": "number" },
+        "nextAttemptAt": { "type": "string", "format": "date-time" },
+        "lastError": { "type": "string" },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" },
+        "dispatchedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["id", "idempotencyKey", "recipientId", "channel", "title", "body", "status", "retryCount", "maxRetries"]
+    },
+    "notification_record": {
+      "title": "NotificationRecord",
+      "description": "Dispatched notification history record.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "queueItemId": { "type": "string" },
+        "idempotencyKey": { "type": "string" },
+        "recipientId": { "type": "string" },
+        "channel": { "type": "string", "enum": ["email", "sms", "in_app"] },
+        "templateId": { "type": "string" },
+        "title": { "type": "string" },
+        "body": { "type": "string" },
+        "providerMessageId": { "type": "string" },
+        "dispatchedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["id", "queueItemId", "recipientId", "channel", "title", "body", "dispatchedAt"]
     }
   },
   "firestore": {
@@ -402,6 +446,14 @@
     "/b2b_ledger/{ledgerId}": {
       "schema": "b2b_ledger",
       "description": "Immutable B2B consignment and security deposit transaction ledger."
+    },
+    "/notification_queue/{jobId}": {
+      "schema": "notification_queue_item",
+      "description": "Asynchronous notification queue with retry and dead-letter state machine."
+    },
+    "/notifications/{notifId}": {
+      "schema": "notification_record",
+      "description": "Dispatched customer and staff notification history records."
     }
   }
 }
