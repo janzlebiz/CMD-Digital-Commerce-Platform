@@ -90,6 +90,12 @@ The canonical product roadmap comprises the following ten phases:
 * **Milestone C2 (Transactional Lifecycle Automation & Authorization Hardening)**: COMPLETED / TESTED (88/88 assertions). Lifecycle triggers implemented for Orders (checkout completed, fulfillment/dispatch, delivery completed, cancellation/refund), Consultations (booking confirmation, cancellation, 24h & 2h reminders with strict customer ownership and branch isolation enforcement), Workshops (registration confirmation, reminder, waitlist promotion), Support (ticket acknowledgement, SLA-breach staff alert, resolution notification), and Inventory (branch-manager low-stock alert when stock reaches calculated ROP threshold).
   * *Scheduled Automation Clarification*: Time-based lifecycle sweeps (24h/2h consultation reminders, workshop broadcast reminders, and ticket SLA scans) do not require a separate custom in-process scheduler; they operate via deterministic trigger endpoints (`POST /api/consultations/:appointmentId/reminder`, `POST /api/workshops/:workshopId/reminders`, `POST /api/support/check-sla-breaches`, `POST /api/inventory/check-rop-alerts`) intended to be invoked by an external scheduler (e.g. Cloud Scheduler / CronJob) or direct staff action with strict RBAC/ownership authorization.
 * **Milestone C3 (Privacy Consent & Marketing Automation Hardening)**: COMPLETED / TESTED (57/57 assertions). Dual-channel granular marketing consent (`marketingEmailConsent`, `marketingSmsConsent`), consent timestamp/source auditing, self-service consent endpoints (`GET/PATCH/POST /api/user/consent`), public 1-click token-required unsubscribe endpoints (`GET/POST /api/marketing/unsubscribe`) with response token sanitization and fail-closed HMAC secret enforcement in production, `marketing_consents` and `marketing_campaigns` schemas in `firebase-blueprint.json` with server-authoritative `firestore.rules`, staff-only campaign CRUD (`marketing_campaigns`), CRM cohort targeting, mandatory consent enforcement during dispatch, strict `batchSize` cap execution, and accurate queue lifecycle tracking (`draft` -> `queued` -> `processing` -> `completed`).
+* **Priority C Regression Baseline**:
+  * Milestone C1: 46/46 assertions
+  * Milestone C2: 88/88 assertions
+  * Milestone C3: 57/57 assertions
+  * Current Total Across All 19 Regression Test Files: **829/829 assertions**
+  * Full Regression Suite: **19/19 suites passed**
 * Remaining Milestone: C4 (Operational Analytics, Dashboards & Export Engine).
 
 ### Priority D: Mobile & PWA Hardening (Original Phase 8)
