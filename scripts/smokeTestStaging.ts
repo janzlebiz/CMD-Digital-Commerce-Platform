@@ -26,196 +26,14 @@ function assert(condition: any, description: string) {
   }
 }
 
-// Helper to create a comprehensive mock database for testing
-function createStagingMockDb() {
-  const collections = new Map<string, Map<string, any>>();
-
-  function getColMap(name: string) {
-    if (!collections.has(name)) collections.set(name, new Map());
-    return collections.get(name)!;
-  }
-
-  // Seed default metadata and data
-  getColMap('_health').set('readyz', { status: 'ready', timestamp: new Date().toISOString() });
-  
-  // Seed admin user
-  getColMap('users').set('demo-super-admin-uid', {
-    uid: 'demo-super-admin-uid',
-    email: 'admin@hcicmd.ph',
-    role: 'super_admin',
-    firstName: 'Super',
-    lastName: 'Admin',
-  });
-
-  // Seed standard customer user
-  getColMap('users').set('demo-customer-uid', {
-    uid: 'demo-customer-uid',
-    email: 'customer@gmail.com',
-    role: 'customer',
-    firstName: 'Jane',
-    lastName: 'Doe',
-    mobileNumber: '+639123456789',
-    marketingEmailConsent: true,
-    marketingSmsConsent: false,
-  });
-
-  // Seed branch inventory and batches
-  getColMap('inventory').set('daet_hci-cmd-65ml', {
-    id: 'daet_hci-cmd-65ml',
-    branchId: 'daet',
-    skuId: 'hci-cmd-65ml',
-    activeStock: 50,
-    allocatedStock: 0,
-    quarantineStock: 0,
-    damagedStock: 0,
-  });
-
-  getColMap('product_batches').set('batch-001', {
-    id: 'batch-001',
-    skuId: 'hci-cmd-65ml',
-    supplierId: 'spl-001',
-    quantity: 100,
-    qualityControlStatus: 'passed',
-    expiryDate: '2028-12-31',
-  });
-
-  getColMap('branch_batch_inventory').set('daet_batch-001', {
-    id: 'daet_batch-001',
-    batchId: 'batch-001',
-    branchId: 'daet',
-    skuId: 'hci-cmd-65ml',
-    availableQuantity: 50,
-    reservedQuantity: 0,
-    quarantineQuantity: 0,
-    damagedQuantity: 0,
-    qualityControlStatus: 'passed',
-    expiryDate: '2028-12-31',
-  });
-
-  const mockDb: any = {
-    collection: (colName: string) => {
-      const colMap = getColMap(colName);
-      return {
-        doc: (docId: string) => {
-          const docRef = {
-            id: docId,
-            colName,
-            get: async () => {
-              const data = colMap.get(docId);
-              return {
-                id: docId,
-                exists: !!data,
-                data: () => data,
-                ref: docRef,
-              };
-            },
-            set: async (data: any, options?: any) => {
-              if (options?.merge) {
-                const existing = colMap.get(docId) || {};
-                colMap.set(docId, { ...existing, ...data });
-              } else {
-                colMap.set(docId, data);
-              }
-            },
-            update: async (data: any) => {
-              const existing = colMap.get(docId) || {};
-              colMap.set(docId, { ...existing, ...data });
-            },
-            delete: async () => {
-              colMap.delete(docId);
-            },
-          };
-          return docRef;
-        },
-        get: async () => {
-          const docs = Array.from(colMap.entries()).map(([id, data]) => ({
-            id,
-            data: () => data,
-            exists: true,
-            ref: mockDb.collection(colName).doc(id),
-          }));
-          return {
-            empty: docs.length === 0,
-            docs,
-            forEach: (cb: any) => docs.forEach(cb),
-          };
-        },
-        where: (field1: string, op1: string, val1: any) => {
-          return {
-            get: async () => {
-              const results: any[] = [];
-              for (const [id, data] of colMap.entries()) {
-                if (data[field1] === val1) {
-                  results.push({
-                    id,
-                    exists: true,
-                    data: () => data,
-                    ref: mockDb.collection(colName).doc(id),
-                  });
-                }
-              }
-              return {
-                empty: results.length === 0,
-                docs: results,
-                forEach: (cb: any) => results.forEach(cb),
-              };
-            },
-          };
-        },
-      };
-    },
-    runTransaction: async (cb: any) => {
-      const tx: any = {
-        get: async (ref: any) => {
-          const colMap = getColMap(ref.colName);
-          const data = colMap.get(ref.id);
-          return {
-            id: ref.id,
-            exists: !!data,
-            data: () => data,
-          };
-        },
-        set: async (ref: any, data: any, options?: any) => {
-          const colMap = getColMap(ref.colName);
-          if (options?.merge) {
-            const existing = colMap.get(ref.id) || {};
-            colMap.set(ref.id, { ...existing, ...data });
-          } else {
-            colMap.set(ref.id, data);
-          }
-        },
-        update: async (ref: any, data: any) => {
-          const colMap = getColMap(ref.colName);
-          const existing = colMap.get(ref.id) || {};
-          colMap.set(ref.id, { ...existing, ...data });
-        },
-      };
-      return cb(tx);
-    },
-  };
-
-  return mockDb;
-}
-
 async function runSmokeTests() {
-  const stagingUrl = process.env.STAGING_URL || 'http://127.0.0.1:3099';
-  let server: http.Server | null = null;
-
-  // If no staging url was passed, start a local test server
-  if (!process.env.STAGING_URL) {
-    console.log(`\nStarting local test server on ${stagingUrl}...`);
-    const mockDb = createStagingMockDb();
-    const app = createExpressApp({ db: mockDb });
-    server = http.createServer(app);
-    await new Promise<void>((resolve) => {
-      server!.listen(3099, '127.0.0.1', () => {
-        resolve();
-      });
-    });
-    console.log('Local test server listening.');
-  } else {
-    console.log(`\nTesting against external staging environment: ${stagingUrl}`);
+  const stagingUrl = process.env.STAGING_URL;
+  if (!stagingUrl) {
+    console.error('ERROR: STAGING_URL environment variable is required. Automatic local fallback is disabled.');
+    process.exit(1);
   }
+
+  console.log(`\nTesting against staging environment: ${stagingUrl}`);
 
   try {
     // --- Test Group 1: Health Probes ---
@@ -298,16 +116,6 @@ async function runSmokeTests() {
   } catch (err: any) {
     console.error('Smoke tests failed with unexpected error:', err.message);
     failedCount++;
-  } finally {
-    if (server) {
-      console.log('\nStopping local test server...');
-      await new Promise<void>((resolve) => {
-        server!.close(() => {
-          resolve();
-        });
-      });
-      console.log('Local test server stopped.');
-    }
   }
 
   console.log('========================================================================');
