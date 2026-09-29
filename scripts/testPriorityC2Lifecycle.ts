@@ -385,6 +385,56 @@ async function runTests() {
     assert(reminder2Replay.status === 200, '2.13 Replay of 2h reminder returns HTTP 200 idempotent response');
     assert(reminder2ReplayData.idempotentReplay === true, '2.14 Response confirms idempotentReplay === true');
 
+    // 2.5 Consultation Reminder Authorization & Cross-User Security Tests
+    // (a) Customer triggering for their OWN appointment is authorized
+    const ownerReminderRes = await fetch(`http://127.0.0.1:${port}/api/consultations/${appointmentRecord.id}/reminder`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${customerToken}`,
+      },
+      body: JSON.stringify({ reminderType: '24h' }),
+    });
+    assert(ownerReminderRes.status === 200 || ownerReminderRes.status === 201, '2.15 Customer triggering reminder for their own appointment is authorized');
+
+    // (b) Cross-user reminder request: Customer Bob tries to trigger reminder for Alice's appointment -> 403 Forbidden
+    const crossCustomerRes = await fetch(`http://127.0.0.1:${port}/api/consultations/${appointmentRecord.id}/reminder`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${customerBobToken}`,
+      },
+      body: JSON.stringify({ reminderType: '24h' }),
+    });
+    const crossCustomerData: any = await crossCustomerRes.json();
+    assert(crossCustomerRes.status === 403, '2.16 Cross-user consultation reminder request by different customer returns HTTP 403 Forbidden');
+    assert(crossCustomerData.error?.includes('Customers can only trigger reminders for their own appointments'), '2.17 Error message explains ownership restriction');
+
+    // (c) Cross-branch manager reminder request: Manager assigned to Naga tries to trigger Daet appointment reminder -> 403 Forbidden
+    const nagaManagerToken = 'DEMO_TOKEN_branch_manager_naga';
+    const crossBranchRes = await fetch(`http://127.0.0.1:${port}/api/consultations/${appointmentRecord.id}/reminder`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${nagaManagerToken}`,
+      },
+      body: JSON.stringify({ reminderType: '24h' }),
+    });
+    const crossBranchData: any = await crossBranchRes.json();
+    assert(crossBranchRes.status === 403, '2.18 Cross-branch manager reminder request returns HTTP 403 Forbidden');
+    assert(crossBranchData.error?.includes('assigned branch'), '2.19 Error message explains branch isolation restriction');
+
+    // (d) Non-existent appointment -> 404
+    const notFoundRes = await fetch(`http://127.0.0.1:${port}/api/consultations/NON-EXISTENT-APPT/reminder`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${managerToken}`,
+      },
+      body: JSON.stringify({ reminderType: '24h' }),
+    });
+    assert(notFoundRes.status === 404, '2.20 Reminder for non-existent appointment returns HTTP 404 Not Found');
+
     // ========================================================================
     // DOMAIN 3: WORKSHOPS LIFECYCLE NOTIFICATIONS
     // ========================================================================

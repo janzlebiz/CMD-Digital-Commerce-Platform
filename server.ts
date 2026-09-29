@@ -4847,6 +4847,10 @@ export function createExpressApp(deps: ServerDependencies = {}): Express {
   });
 
   // --- C2: POST /api/consultations/:appointmentId/reminder - Trigger 24h or 2h Reminder ---
+  // Note on Scheduled Automation: 24h/2h consultation reminders, workshop broadcasts,
+  // and SLA scans require an external scheduler/cron trigger (e.g. Cloud Scheduler,
+  // Kubernetes CronJob, or an external cron runner). This endpoint serves as the authoritative
+  // programmatic trigger interface enforcing strict RBAC/ownership controls.
   app.post('/api/consultations/:appointmentId/reminder', async (req: Request, res: Response): Promise<void> => {
     const user = await requireAuth(req, res);
     if (!user) return;
@@ -4861,6 +4865,43 @@ export function createExpressApp(deps: ServerDependencies = {}): Express {
     }
 
     try {
+      const apptSnap = await db.collection('consultation_appointments').doc(strAppointmentId).get();
+      if (!apptSnap || !apptSnap.exists) {
+        res.status(404).json({ error: `Appointment not found: ${strAppointmentId}` });
+        return;
+      }
+      const appt = typeof apptSnap.data === 'function' ? apptSnap.data() : apptSnap.data;
+
+      // Role and Ownership Authorization Check:
+      // 1. Customers may only trigger reminders for their own appointment.
+      if (user.role === 'customer' || user.role.startsWith('customer')) {
+        if (appt.userId !== user.uid) {
+          res.status(403).json({ error: 'Access Denied: Customers can only trigger reminders for their own appointments.' });
+          return;
+        }
+      }
+      // 2. Branch Managers may only trigger reminders for appointments at their assigned branch.
+      else if (user.role === 'branch_manager' || user.role.startsWith('branch_manager')) {
+        const apptBranch = (appt.branchId || 'daet').toLowerCase().trim();
+        const userBranch = (user.assignedBranchId || (user.role.includes('_') ? user.role.split('_')[2] : 'daet')).toLowerCase().trim();
+        if (apptBranch !== userBranch) {
+          res.status(403).json({ error: 'Access Denied: Branch managers can only trigger reminders for appointments at their assigned branch.' });
+          return;
+        }
+      }
+      // 3. Practitioners may only trigger reminders for their assigned appointments.
+      else if (user.role === 'practitioner') {
+        if (appt.practitionerId !== user.uid) {
+          res.status(403).json({ error: 'Access Denied: Practitioners can only trigger reminders for their assigned appointments.' });
+          return;
+        }
+      }
+      // 4. Regional Directors and Super Admins have regional/global staff authority.
+      else if (user.role !== 'regional_director' && user.role !== 'super_admin') {
+        res.status(403).json({ error: 'Access Denied: You do not have permission to trigger consultation reminders.' });
+        return;
+      }
+
       const result = await enqueueConsultationReminder(db, strAppointmentId, reminderType as '24h' | '2h');
       res.status(result.idempotentReplay ? 200 : 201).json(result);
     } catch (err: any) {
