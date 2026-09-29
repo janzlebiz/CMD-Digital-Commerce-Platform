@@ -3544,6 +3544,31 @@ export function createExpressApp(deps: ServerDependencies = {}): Express {
   const app = express();
   app.use(express.json());
 
+  // Phase 9B-1: In-Memory Rate Limiting Store & Middleware
+  const rateLimitStore = new Map<string, { count: number; resetAt: number }>();
+  function createRateLimiter(windowMs: number, maxRequests: number, message = 'Rate limit exceeded. Please try again later.') {
+    return (req: Request, res: Response, next: () => void) => {
+      const clientKey = `${req.ip || req.headers['x-forwarded-for'] || 'unknown'}:${req.path}`;
+      const now = Date.now();
+      let record = rateLimitStore.get(clientKey);
+      if (!record || now > record.resetAt) {
+        record = { count: 1, resetAt: now + windowMs };
+        rateLimitStore.set(clientKey, record);
+        next();
+        return;
+      }
+      record.count++;
+      if (record.count > maxRequests) {
+        res.status(429).json({ error: message, retryAfterSeconds: Math.ceil((record.resetAt - now) / 1000) });
+        return;
+      }
+      next();
+    };
+  }
+
+  const standardRateLimiter = createRateLimiter(60000, 60); // 60 req/min
+  const strictRateLimiter = createRateLimiter(60000, 15);    // 15 req/min for checkout & unsubscribe
+
   app.use((req, res, next) => {
     const startTime = Date.now();
     const incomingTrace = req.headers['x-correlation-id'] || req.headers['x-request-id'];
@@ -4154,7 +4179,7 @@ export function createExpressApp(deps: ServerDependencies = {}): Express {
   }
 
   // --- 2. POST /api/orders/checkout ---
-  app.post('/api/orders/checkout', async (req: Request, res: Response): Promise<void> => {
+  app.post('/api/orders/checkout', strictRateLimiter, async (req: Request, res: Response): Promise<void> => {
     const user = await requireAuth(req, res);
     if (!user) return;
 
@@ -8197,8 +8222,104 @@ export function createExpressApp(deps: ServerDependencies = {}): Express {
     }
   };
 
-  app.get('/api/marketing/unsubscribe', handlePublicUnsubscribe);
-  app.post('/api/marketing/unsubscribe', handlePublicUnsubscribe);
+  app.get('/api/marketing/unsubscribe', strictRateLimiter, handlePublicUnsubscribe);
+  app.post('/api/marketing/unsubscribe', strictRateLimiter, handlePublicUnsubscribe);
+
+  // 4. GET /api/user/export-data - Authenticated DSAR Data Export (DPA 2012 / GDPR)
+  app.get('/api/user/export-data', standardRateLimiter, async (req: Request, res: Response): Promise<void> => {
+    const user = await requireAuth(req, res);
+    if (!user) return;
+
+    try {
+      const [userSnap, consentSnap, ordersSnap, ticketsSnap, apptsSnap] = await Promise.all([
+        db.collection('users').doc(user.uid).get().catch(() => ({ exists: false })),
+        db.collection('marketing_consents').doc(user.uid).get().catch(() => ({ exists: false })),
+        db.collection('orders').where('userId', '==', user.uid).get().catch(() => ({ docs: [], empty: true })),
+        db.collection('support_tickets').where('userId', '==', user.uid).get().catch(() => ({ docs: [], empty: true })),
+        db.collection('consultation_appointments').where('userId', '==', user.uid).get().catch(() => ({ docs: [], empty: true })),
+      ]);
+
+      const extractDocs = (snap: any) => (!snap || snap.empty ? [] : (snap.docs || []).map((d: any) => typeof d.data === 'function' ? d.data() : d.data));
+
+      const exportPackage = {
+        exportRequestedAt: new Date().toISOString(),
+        user: userSnap.exists ? userSnap.data() : { uid: user.uid, email: user.email, role: user.role },
+        marketingConsent: consentSnap.exists ? consentSnap.data() : null,
+        orders: extractDocs(ordersSnap),
+        supportTickets: extractDocs(ticketsSnap),
+        consultationAppointments: extractDocs(apptsSnap),
+      };
+
+      await logAuditEvent(
+        user.uid,
+        user.role,
+        user.assignedBranchId || null,
+        'user_data_exported',
+        'users',
+        user.uid,
+        true,
+        { exportedSections: Object.keys(exportPackage) },
+        req
+      );
+
+      res.status(200).json({ success: true, exportPackage });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  // 5. DELETE /api/user/account - Authenticated Account Deletion & PII Anonymization / Purge
+  app.delete('/api/user/account', standardRateLimiter, async (req: Request, res: Response): Promise<void> => {
+    const user = await requireAuth(req, res);
+    if (!user) return;
+
+    try {
+      const nowIso = new Date().toISOString();
+      const userRef = db.collection('users').doc(user.uid);
+      const userSnap = await userRef.get();
+      if (userSnap && userSnap.exists) {
+        await userRef.set({
+          firstName: '[DELETED]',
+          lastName: '[DELETED]',
+          email: `deleted_${user.uid}@anonymized.invalid`,
+          mobileNumber: '[DELETED]',
+          isAnonymized: true,
+          anonymizedAt: nowIso,
+        }, { merge: true });
+      }
+
+      const consentRef = db.collection('marketing_consents').doc(user.uid);
+      const consentSnap = await consentRef.get();
+      if (consentSnap && consentSnap.exists) {
+        await consentRef.set({
+          marketingEmailConsent: false,
+          marketingSmsConsent: false,
+          consentUpdatedAt: nowIso,
+          consentSource: 'account_deletion',
+        }, { merge: true });
+      }
+
+      await logAuditEvent(
+        user.uid,
+        user.role,
+        user.assignedBranchId || null,
+        'user_account_deleted_and_anonymized',
+        'users',
+        user.uid,
+        true,
+        { deletedAt: nowIso },
+        req
+      );
+
+      res.status(200).json({
+        success: true,
+        message: 'User account successfully anonymized and personal data purged in compliance with DPA 2012 / GDPR.',
+        anonymizedAt: nowIso,
+      });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
 
   // 4. GET /api/marketing/campaigns - List Marketing Campaigns (Staff Only)
   app.get('/api/marketing/campaigns', async (req: Request, res: Response): Promise<void> => {

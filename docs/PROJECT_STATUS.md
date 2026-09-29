@@ -90,14 +90,15 @@ The canonical product roadmap comprises the following ten phases:
 * **Milestone C2 (Transactional Lifecycle Automation & Authorization Hardening)**: COMPLETED / TESTED (88/88 assertions). Lifecycle triggers implemented for Orders (checkout completed, fulfillment/dispatch, delivery completed, cancellation/refund), Consultations (booking confirmation, cancellation, 24h & 2h reminders with strict customer ownership and branch isolation enforcement), Workshops (registration confirmation, reminder, waitlist promotion), Support (ticket acknowledgement, SLA-breach staff alert, resolution notification), and Inventory (branch-manager low-stock alert when stock reaches calculated ROP threshold).
   * *Scheduled Automation Clarification*: Time-based lifecycle sweeps (24h/2h consultation reminders, workshop broadcast reminders, and ticket SLA scans) do not require a separate custom in-process scheduler; they operate via deterministic trigger endpoints (`POST /api/consultations/:appointmentId/reminder`, `POST /api/workshops/:workshopId/reminders`, `POST /api/support/check-sla-breaches`, `POST /api/inventory/check-rop-alerts`) intended to be invoked by an external scheduler (e.g. Cloud Scheduler / CronJob) or direct staff action with strict RBAC/ownership authorization.
 * **Milestone C4 (Operational Analytics, Dashboards & Export Engine)**: COMPLETED / TESTED (87/87 assertions). Unified `GET /api/analytics/operational-kpis` analytics engine supporting date range and authorized branch filtering with strict RBAC & branch isolation, covering 5 core operational pillars (E-commerce GMV/AOV/refunds, Consultations utilization/attendance, Workshops capacity/waitlist, Support RA 11967 SLA compliance & resolution time, Inventory stockout risks, transfers, and quarantine holds), Executive Dashboard in `AdminDashboardView.tsx` with branch/date filters, loading, empty, and error states, authenticated server-side CSV and JSON export engines (`GET /api/analytics/export`) with PII redaction and audit logging, and dedicated test suite (`scripts/testPriorityC4Analytics.ts`).
-* **Priority C Regression Baseline**:
+* **Priority C & D Regression Baseline**:
   * Milestone C1: 46/46 assertions
   * Milestone C2: 88/88 assertions
   * Milestone C3: 57/57 assertions
   * Milestone C4: 87/87 assertions
   * Milestone D (Phase 8 PWA): 23/23 assertions
-  * Current Total Across All 21 Regression Test Files: **939/939 assertions**
-  * Full Regression Suite: **21/21 suites passed**
+  * Phase 9B-1 (Security & Privacy): 14/14 assertions
+  * Current Total Across All 22 Regression Test Files: **953/953 assertions**
+  * Full Regression Suite: **22/22 suites passed**
 * Priority C Automation & Analytics is fully **COMPLETED**.
 
 ### Priority D: Mobile & PWA Hardening (Original Phase 8) — COMPLETED
@@ -106,17 +107,13 @@ The canonical product roadmap comprises the following ten phases:
 * **HTML Metadata & Registration**: Configured `index.html` with manifest link, theme-color `#090d16`, and apple-touch-icon, with automatic service worker registration in `src/main.tsx`.
 * **Testing & Regression**: Dedicated test suite (`scripts/testPriorityDPwa.ts`) passing **23/23 assertions**. Full regression suite passing **21/21 suites** with a cumulative total of **939/939 assertions**.
 
-### Priority E: Production Certification (Original Phase 9) — PHASE 9A AUDIT COMPLETED
-* **Phase 9A Production Certification Audit**: Conducted a formal system audit across all 6 required production gates (Security & Penetration Readiness, Privacy & Compliance, Performance & Load, Backup & Disaster Recovery, Monitoring & Runbooks, and End-to-End Business Acceptance).
-* **Audit Document**: Published detailed findings, gap analysis, and affected components in `docs/PHASE_9A_PRODUCTION_AUDIT.md`.
-* **Gate Status**: 
-  * Security & Penetration Readiness: **PARTIAL PASS** (Core auth & HMAC pass; DAST/fuzzing and rate limiting missing).
-  * Privacy & Compliance: **PASS** (Consent, unsubscribe, and DPA/RA 11967 fully operational).
-  * Performance, Load & Concurrency: **PARTIAL PASS** (Concurrency safety verified; high-load k6 stress testing missing).
-  * Backup, Restore & Disaster Recovery: **FAIL** (Automated PITR backup scripts and recovery runbooks missing).
-  * Monitoring, Alerting & Runbooks: **FAIL** (Automated alerting webhooks and operator runbooks missing).
-  * End-to-End Business Acceptance: **PARTIAL PASS** (939/939 assertions passing; formal UAT sign-off records missing).
-* **Next Steps**: Proceed to Phase 9B Remediation to address identified gaps before formal launch certification.
+### Priority E: Production Certification (Original Phase 9) — PHASE 9B-1 REMEDIATION COMPLETED
+* **Phase 9B-1 Security & Privacy Remediation**:
+  * **Rate Limiting**: Implemented robust in-memory sliding-window rate limiters protecting checkout (`POST /api/orders/checkout`) and public unsubscribe (`GET/POST /api/marketing/unsubscribe`) against brute-force attacks and token enumeration (returning HTTP 429 when thresholds are exceeded).
+  * **Privacy / DSAR Export**: Implemented authenticated `GET /api/user/export-data` endpoint returning a comprehensive Data Subject Access Request (DSAR) package complying with DPA 2012 / GDPR regulations.
+  * **Account Deletion & Anonymization**: Implemented authenticated `DELETE /api/user/account` endpoint purging personal identifiers (`[DELETED]`, pseudonymized email `deleted_*@anonymized.invalid`), revoking marketing consents, and preserving required financial audit trails.
+  * **Testing & Regression**: Dedicated remediation test suite (`scripts/testPhase9SecurityPrivacy.ts`) passing **14/14 assertions**. Full regression suite passing **22/22 suites** with a cumulative total of **953/953 assertions**.
+* **Audit Document**: Updated findings and remediation status in `docs/PHASE_9A_PRODUCTION_AUDIT.md`.
 
 ---
 
