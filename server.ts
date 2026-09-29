@@ -2647,6 +2647,370 @@ export async function checkAndEnqueueLowStockAlert(
   return { alertTriggered: false, details };
 }
 
+// ============================================================================
+// PRIORITY C — MILESTONE C3: PRIVACY CONSENT & MARKETING AUTOMATION HELPERS
+// ============================================================================
+
+export interface MarketingConsentRecord {
+  userId?: string;
+  email?: string;
+  marketingEmailConsent: boolean;
+  marketingSmsConsent: boolean;
+  consentUpdatedAt: string;
+  consentSource: string;
+  unsubscribeToken: string;
+  ipAddress?: string;
+  userAgent?: string;
+}
+
+export function generateUnsubscribeToken(userIdOrEmail: string): string {
+  const secret = process.env.HMAC_SECRET || 'HCI_CMD_DEFAULT_PRODUCTION_SECRET_KEY_2026_V1';
+  return crypto.createHmac('sha256', secret).update(String(userIdOrEmail).toLowerCase().trim()).digest('hex').slice(0, 32);
+}
+
+export async function updateUserMarketingConsent(
+  db: any,
+  params: {
+    userId?: string;
+    email?: string;
+    emailConsent?: boolean;
+    smsConsent?: boolean;
+    source: string;
+    ipAddress?: string;
+    userAgent?: string;
+  }
+): Promise<MarketingConsentRecord> {
+  const nowIso = new Date().toISOString();
+  const identifier = params.userId || params.email || 'unknown';
+  const unsubscribeToken = generateUnsubscribeToken(identifier);
+
+  let currentEmailConsent = false;
+  let currentSmsConsent = false;
+
+  if (params.userId) {
+    const userDoc = await db.collection('users').doc(params.userId).get();
+    if (userDoc && userDoc.exists) {
+      const uData = typeof userDoc.data === 'function' ? userDoc.data() : userDoc.data;
+      currentEmailConsent = uData.marketingEmailConsent === true;
+      currentSmsConsent = uData.marketingSmsConsent === true;
+    }
+  }
+
+  const updatedEmailConsent = params.emailConsent !== undefined ? params.emailConsent : currentEmailConsent;
+  const updatedSmsConsent = params.smsConsent !== undefined ? params.smsConsent : currentSmsConsent;
+
+  const consentRecord: MarketingConsentRecord = {
+    userId: params.userId,
+    email: params.email,
+    marketingEmailConsent: updatedEmailConsent,
+    marketingSmsConsent: updatedSmsConsent,
+    consentUpdatedAt: nowIso,
+    consentSource: params.source || 'profile',
+    unsubscribeToken,
+    ipAddress: params.ipAddress,
+    userAgent: params.userAgent,
+  };
+
+  if (params.userId) {
+    await db.collection('users').doc(params.userId).set({
+      marketingEmailConsent: updatedEmailConsent,
+      marketingSmsConsent: updatedSmsConsent,
+      consentUpdatedAt: nowIso,
+      consentSource: params.source || 'profile',
+      unsubscribeToken,
+    }, { merge: true });
+  }
+
+  const consentDocId = params.userId || `email_${crypto.createHash('sha256').update(String(params.email).toLowerCase().trim()).digest('hex').slice(0, 16)}`;
+  await db.collection('marketing_consents').doc(consentDocId).set(consentRecord, { merge: true });
+
+  if (params.email && !params.userId) {
+    try {
+      const userSnap = await db.collection('users').where('email', '==', String(params.email).toLowerCase().trim()).get();
+      if (userSnap && !userSnap.empty) {
+        const docs = userSnap.docs || [];
+        for (const d of docs) {
+          const uRef = d.ref || db.collection('users').doc(d.id);
+          await uRef.set({
+            marketingEmailConsent: updatedEmailConsent,
+            marketingSmsConsent: updatedSmsConsent,
+            consentUpdatedAt: nowIso,
+            consentSource: params.source || 'unsubscribe_link',
+            unsubscribeToken,
+          }, { merge: true });
+        }
+      }
+    } catch (_e) {
+      // Best effort
+    }
+  }
+
+  return consentRecord;
+}
+
+export async function getUserMarketingConsent(
+  db: any,
+  userIdOrEmail: string
+): Promise<MarketingConsentRecord> {
+  const isEmail = String(userIdOrEmail).includes('@');
+  if (!isEmail) {
+    const userDoc = await db.collection('users').doc(userIdOrEmail).get();
+    if (userDoc && userDoc.exists) {
+      const u = typeof userDoc.data === 'function' ? userDoc.data() : userDoc.data;
+      return {
+        userId: u.uid || userIdOrEmail,
+        email: u.email,
+        marketingEmailConsent: u.marketingEmailConsent === true,
+        marketingSmsConsent: u.marketingSmsConsent === true,
+        consentUpdatedAt: u.consentUpdatedAt || new Date().toISOString(),
+        consentSource: u.consentSource || 'default_opt_out',
+        unsubscribeToken: u.unsubscribeToken || generateUnsubscribeToken(userIdOrEmail),
+      };
+    }
+  }
+
+  const emailNorm = String(userIdOrEmail).toLowerCase().trim();
+  const consentHash = `email_${crypto.createHash('sha256').update(emailNorm).digest('hex').slice(0, 16)}`;
+  const consentDoc = await db.collection('marketing_consents').doc(consentHash).get();
+  if (consentDoc && consentDoc.exists) {
+    return typeof consentDoc.data === 'function' ? consentDoc.data() : consentDoc.data;
+  }
+
+  return {
+    email: isEmail ? emailNorm : undefined,
+    userId: isEmail ? undefined : userIdOrEmail,
+    marketingEmailConsent: false,
+    marketingSmsConsent: false,
+    consentUpdatedAt: new Date().toISOString(),
+    consentSource: 'default_opt_out',
+    unsubscribeToken: generateUnsubscribeToken(userIdOrEmail),
+  };
+}
+
+export type MarketingCampaignChannel = 'email' | 'sms';
+export type MarketingCampaignStatus = 'draft' | 'scheduled' | 'queued' | 'processing' | 'completed' | 'cancelled';
+
+export interface MarketingCampaign {
+  id: string;
+  title: string;
+  description?: string;
+  channel: MarketingCampaignChannel;
+  templateId?: string;
+  subject: string;
+  body: string;
+  targetCohort: 'all' | 'wholesale_stockist' | 'repeat_retail' | 'wellness_seminar_attendees' | 'replenishment_due' | 'lapsed_accounts' | string;
+  branchId?: string | 'all';
+  status: MarketingCampaignStatus;
+  scheduledAt?: string;
+  createdAt: string;
+  updatedAt: string;
+  createdBy: string;
+  createdByName?: string;
+  
+  totalTargeted?: number;
+  totalEligible?: number;
+  totalExcludedConsent?: number;
+  enqueuedCount?: number;
+  dispatchedCount?: number;
+  failedCount?: number;
+  batchSize?: number;
+  dispatchedAt?: string;
+}
+
+export async function createMarketingCampaign(
+  db: any,
+  user: any,
+  payload: Partial<MarketingCampaign>
+): Promise<MarketingCampaign> {
+  const nowIso = new Date().toISOString();
+  const campaignId = `CMP-${Date.now()}-${crypto.randomBytes(3).toString('hex').toUpperCase()}`;
+  
+  const campaign: MarketingCampaign = {
+    id: campaignId,
+    title: String(payload.title || 'Untitled Campaign').trim(),
+    description: payload.description ? String(payload.description).trim() : undefined,
+    channel: payload.channel === 'sms' ? 'sms' : 'email',
+    templateId: payload.templateId ? String(payload.templateId).trim() : undefined,
+    subject: String(payload.subject || '').trim(),
+    body: String(payload.body || '').trim(),
+    targetCohort: String(payload.targetCohort || 'all').trim(),
+    branchId: payload.branchId ? String(payload.branchId).toLowerCase().trim() : 'all',
+    status: 'draft',
+    scheduledAt: payload.scheduledAt,
+    createdAt: nowIso,
+    updatedAt: nowIso,
+    createdBy: user.uid,
+    createdByName: user.email || user.role,
+    totalTargeted: 0,
+    totalEligible: 0,
+    totalExcludedConsent: 0,
+    enqueuedCount: 0,
+  };
+
+  await db.collection('marketing_campaigns').doc(campaignId).set(campaign);
+  return campaign;
+}
+
+export async function dispatchMarketingCampaign(
+  db: any,
+  user: any,
+  campaignId: string,
+  options: { batchSize?: number } = {}
+): Promise<{
+  campaign: MarketingCampaign;
+  totalTargeted: number;
+  totalEligible: number;
+  totalExcludedConsent: number;
+  enqueuedCount: number;
+  enqueuedItems: EnqueueNotificationResult[];
+}> {
+  const campaignRef = db.collection('marketing_campaigns').doc(campaignId);
+  const snap = await campaignRef.get();
+  if (!snap || !snap.exists) {
+    throw new Error(`Campaign not found: ${campaignId}`);
+  }
+
+  const campaign: MarketingCampaign = typeof snap.data === 'function' ? snap.data() : snap.data;
+
+  // Verify staff authorization
+  if (user.role === 'branch_manager' || user.role.startsWith('branch_manager')) {
+    const assigned = (user.assignedBranchId || (user.role.includes('_') ? user.role.split('_')[2] : 'daet')).toLowerCase().trim();
+    if (campaign.branchId && campaign.branchId !== 'all' && campaign.branchId !== assigned) {
+      throw new Error('PERMISSION_DENIED: Branch managers cannot dispatch campaigns for other branches.');
+    }
+  }
+
+  const [usersSnap, ordersSnap, regsSnap] = await Promise.all([
+    db.collection('users').get(),
+    db.collection('orders').get(),
+    db.collection('workshop_registrations').get(),
+  ]);
+
+  const users: any[] = [];
+  if (usersSnap && !usersSnap.empty) {
+    (usersSnap.docs || []).forEach((d: any) => users.push(typeof d.data === 'function' ? d.data() : d.data));
+  }
+
+  const orders: any[] = [];
+  if (ordersSnap && !ordersSnap.empty) {
+    (ordersSnap.docs || []).forEach((d: any) => orders.push(typeof d.data === 'function' ? d.data() : d.data));
+  }
+
+  const registrations: any[] = [];
+  if (regsSnap && !regsSnap.empty) {
+    (regsSnap.docs || []).forEach((d: any) => registrations.push(typeof d.data === 'function' ? d.data() : d.data));
+  }
+
+  const branchFilter = campaign.branchId && campaign.branchId !== 'all' ? campaign.branchId : undefined;
+  const cohortRecords = aggregateCustomerCrmProfiles(
+    {
+      orders,
+      registrations,
+      users,
+    },
+    branchFilter
+  );
+
+  const targetCohort = campaign.targetCohort || 'all';
+  const targetedCandidates = cohortRecords.filter((rec: any) => {
+    if (targetCohort === 'all') return true;
+    return Array.isArray(rec.cohorts) && rec.cohorts.includes(targetCohort);
+  });
+
+  const userMap = new Map<string, any>();
+  users.forEach((u) => {
+    if (u.uid) userMap.set(u.uid, u);
+  });
+
+  let totalTargeted = 0;
+  let totalEligible = 0;
+  let totalExcludedConsent = 0;
+  const enqueuedItems: EnqueueNotificationResult[] = [];
+
+  const batchSize = options.batchSize || campaign.batchSize || 50;
+
+  for (const cand of targetedCandidates) {
+    totalTargeted++;
+    const userObj = userMap.get(cand.userId) || {
+      uid: cand.userId,
+      email: cand.customerEmail,
+      phone: cand.customerPhone,
+      marketingEmailConsent: false,
+      marketingSmsConsent: false,
+    };
+
+    // Mandatory Privacy Consent Evaluation
+    let hasConsent = false;
+    if (campaign.channel === 'email') {
+      hasConsent = userObj.marketingEmailConsent === true;
+    } else if (campaign.channel === 'sms') {
+      hasConsent = userObj.marketingSmsConsent === true && !!(userObj.phone || userObj.mobileNumber || cand.customerPhone);
+    }
+
+    if (!hasConsent) {
+      totalExcludedConsent++;
+      continue;
+    }
+
+    totalEligible++;
+
+    const recipientEmail = campaign.channel === 'email' ? (userObj.email || cand.customerEmail) : undefined;
+    const recipientPhone = campaign.channel === 'sms' ? (userObj.phone || userObj.mobileNumber || cand.customerPhone) : undefined;
+    const unsubscribeToken = userObj.unsubscribeToken || generateUnsubscribeToken(userObj.uid || recipientEmail || '');
+
+    const idempotencyKey = generateNotificationIdempotencyKey(
+      campaign.channel,
+      userObj.uid || cand.userId,
+      'marketing_campaign',
+      `${campaign.id}_${userObj.uid || cand.userId}`
+    );
+
+    const queueRes = await enqueueNotification(db, {
+      idempotencyKey,
+      recipientId: userObj.uid || cand.userId,
+      recipientEmail,
+      recipientPhone,
+      channel: campaign.channel,
+      templateId: campaign.templateId || `campaign_${campaign.id}`,
+      title: campaign.subject,
+      body: campaign.body,
+      metadata: {
+        campaignId: campaign.id,
+        campaignTitle: campaign.title,
+        cohort: targetCohort,
+        branchId: campaign.branchId,
+        unsubscribeToken,
+      },
+    });
+
+    enqueuedItems.push(queueRes);
+  }
+
+  const nowIso = new Date().toISOString();
+  const updatedCampaign: MarketingCampaign = {
+    ...campaign,
+    status: 'completed',
+    totalTargeted,
+    totalEligible,
+    totalExcludedConsent,
+    enqueuedCount: enqueuedItems.length,
+    dispatchedAt: nowIso,
+    updatedAt: nowIso,
+    batchSize,
+  };
+
+  await campaignRef.set(updatedCampaign, { merge: true });
+
+  return {
+    campaign: updatedCampaign,
+    totalTargeted,
+    totalEligible,
+    totalExcludedConsent,
+    enqueuedCount: enqueuedItems.length,
+    enqueuedItems,
+  };
+}
+
 export interface ServerDependencies {
   db?: any;
   auth?: any;
@@ -7164,6 +7528,449 @@ export function createExpressApp(deps: ServerDependencies = {}): Express {
       res.status(200).json({ success: true, ...result });
     } catch (err: any) {
       res.status(500).json({ error: err.message });
+    }
+  });
+
+  // ============================================================================
+  // --- PRIORITY C MILESTONE C3: PRIVACY CONSENT & MARKETING AUTOMATION ROUTES ---
+  // ============================================================================
+
+  // 1. GET /api/user/consent - Self-service Marketing Consent Retrieval
+  app.get('/api/user/consent', async (req: Request, res: Response): Promise<void> => {
+    const user = await requireAuth(req, res);
+    if (!user) return;
+
+    try {
+      const consent = await getUserMarketingConsent(db, user.uid);
+      res.status(200).json({ success: true, consent });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  // 2. PATCH & POST /api/user/consent - Self-service Marketing Consent Update
+  const handleUserConsentUpdate = async (req: Request, res: Response): Promise<void> => {
+    const user = await requireAuth(req, res);
+    if (!user) return;
+
+    const { emailConsent, smsConsent, source = 'profile' } = req.body || {};
+
+    try {
+      const updatedConsent = await updateUserMarketingConsent(db, {
+        userId: user.uid,
+        email: user.email,
+        emailConsent: typeof emailConsent === 'boolean' ? emailConsent : undefined,
+        smsConsent: typeof smsConsent === 'boolean' ? smsConsent : undefined,
+        source: String(source).trim(),
+        ipAddress: req.ip,
+        userAgent: req.headers['user-agent'] as string,
+      });
+
+      await logAuditEvent(
+        user.uid,
+        user.role,
+        user.assignedBranchId || null,
+        'marketing_consent_updated',
+        'marketing_consents',
+        user.uid,
+        true,
+        {
+          marketingEmailConsent: updatedConsent.marketingEmailConsent,
+          marketingSmsConsent: updatedConsent.marketingSmsConsent,
+          source: updatedConsent.consentSource,
+        },
+        req
+      );
+
+      res.status(200).json({ success: true, consent: updatedConsent });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  };
+
+  app.patch('/api/user/consent', handleUserConsentUpdate);
+  app.post('/api/user/consent', handleUserConsentUpdate);
+
+  // 3. GET & POST /api/marketing/unsubscribe - Public 1-Click Unsubscribe Endpoint
+  const handlePublicUnsubscribe = async (req: Request, res: Response): Promise<void> => {
+    const tokenParam = (req.query.token || req.body?.token) ? String(req.query.token || req.body?.token).trim() : undefined;
+    const emailParam = (req.query.email || req.body?.email) ? String(req.query.email || req.body?.email).trim().toLowerCase() : undefined;
+    const channelParam = (req.query.channel || req.body?.channel) ? String(req.query.channel || req.body?.channel).trim().toLowerCase() : 'all';
+
+    if (!tokenParam && !emailParam) {
+      res.status(400).json({ error: 'Unsubscribe requires a valid token or email parameter.' });
+      return;
+    }
+
+    try {
+      let targetUserId: string | undefined;
+      let targetEmail: string | undefined = emailParam;
+
+      if (tokenParam) {
+        // Query users with matching unsubscribeToken
+        const userSnap = await db.collection('users').where('unsubscribeToken', '==', tokenParam).get();
+        if (userSnap && !userSnap.empty) {
+          const doc = userSnap.docs[0];
+          const d = typeof doc.data === 'function' ? doc.data() : doc.data;
+          targetUserId = d.uid;
+          targetEmail = d.email || targetEmail;
+        } else {
+          // Check marketing_consents collection
+          const consentSnap = await db.collection('marketing_consents').where('unsubscribeToken', '==', tokenParam).get();
+          if (consentSnap && !consentSnap.empty) {
+            const cDoc = consentSnap.docs[0];
+            const c = typeof cDoc.data === 'function' ? cDoc.data() : cDoc.data;
+            targetUserId = c.userId;
+            targetEmail = c.email || targetEmail;
+          }
+        }
+      }
+
+      if (!targetUserId && !targetEmail) {
+        res.status(404).json({ error: 'No subscriber record found matching the provided unsubscribe token or email.' });
+        return;
+      }
+
+      const emailConsent = (channelParam === 'sms') ? undefined : false;
+      const smsConsent = (channelParam === 'email') ? undefined : false;
+
+      const updatedRecord = await updateUserMarketingConsent(db, {
+        userId: targetUserId,
+        email: targetEmail,
+        emailConsent,
+        smsConsent,
+        source: 'unsubscribe_link',
+        ipAddress: req.ip,
+        userAgent: req.headers['user-agent'] as string,
+      });
+
+      await logAuditEvent(
+        targetUserId || 'public_unregistered',
+        'customer',
+        null,
+        'marketing_unsubscribed',
+        'marketing_consents',
+        targetUserId || targetEmail || 'unknown',
+        true,
+        {
+          channel: channelParam,
+          token: tokenParam ? `${tokenParam.slice(0, 6)}...` : undefined,
+          email: targetEmail,
+        },
+        req
+      );
+
+      res.status(200).json({
+        success: true,
+        message: 'You have been successfully unsubscribed from marketing communications.',
+        consent: updatedRecord,
+      });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  };
+
+  app.get('/api/marketing/unsubscribe', handlePublicUnsubscribe);
+  app.post('/api/marketing/unsubscribe', handlePublicUnsubscribe);
+
+  // 4. GET /api/marketing/campaigns - List Marketing Campaigns (Staff Only)
+  app.get('/api/marketing/campaigns', async (req: Request, res: Response): Promise<void> => {
+    const user = await requireAuth(req, res);
+    if (!user) return;
+
+    const isStaff = user.role === 'branch_manager' || user.role.startsWith('branch_manager') || user.role === 'regional_director' || user.role === 'super_admin';
+    if (!isStaff) {
+      res.status(403).json({ error: 'Access Denied: Only staff can manage marketing campaigns.' });
+      return;
+    }
+
+    try {
+      const snap = await db.collection('marketing_campaigns').get();
+      const campaigns: MarketingCampaign[] = [];
+
+      if (snap && !snap.empty) {
+        const docs = snap.docs || [];
+        for (const d of docs) {
+          const c: MarketingCampaign = typeof d.data === 'function' ? d.data() : d.data;
+          if (user.role === 'branch_manager' || user.role.startsWith('branch_manager')) {
+            const assigned = (user.assignedBranchId || (user.role.includes('_') ? user.role.split('_')[2] : 'daet')).toLowerCase().trim();
+            if (c.branchId && c.branchId !== 'all' && c.branchId !== assigned) {
+              continue; // Exclude other branches
+            }
+          }
+          campaigns.push(c);
+        }
+      }
+
+      res.status(200).json({ success: true, campaigns });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  // 5. GET /api/marketing/campaigns/:campaignId - Get Campaign Details (Staff Only)
+  app.get('/api/marketing/campaigns/:campaignId', async (req: Request, res: Response): Promise<void> => {
+    const user = await requireAuth(req, res);
+    if (!user) return;
+
+    const isStaff = user.role === 'branch_manager' || user.role.startsWith('branch_manager') || user.role === 'regional_director' || user.role === 'super_admin';
+    if (!isStaff) {
+      res.status(403).json({ error: 'Access Denied: Only staff can view marketing campaigns.' });
+      return;
+    }
+
+    const { campaignId } = req.params;
+    const strCampaignId = String(campaignId || '');
+    try {
+      const doc = await db.collection('marketing_campaigns').doc(strCampaignId).get();
+      if (!doc || !doc.exists) {
+        res.status(404).json({ error: `Campaign not found: ${strCampaignId}` });
+        return;
+      }
+
+      const campaign: MarketingCampaign = typeof doc.data === 'function' ? doc.data() : doc.data;
+      if (user.role === 'branch_manager' || user.role.startsWith('branch_manager')) {
+        const assigned = (user.assignedBranchId || (user.role.includes('_') ? user.role.split('_')[2] : 'daet')).toLowerCase().trim();
+        if (campaign.branchId && campaign.branchId !== 'all' && campaign.branchId !== assigned) {
+          res.status(403).json({ error: 'Access Denied: Branch managers cannot access campaigns for other branches.' });
+          return;
+        }
+      }
+
+      res.status(200).json({ success: true, campaign });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  // 6. POST /api/marketing/campaigns - Create Marketing Campaign (Staff Only)
+  app.post('/api/marketing/campaigns', async (req: Request, res: Response): Promise<void> => {
+    const user = await requireAuth(req, res);
+    if (!user) return;
+
+    const isStaff = user.role === 'branch_manager' || user.role.startsWith('branch_manager') || user.role === 'regional_director' || user.role === 'super_admin';
+    if (!isStaff) {
+      res.status(403).json({ error: 'Access Denied: Only staff can create marketing campaigns.' });
+      return;
+    }
+
+    const { title, description, channel = 'email', templateId, subject, body, targetCohort = 'all', branchId, scheduledAt } = req.body || {};
+    if (!title || !subject || !body) {
+      res.status(400).json({ error: 'title, subject, and body are required to create a campaign.' });
+      return;
+    }
+
+    if (channel !== 'email' && channel !== 'sms') {
+      res.status(400).json({ error: "channel must be 'email' or 'sms'." });
+      return;
+    }
+
+    let resolvedBranch = branchId || 'all';
+    if (user.role === 'branch_manager' || user.role.startsWith('branch_manager')) {
+      resolvedBranch = (user.assignedBranchId || (user.role.includes('_') ? user.role.split('_')[2] : 'daet')).toLowerCase().trim();
+    }
+
+    try {
+      const campaign = await createMarketingCampaign(db, user, {
+        title,
+        description,
+        channel: channel as MarketingCampaignChannel,
+        templateId,
+        subject,
+        body,
+        targetCohort,
+        branchId: resolvedBranch,
+        scheduledAt,
+      });
+
+      await logAuditEvent(
+        user.uid,
+        user.role,
+        resolvedBranch === 'all' ? null : resolvedBranch,
+        'marketing_campaign_created',
+        'marketing_campaigns',
+        campaign.id,
+        true,
+        { title, channel, targetCohort, branchId: resolvedBranch },
+        req
+      );
+
+      res.status(201).json({ success: true, campaign });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  // 7. PATCH /api/marketing/campaigns/:campaignId - Update Campaign (Staff Only)
+  app.patch('/api/marketing/campaigns/:campaignId', async (req: Request, res: Response): Promise<void> => {
+    const user = await requireAuth(req, res);
+    if (!user) return;
+
+    const isStaff = user.role === 'branch_manager' || user.role.startsWith('branch_manager') || user.role === 'regional_director' || user.role === 'super_admin';
+    if (!isStaff) {
+      res.status(403).json({ error: 'Access Denied: Only staff can update marketing campaigns.' });
+      return;
+    }
+
+    const { campaignId } = req.params;
+    const strCampaignId = String(campaignId || '');
+    try {
+      const docRef = db.collection('marketing_campaigns').doc(strCampaignId);
+      const doc = await docRef.get();
+      if (!doc || !doc.exists) {
+        res.status(404).json({ error: `Campaign not found: ${strCampaignId}` });
+        return;
+      }
+
+      const current: MarketingCampaign = typeof doc.data === 'function' ? doc.data() : doc.data;
+      if (user.role === 'branch_manager' || user.role.startsWith('branch_manager')) {
+        const assigned = (user.assignedBranchId || (user.role.includes('_') ? user.role.split('_')[2] : 'daet')).toLowerCase().trim();
+        if (current.branchId && current.branchId !== 'all' && current.branchId !== assigned) {
+          res.status(403).json({ error: 'Access Denied: Branch managers cannot modify campaigns for other branches.' });
+          return;
+        }
+      }
+
+      if (current.status === 'completed') {
+        res.status(400).json({ error: 'Cannot modify a completed marketing campaign.' });
+        return;
+      }
+
+      const { title, description, channel, templateId, subject, body, targetCohort, scheduledAt, status } = req.body || {};
+      const nowIso = new Date().toISOString();
+      const updated: MarketingCampaign = {
+        ...current,
+        title: title !== undefined ? String(title).trim() : current.title,
+        description: description !== undefined ? String(description).trim() : current.description,
+        channel: channel === 'sms' ? 'sms' : (channel === 'email' ? 'email' : current.channel),
+        templateId: templateId !== undefined ? String(templateId).trim() : current.templateId,
+        subject: subject !== undefined ? String(subject).trim() : current.subject,
+        body: body !== undefined ? String(body).trim() : current.body,
+        targetCohort: targetCohort !== undefined ? String(targetCohort).trim() : current.targetCohort,
+        scheduledAt: scheduledAt !== undefined ? scheduledAt : current.scheduledAt,
+        status: status !== undefined ? status : current.status,
+        updatedAt: nowIso,
+      };
+
+      await docRef.set(updated, { merge: true });
+
+      const resolvedBranchLog = (current.branchId && current.branchId !== 'all') ? String(current.branchId) : null;
+      await logAuditEvent(
+        user.uid,
+        user.role,
+        resolvedBranchLog,
+        'marketing_campaign_updated',
+        'marketing_campaigns',
+        strCampaignId,
+        true,
+        { patch: req.body },
+        req
+      );
+
+      res.status(200).json({ success: true, campaign: updated });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  // 8. DELETE /api/marketing/campaigns/:campaignId - Delete Campaign (Staff Only)
+  app.delete('/api/marketing/campaigns/:campaignId', async (req: Request, res: Response): Promise<void> => {
+    const user = await requireAuth(req, res);
+    if (!user) return;
+
+    const isStaff = user.role === 'branch_manager' || user.role.startsWith('branch_manager') || user.role === 'regional_director' || user.role === 'super_admin';
+    if (!isStaff) {
+      res.status(403).json({ error: 'Access Denied: Only staff can delete marketing campaigns.' });
+      return;
+    }
+
+    const { campaignId } = req.params;
+    const strCampaignId = String(campaignId || '');
+    try {
+      const docRef = db.collection('marketing_campaigns').doc(strCampaignId);
+      const doc = await docRef.get();
+      if (!doc || !doc.exists) {
+        res.status(404).json({ error: `Campaign not found: ${strCampaignId}` });
+        return;
+      }
+
+      const current: MarketingCampaign = typeof doc.data === 'function' ? doc.data() : doc.data;
+      if (user.role === 'branch_manager' || user.role.startsWith('branch_manager')) {
+        const assigned = (user.assignedBranchId || (user.role.includes('_') ? user.role.split('_')[2] : 'daet')).toLowerCase().trim();
+        if (current.branchId && current.branchId !== 'all' && current.branchId !== assigned) {
+          res.status(403).json({ error: 'Access Denied: Branch managers cannot delete campaigns for other branches.' });
+          return;
+        }
+      }
+
+      await docRef.delete();
+
+      const resolvedBranchLog = (current.branchId && current.branchId !== 'all') ? String(current.branchId) : null;
+      await logAuditEvent(
+        user.uid,
+        user.role,
+        resolvedBranchLog,
+        'marketing_campaign_deleted',
+        'marketing_campaigns',
+        strCampaignId,
+        true,
+        {},
+        req
+      );
+
+      res.status(200).json({ success: true, message: `Campaign ${strCampaignId} deleted.` });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  // 9. POST /api/marketing/campaigns/:campaignId/dispatch - Execute Campaign with Mandatory Privacy Consent
+  app.post('/api/marketing/campaigns/:campaignId/dispatch', async (req: Request, res: Response): Promise<void> => {
+    const user = await requireAuth(req, res);
+    if (!user) return;
+
+    const isStaff = user.role === 'branch_manager' || user.role.startsWith('branch_manager') || user.role === 'regional_director' || user.role === 'super_admin';
+    if (!isStaff) {
+      res.status(403).json({ error: 'Access Denied: Only staff can dispatch marketing campaigns.' });
+      return;
+    }
+
+    const { campaignId } = req.params;
+    const strCampaignId = String(campaignId || '');
+    const { batchSize } = req.body || {};
+
+    try {
+      const result = await dispatchMarketingCampaign(db, user, strCampaignId, { batchSize });
+
+      const resolvedBranchLog = (result.campaign.branchId && result.campaign.branchId !== 'all') ? String(result.campaign.branchId) : null;
+      await logAuditEvent(
+        user.uid,
+        user.role,
+        resolvedBranchLog,
+        'marketing_campaign_dispatched',
+        'marketing_campaigns',
+        strCampaignId,
+        true,
+        {
+          channel: result.campaign.channel,
+          targetCohort: result.campaign.targetCohort,
+          totalTargeted: result.totalTargeted,
+          totalEligible: result.totalEligible,
+          totalExcludedConsent: result.totalExcludedConsent,
+          enqueuedCount: result.enqueuedCount,
+        },
+        req
+      );
+
+      res.status(200).json({ success: true, ...result });
+    } catch (err: any) {
+      if (err.message.includes('PERMISSION_DENIED')) {
+        res.status(403).json({ error: err.message });
+      } else if (err.message.includes('not found')) {
+        res.status(404).json({ error: err.message });
+      } else {
+        res.status(500).json({ error: err.message });
+      }
     }
   });
 
