@@ -58,13 +58,22 @@ function createMockDatastore() {
   };
 }
 
-function createMockStorageClient() {
+function createMockStorageClient(options: { lifecycleRule?: any[]; queryError?: boolean } = {}) {
   const storageMap = new Map<string, Map<string, Buffer>>();
+  const defaultRule = [{ action: { type: 'Delete' }, condition: { age: 30, matchesPrefix: ['backups/'] } }];
+  const lifecycleRule = options.lifecycleRule !== undefined ? options.lifecycleRule : defaultRule;
+
   return {
     bucket: (bucketName: string) => {
       if (!storageMap.has(bucketName)) storageMap.set(bucketName, new Map());
       const bucketStore = storageMap.get(bucketName)!;
       return {
+        getMetadata: async () => {
+          if (options.queryError) {
+            throw new Error('GCS_METADATA_ACCESS_DENIED: Service account unauthorized');
+          }
+          return [{ lifecycle: { rule: lifecycleRule } }];
+        },
         file: (destination: string) => ({
           save: async (content: Buffer) => {
             bucketStore.set(destination, content);
@@ -185,8 +194,12 @@ async function runBackupRecoveryTests() {
 
   // 5. Test Firestore Point-In-Time Recovery (PITR) configuration verification
   console.log('\n--- Test Group 5: Firestore Point-In-Time Recovery (PITR) Verification ---');
-  const pitrResult = await verifyFirestorePitrConfiguration();
-  assert(pitrResult.pitrEnabled === true && pitrResult.retentionPeriodDays === 7, '5.1 Firestore PITR configuration verified as ENABLED with 7-day retention window');
+  const validPitrMock = {
+    pointInTimeRecoveryEnablement: 'POINT_IN_TIME_RECOVERY_ENABLED',
+    pitrRetentionPeriod: '604800s',
+  };
+  const pitrResult = await verifyFirestorePitrConfiguration({ customPitrConfig: validPitrMock });
+  assert(pitrResult.pitrEnabled === true && pitrResult.retentionPeriodDays === 7, '5.1 Injected valid PITR response verifies ENABLED status and 7-day retention window');
 
   let pitrDisabledCaught = false;
   try {
@@ -198,13 +211,41 @@ async function runBackupRecoveryTests() {
       pitrDisabledCaught = true;
     }
   }
-
   assert(pitrDisabledCaught === true, '5.2 Disabled Firestore PITR configuration correctly rejected by verification script');
+
+  let pitrInvalidRetentionCaught = false;
+  try {
+    await verifyFirestorePitrConfiguration({
+      customPitrConfig: { pointInTimeRecoveryEnablement: 'POINT_IN_TIME_RECOVERY_ENABLED', pitrRetentionPeriod: '86400s' },
+    });
+  } catch (err: any) {
+    if (err.message.includes('FIRESTORE_PITR_INVALID_RETENTION')) {
+      pitrInvalidRetentionCaught = true;
+    }
+  }
+  assert(pitrInvalidRetentionCaught === true, '5.3 Invalid retention period (<7 days) correctly rejected by verification script');
+
+  let pitrQueryFailedCaught = false;
+  try {
+    await verifyFirestorePitrConfiguration({
+      fetchHandler: async () => {
+        throw new Error('API_NETWORK_UNREACHABLE');
+      },
+    });
+  } catch (err: any) {
+    if (err.message.includes('FIRESTORE_PITR_QUERY_FAILED')) {
+      pitrQueryFailedCaught = true;
+    }
+  }
+  assert(pitrQueryFailedCaught === true, '5.4 Firestore PITR verifier fails closed when API query fails');
 
   // 6. Test GCS Bucket Lifecycle Policy Verification (30-day expiration)
   console.log('\n--- Test Group 6: GCS Bucket Lifecycle Expiration Policy Verification ---');
-  const lifecycleRes = await verifyGcsBucketLifecyclePolicy();
-  assert(lifecycleRes.lifecycleVerified === true && lifecycleRes.expirationAgeDays === 30, '6.1 GCS bucket lifecycle policy verified with active 30-day object expiration rule');
+  const validLifecycleStorage = createMockStorageClient({
+    lifecycleRule: [{ action: { type: 'Delete' }, condition: { age: 30 } }],
+  });
+  const lifecycleRes = await verifyGcsBucketLifecyclePolicy({ storageClient: validLifecycleStorage });
+  assert(lifecycleRes.lifecycleVerified === true && lifecycleRes.expirationAgeDays === 30, '6.1 Querying bucket metadata via storageClient verifies active 30-day object expiration rule');
 
   let lifecycleMissingCaught = false;
   try {
@@ -216,8 +257,18 @@ async function runBackupRecoveryTests() {
       lifecycleMissingCaught = true;
     }
   }
-
   assert(lifecycleMissingCaught === true, '6.2 Missing or invalid GCS 30-day lifecycle expiration policy correctly rejected');
+
+  let lifecycleQueryFailedCaught = false;
+  try {
+    const errorStorage = createMockStorageClient({ queryError: true });
+    await verifyGcsBucketLifecyclePolicy({ storageClient: errorStorage });
+  } catch (err: any) {
+    if (err.message.includes('GCS_LIFECYCLE_QUERY_FAILED')) {
+      lifecycleQueryFailedCaught = true;
+    }
+  }
+  assert(lifecycleQueryFailedCaught === true, '6.3 GCS Lifecycle policy verifier fails closed when metadata query fails');
 
   // Cleanup test directories
   if (fs.existsSync(testOutputDir)) {

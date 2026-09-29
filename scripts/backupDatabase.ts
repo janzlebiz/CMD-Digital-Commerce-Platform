@@ -156,6 +156,7 @@ export async function verifyFirestorePitrConfiguration(options: {
   projectId?: string;
   databaseId?: string;
   customPitrConfig?: any;
+  fetchHandler?: (url: string) => Promise<any>;
 } = {}): Promise<PitrVerificationResult> {
   const projectId = options.projectId || 'ai-studio-cmddigitalcommer-8d70f45b-1636-42ba-9e2d-f063a7b0e086';
   const databaseId = options.databaseId || '(default)';
@@ -163,45 +164,44 @@ export async function verifyFirestorePitrConfiguration(options: {
   let rawConfig = options.customPitrConfig;
 
   if (!rawConfig) {
-    // Query actual GCP Firestore database configuration
+    const url = `https://firestore.googleapis.com/v1/projects/${projectId}/databases/${databaseId}`;
     try {
-      const url = `https://firestore.googleapis.com/v1/projects/${projectId}/databases/${databaseId}`;
-      const res = await fetch(url);
-      if (res.ok) {
-        rawConfig = await res.json();
+      if (options.fetchHandler) {
+        rawConfig = await options.fetchHandler(url);
+      } else {
+        const res = await fetch(url);
+        if (res.ok) {
+          rawConfig = await res.json();
+        }
       }
-    } catch {
-      // Query failed or isolated environment
+    } catch (err: any) {
+      throw new Error(`FIRESTORE_PITR_QUERY_FAILED: Unable to query Firestore database configuration (${err.message})`);
     }
+  }
 
-    if (!rawConfig) {
-      rawConfig = {
-        name: `projects/${projectId}/databases/${databaseId}`,
-        pointInTimeRecoveryEnablement: 'POINT_IN_TIME_RECOVERY_ENABLED',
-        pitrRetentionPeriod: '604800s', // 7 days in seconds
-        earliestVersionTime: new Date(Date.now() - 7 * 86400 * 1000).toISOString(),
-        versionRetentionPeriod: '7d',
-      };
-    }
+  if (!rawConfig) {
+    throw new Error(`FIRESTORE_PITR_QUERY_FAILED: Unable to retrieve Firestore database configuration for ${projectId}/${databaseId}. Failed closed.`);
   }
 
   const isEnabled = rawConfig.pointInTimeRecoveryEnablement === 'POINT_IN_TIME_RECOVERY_ENABLED' ||
     rawConfig.pitrEnabled === true;
 
-  let retentionDays = 7;
+  let retentionDays = 0;
   if (rawConfig.pitrRetentionPeriod) {
     const seconds = parseInt(rawConfig.pitrRetentionPeriod, 10);
     if (!isNaN(seconds)) retentionDays = Math.round(seconds / 86400);
   } else if (typeof rawConfig.retentionPeriodDays === 'number') {
     retentionDays = rawConfig.retentionPeriodDays;
+  } else if (rawConfig.versionRetentionPeriod === '7d' || rawConfig.versionRetentionPeriod === '604800s') {
+    retentionDays = 7;
   }
 
   if (!isEnabled) {
     throw new Error(`FIRESTORE_PITR_DISABLED: Point-In-Time Recovery is not enabled on database ${projectId}/${databaseId}.`);
   }
 
-  if (retentionDays < 1) {
-    throw new Error(`FIRESTORE_PITR_INVALID_RETENTION: Retention period ${retentionDays} days is invalid.`);
+  if (retentionDays < 7) {
+    throw new Error(`FIRESTORE_PITR_INVALID_RETENTION: PITR retention period is ${retentionDays} days, required 7 days (604800s).`);
   }
 
   const result: PitrVerificationResult = {
@@ -231,9 +231,9 @@ export async function verifyGcsBucketLifecyclePolicy(options: {
 } = {}): Promise<GcsLifecycleVerificationResult> {
   const bucketName = options.bucketName || process.env.BACKUP_OFFSITE_STORAGE_BUCKET || 'hci-cmd-backups-offsite-asia';
 
-  let lifecycleRules: any[] = [];
+  let lifecycleRules: any[] | null = null;
 
-  if (options.customLifecycleConfig) {
+  if (options.customLifecycleConfig !== undefined) {
     lifecycleRules = options.customLifecycleConfig;
   } else {
     try {
@@ -242,14 +242,13 @@ export async function verifyGcsBucketLifecyclePolicy(options: {
       });
       const [metadata] = await storage.bucket(bucketName).getMetadata();
       lifecycleRules = metadata.lifecycle?.rule || [];
-    } catch {
-      lifecycleRules = [
-        {
-          action: { type: 'Delete' },
-          condition: { age: 30, matchesPrefix: ['backups/'] },
-        },
-      ];
+    } catch (err: any) {
+      throw new Error(`GCS_LIFECYCLE_QUERY_FAILED: Failed to query GCS bucket lifecycle metadata for ${bucketName} (${err.message}). Failed closed.`);
     }
+  }
+
+  if (!Array.isArray(lifecycleRules)) {
+    throw new Error(`GCS_LIFECYCLE_QUERY_FAILED: Invalid or missing lifecycle rule metadata for bucket ${bucketName}. Failed closed.`);
   }
 
   const has30DayExpirationRule = lifecycleRules.some((rule: any) => {
