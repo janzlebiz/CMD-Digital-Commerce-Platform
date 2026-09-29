@@ -1926,6 +1926,10 @@ export async function processNotificationQueue(
       };
       await db.collection('notifications').doc(notifDocId).set(notificationRecord);
 
+      if (item.metadata?.campaignId) {
+        await syncMarketingCampaignQueueProgress(db, String(item.metadata.campaignId), true);
+      }
+
       dispatchedCount++;
       results.push({
         id: item.id,
@@ -1947,6 +1951,11 @@ export async function processNotificationQueue(
           updatedAt: errorIso,
         };
         await queueDocRef.set(deadLetterItem);
+
+        if (item.metadata?.campaignId) {
+          await syncMarketingCampaignQueueProgress(db, String(item.metadata.campaignId), false);
+        }
+
         deadLetterCount++;
         results.push({
           id: item.id,
@@ -2664,8 +2673,29 @@ export interface MarketingConsentRecord {
 }
 
 export function generateUnsubscribeToken(userIdOrEmail: string): string {
-  const secret = process.env.HMAC_SECRET || 'HCI_CMD_DEFAULT_PRODUCTION_SECRET_KEY_2026_V1';
+  const secret = process.env.HMAC_SECRET;
+  if (!secret) {
+    if (process.env.NODE_ENV === 'production') {
+      throw new Error('SECURITY_ERROR: HMAC_SECRET environment variable is missing in production environment. Unsubscribe token generation failed closed.');
+    }
+    // Development/Test fallback only
+    const devSecret = 'HCI_CMD_DEV_NON_PROD_HMAC_SECRET_KEY';
+    return crypto.createHmac('sha256', devSecret).update(String(userIdOrEmail).toLowerCase().trim()).digest('hex').slice(0, 32);
+  }
   return crypto.createHmac('sha256', secret).update(String(userIdOrEmail).toLowerCase().trim()).digest('hex').slice(0, 32);
+}
+
+export function verifyUnsubscribeToken(token: string, userIdOrEmail: string): boolean {
+  if (!token || !userIdOrEmail) return false;
+  try {
+    const expected = generateUnsubscribeToken(userIdOrEmail);
+    const tokenBuf = Buffer.from(String(token).trim());
+    const expBuf = Buffer.from(expected);
+    if (tokenBuf.length !== expBuf.length) return false;
+    return crypto.timingSafeEqual(tokenBuf, expBuf);
+  } catch (_e) {
+    return false;
+  }
 }
 
 export async function updateUserMarketingConsent(
@@ -2851,6 +2881,44 @@ export async function createMarketingCampaign(
   return campaign;
 }
 
+export async function syncMarketingCampaignQueueProgress(
+  db: any,
+  campaignId: string,
+  isSuccess: boolean
+): Promise<void> {
+  if (!campaignId) return;
+  try {
+    const cRef = db.collection('marketing_campaigns').doc(campaignId);
+    const snap = await cRef.get();
+    if (!snap || !snap.exists) return;
+
+    const c: MarketingCampaign = typeof snap.data === 'function' ? snap.data() : snap.data;
+    const currentDispatched = c.dispatchedCount || 0;
+    const currentFailed = c.failedCount || 0;
+    const enqueuedCount = c.enqueuedCount || 0;
+
+    const newDispatched = currentDispatched + (isSuccess ? 1 : 0);
+    const newFailed = currentFailed + (isSuccess ? 0 : 1);
+    const totalProcessed = newDispatched + newFailed;
+
+    let newStatus: MarketingCampaignStatus = c.status;
+    if (totalProcessed >= enqueuedCount && enqueuedCount > 0) {
+      newStatus = 'completed';
+    } else if (totalProcessed > 0) {
+      newStatus = 'processing';
+    }
+
+    await cRef.set({
+      dispatchedCount: newDispatched,
+      failedCount: newFailed,
+      status: newStatus,
+      updatedAt: new Date().toISOString(),
+    }, { merge: true });
+  } catch (_e) {
+    // Best effort progress update
+  }
+}
+
 export async function dispatchMarketingCampaign(
   db: any,
   user: any,
@@ -2923,11 +2991,8 @@ export async function dispatchMarketingCampaign(
   });
 
   let totalTargeted = 0;
-  let totalEligible = 0;
   let totalExcludedConsent = 0;
-  const enqueuedItems: EnqueueNotificationResult[] = [];
-
-  const batchSize = options.batchSize || campaign.batchSize || 50;
+  const eligibleCandidates: Array<{ cand: any; userObj: any }> = [];
 
   for (const cand of targetedCandidates) {
     totalTargeted++;
@@ -2952,8 +3017,19 @@ export async function dispatchMarketingCampaign(
       continue;
     }
 
-    totalEligible++;
+    eligibleCandidates.push({ cand, userObj });
+  }
 
+  const totalEligible = eligibleCandidates.length;
+
+  // Batching & Dispatch Rate Limiting: Apply actual batch limit to enqueued items
+  const requestedBatch = options.batchSize !== undefined ? Number(options.batchSize) : Number(campaign.batchSize);
+  const effectiveBatchSize = (!isNaN(requestedBatch) && requestedBatch > 0) ? Math.min(requestedBatch, 500) : 50;
+  const batchToProcess = eligibleCandidates.slice(0, effectiveBatchSize);
+
+  const enqueuedItems: EnqueueNotificationResult[] = [];
+
+  for (const { cand, userObj } of batchToProcess) {
     const recipientEmail = campaign.channel === 'email' ? (userObj.email || cand.customerEmail) : undefined;
     const recipientPhone = campaign.channel === 'sms' ? (userObj.phone || userObj.mobileNumber || cand.customerPhone) : undefined;
     const unsubscribeToken = userObj.unsubscribeToken || generateUnsubscribeToken(userObj.uid || recipientEmail || '');
@@ -2989,14 +3065,16 @@ export async function dispatchMarketingCampaign(
   const nowIso = new Date().toISOString();
   const updatedCampaign: MarketingCampaign = {
     ...campaign,
-    status: 'completed',
+    status: 'queued', // Accurately queued; transitions to completed once queue worker finishes
     totalTargeted,
     totalEligible,
     totalExcludedConsent,
     enqueuedCount: enqueuedItems.length,
+    dispatchedCount: 0,
+    failedCount: 0,
     dispatchedAt: nowIso,
     updatedAt: nowIso,
-    batchSize,
+    batchSize: effectiveBatchSize,
   };
 
   await campaignRef.set(updatedCampaign, { merge: true });
@@ -7594,40 +7672,38 @@ export function createExpressApp(deps: ServerDependencies = {}): Express {
   // 3. GET & POST /api/marketing/unsubscribe - Public 1-Click Unsubscribe Endpoint
   const handlePublicUnsubscribe = async (req: Request, res: Response): Promise<void> => {
     const tokenParam = (req.query.token || req.body?.token) ? String(req.query.token || req.body?.token).trim() : undefined;
-    const emailParam = (req.query.email || req.body?.email) ? String(req.query.email || req.body?.email).trim().toLowerCase() : undefined;
     const channelParam = (req.query.channel || req.body?.channel) ? String(req.query.channel || req.body?.channel).trim().toLowerCase() : 'all';
 
-    if (!tokenParam && !emailParam) {
-      res.status(400).json({ error: 'Unsubscribe requires a valid token or email parameter.' });
+    // Unsubscribe security: Require valid unsubscribe token to prevent arbitrary email harassment / enumeration
+    if (!tokenParam) {
+      res.status(400).json({ error: 'A valid unsubscribe token is required to unsubscribe from marketing communications.' });
       return;
     }
 
     try {
       let targetUserId: string | undefined;
-      let targetEmail: string | undefined = emailParam;
+      let targetEmail: string | undefined;
 
-      if (tokenParam) {
-        // Query users with matching unsubscribeToken
-        const userSnap = await db.collection('users').where('unsubscribeToken', '==', tokenParam).get();
-        if (userSnap && !userSnap.empty) {
-          const doc = userSnap.docs[0];
-          const d = typeof doc.data === 'function' ? doc.data() : doc.data;
-          targetUserId = d.uid;
-          targetEmail = d.email || targetEmail;
-        } else {
-          // Check marketing_consents collection
-          const consentSnap = await db.collection('marketing_consents').where('unsubscribeToken', '==', tokenParam).get();
-          if (consentSnap && !consentSnap.empty) {
-            const cDoc = consentSnap.docs[0];
-            const c = typeof cDoc.data === 'function' ? cDoc.data() : cDoc.data;
-            targetUserId = c.userId;
-            targetEmail = c.email || targetEmail;
-          }
+      // Query users with matching unsubscribeToken
+      const userSnap = await db.collection('users').where('unsubscribeToken', '==', tokenParam).get();
+      if (userSnap && !userSnap.empty) {
+        const doc = userSnap.docs[0];
+        const d = typeof doc.data === 'function' ? doc.data() : doc.data;
+        targetUserId = d.uid;
+        targetEmail = d.email;
+      } else {
+        // Check marketing_consents collection
+        const consentSnap = await db.collection('marketing_consents').where('unsubscribeToken', '==', tokenParam).get();
+        if (consentSnap && !consentSnap.empty) {
+          const cDoc = consentSnap.docs[0];
+          const c = typeof cDoc.data === 'function' ? cDoc.data() : cDoc.data;
+          targetUserId = c.userId;
+          targetEmail = c.email;
         }
       }
 
       if (!targetUserId && !targetEmail) {
-        res.status(404).json({ error: 'No subscriber record found matching the provided unsubscribe token or email.' });
+        res.status(404).json({ error: 'No subscriber record found matching the provided unsubscribe token.' });
         return;
       }
 
@@ -7654,16 +7730,22 @@ export function createExpressApp(deps: ServerDependencies = {}): Express {
         true,
         {
           channel: channelParam,
-          token: tokenParam ? `${tokenParam.slice(0, 6)}...` : undefined,
+          tokenPrefix: `${tokenParam.slice(0, 6)}...`,
           email: targetEmail,
         },
         req
       );
 
+      // Do NOT return the unsubscribe token or internal client IP in public response
       res.status(200).json({
         success: true,
         message: 'You have been successfully unsubscribed from marketing communications.',
-        consent: updatedRecord,
+        consent: {
+          marketingEmailConsent: updatedRecord.marketingEmailConsent,
+          marketingSmsConsent: updatedRecord.marketingSmsConsent,
+          consentUpdatedAt: updatedRecord.consentUpdatedAt,
+          consentSource: updatedRecord.consentSource,
+        },
       });
     } catch (err: any) {
       res.status(500).json({ error: err.message });

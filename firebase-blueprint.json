@@ -380,6 +380,47 @@
         "dispatchedAt": { "type": "string", "format": "date-time" }
       },
       "required": ["id", "queueItemId", "recipientId", "channel", "title", "body", "dispatchedAt"]
+    },
+    "marketing_consent": {
+      "title": "MarketingConsentRecord",
+      "description": "User marketing communication preferences under DPA 2012 / GDPR.",
+      "type": "object",
+      "properties": {
+        "userId": { "type": "string" },
+        "email": { "type": "string", "format": "email" },
+        "marketingEmailConsent": { "type": "boolean" },
+        "marketingSmsConsent": { "type": "boolean" },
+        "consentUpdatedAt": { "type": "string", "format": "date-time" },
+        "consentSource": { "type": "string" },
+        "unsubscribeToken": { "type": "string" }
+      },
+      "required": ["marketingEmailConsent", "marketingSmsConsent", "consentUpdatedAt", "consentSource"]
+    },
+    "marketing_campaign": {
+      "title": "MarketingCampaignRecord",
+      "description": "Marketing communication campaign targeting CRM cohorts.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "title": { "type": "string" },
+        "description": { "type": "string" },
+        "channel": { "type": "string", "enum": ["email", "sms"] },
+        "subject": { "type": "string" },
+        "body": { "type": "string" },
+        "targetCohort": { "type": "string" },
+        "branchId": { "type": "string" },
+        "status": { "type": "string", "enum": ["draft", "scheduled", "queued", "processing", "completed", "cancelled", "failed"] },
+        "totalTargeted": { "type": "number" },
+        "totalEligible": { "type": "number" },
+        "totalExcludedConsent": { "type": "number" },
+        "enqueuedCount": { "type": "number" },
+        "dispatchedCount": { "type": "number" },
+        "failedCount": { "type": "number" },
+        "batchSize": { "type": "number" },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["id", "title", "channel", "subject", "body", "targetCohort", "status", "createdAt"]
     }
   },
   "firestore": {
@@ -454,6 +495,14 @@
     "/notifications/{notifId}": {
       "schema": "notification_record",
       "description": "Dispatched customer and staff notification history records."
+    },
+    "/marketing_consents/{consentDocId}": {
+      "schema": "marketing_consent",
+      "description": "Customer marketing preferences and audit history under DPA 2012 / GDPR."
+    },
+    "/marketing_campaigns/{campaignId}": {
+      "schema": "marketing_campaign",
+      "description": "Staff marketing automation campaigns and cohort dispatch records."
     }
   }
 }

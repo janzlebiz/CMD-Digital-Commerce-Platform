@@ -330,16 +330,52 @@ async function runTests() {
     assert(unsubData.consent.marketingEmailConsent === false, '1.9 Unsubscribed user has email consent revoked');
     assert(unsubData.consent.marketingSmsConsent === false, '1.10 Unsubscribed user has SMS consent revoked');
     assert(unsubData.consent.consentSource === 'unsubscribe_link', '1.11 Consent source recorded as unsubscribe_link');
+    assert(unsubData.consent.unsubscribeToken === undefined, '1.12 Public unsubscribe response does NOT leak unsubscribe token');
 
-    // 1.4 Public Unsubscribe via Email Body
-    const unsubEmailRes = await fetch(`http://127.0.0.1:${port}/api/marketing/unsubscribe`, {
+    // 1.4 Arbitrary email-only unsubscribe without valid token is blocked (400 Bad Request)
+    const unsubEmailOnlyRes = await fetch(`http://127.0.0.1:${port}/api/marketing/unsubscribe`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ email: 'bob@example.com', channel: 'sms' }),
     });
-    const unsubEmailData: any = await unsubEmailRes.json();
-    assert(unsubEmailRes.status === 200, '1.12 POST /api/marketing/unsubscribe with email body succeeds with HTTP 200');
-    assert(unsubEmailData.consent.marketingSmsConsent === false, '1.13 Bob SMS consent revoked via email lookup');
+    const unsubEmailOnlyData: any = await unsubEmailOnlyRes.json();
+    assert(unsubEmailOnlyRes.status === 400, '1.13 Arbitrary email-only unsubscribe without token returns HTTP 400 Bad Request');
+    assert(unsubEmailOnlyData.error?.includes('valid unsubscribe token is required'), '1.14 Error message clarifies token is required');
+
+    // 1.5 Valid token unsubscribe via POST body
+    const bobToken = generateUnsubscribeToken('demo-bob-uid');
+    const unsubBobRes = await fetch(`http://127.0.0.1:${port}/api/marketing/unsubscribe`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ token: bobToken, channel: 'sms' }),
+    });
+    const unsubBobData: any = await unsubBobRes.json();
+    assert(unsubBobRes.status === 200, '1.15 POST /api/marketing/unsubscribe with valid token succeeds with HTTP 200');
+    assert(unsubBobData.consent.marketingSmsConsent === false, '1.16 Bob SMS consent revoked via valid token lookup');
+
+    // 1.6 HMAC Determinism & Fail-Closed Security
+    const oldNodeEnv = process.env.NODE_ENV;
+    const oldHmacSecret = process.env.HMAC_SECRET;
+    try {
+      // (a) Production fail-closed test: missing HMAC_SECRET in production must throw
+      process.env.NODE_ENV = 'production';
+      delete process.env.HMAC_SECRET;
+      let threwSecurityError = false;
+      try {
+        generateUnsubscribeToken('test-user-prod');
+      } catch (e: any) {
+        threwSecurityError = e.message.includes('SECURITY_ERROR') && e.message.includes('HMAC_SECRET');
+      }
+      assert(threwSecurityError === true, '1.17 Missing HMAC_SECRET in production fails closed with SECURITY_ERROR');
+
+      // (b) Configured secret token verification
+      process.env.HMAC_SECRET = 'PROD_SECURE_HMAC_TEST_KEY_2026';
+      const prodToken = generateUnsubscribeToken('test-user-prod');
+      assert(typeof prodToken === 'string' && prodToken.length === 32, '1.18 Deterministic HMAC token generated when secret configured');
+    } finally {
+      process.env.NODE_ENV = oldNodeEnv;
+      process.env.HMAC_SECRET = oldHmacSecret;
+    }
 
     // Re-opt Alice in for downstream campaign testing
     await updateUserMarketingConsent(mockDb, {
@@ -481,6 +517,41 @@ async function runTests() {
     assert(dispatchSmsData.totalExcludedConsent === 0, '3.15 Zero excluded when all targeted have SMS consent');
     assert(dispatchSmsData.enqueuedCount === 2, '3.16 2 SMS messages enqueued into notification queue');
 
+    // Scenario C: Batching Limit & Campaign Status Accuracy
+    // Create a new campaign targeting wholesale_stockist with batchSize = 1
+    const createBatchCampRes = await fetch(`http://127.0.0.1:${port}/api/marketing/campaigns`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${adminToken}`,
+      },
+      body: JSON.stringify({
+        title: 'Batched Wholesale SMS Notification',
+        channel: 'sms',
+        subject: 'Batch Test',
+        body: 'Batch rate limited dispatch testing',
+        targetCohort: 'wholesale_stockist',
+        branchId: 'all',
+      }),
+    });
+    const createBatchData: any = await createBatchCampRes.json();
+    const batchCampaignId = createBatchData.campaign.id;
+
+    // Dispatch with explicit batchSize = 1 when 2 users are eligible
+    const dispatchBatchRes = await fetch(`http://127.0.0.1:${port}/api/marketing/campaigns/${batchCampaignId}/dispatch`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${adminToken}`,
+      },
+      body: JSON.stringify({ batchSize: 1 }),
+    });
+    const dispatchBatchData: any = await dispatchBatchRes.json();
+    assert(dispatchBatchRes.status === 200, '3.17 Batched campaign dispatch returns HTTP 200');
+    assert(dispatchBatchData.totalEligible === 2, '3.18 Total eligible across cohort is 2');
+    assert(dispatchBatchData.enqueuedCount === 1, '3.19 batchSize: 1 strictly caps enqueued items to 1 in this dispatch');
+    assert(dispatchBatchData.campaign.status === 'queued', '3.20 Campaign status immediately after dispatch is accurately queued (not prematurely completed)');
+
     // ========================================================================
     // SECTION 4: IDEMPOTENCY, DUPLICATE PREVENTION & QUEUE DISPATCH
     // ========================================================================
@@ -500,20 +571,31 @@ async function runTests() {
 
     // 4.2 Process Notification Queue for Campaign Messages
     const queueProcessRes = await processNotificationQueue(mockDb, { maxBatchSize: 50, forceImmediate: true });
-    assert(queueProcessRes.processedCount >= 3, '4.3 Queue worker processes all enqueued campaign messages');
-    assert(queueProcessRes.dispatchedCount >= 3, '4.4 All campaign messages successfully dispatched to adapters');
+    assert(queueProcessRes.processedCount >= 4, '4.3 Queue worker processes all enqueued campaign messages');
+    assert(queueProcessRes.dispatchedCount >= 4, '4.4 All campaign messages successfully dispatched to adapters');
     assert(spyEmail.sendCount >= 1, '4.5 Email adapter dispatched campaign email');
-    assert(spySms.sendCount >= 2, '4.6 SMS adapter dispatched wholesale SMS broadcasts');
+    assert(spySms.sendCount >= 3, '4.6 SMS adapter dispatched wholesale SMS broadcasts');
 
-    // 4.3 Verify Audit Logs
+    // 4.3 Verify Campaign Status Transition to Completed after Queue Processing
+    const daetCampDoc = await mockDb.collection('marketing_campaigns').doc(daetCampaignId).get();
+    const daetCampData = daetCampDoc.data();
+    assert(daetCampData.status === 'completed', '4.7 Campaign status transitions to completed after queue worker dispatches items');
+    assert(daetCampData.dispatchedCount === 1, '4.8 Campaign records accurate dispatchedCount === 1');
+
+    const batchCampDoc = await mockDb.collection('marketing_campaigns').doc(batchCampaignId).get();
+    const batchCampData = batchCampDoc.data();
+    assert(batchCampData.status === 'completed', '4.9 Batched campaign transitions to completed once its enqueued items finish');
+    assert(batchCampData.dispatchedCount === 1, '4.10 Batched campaign records accurate dispatchedCount === 1');
+
+    // 4.4 Verify Audit Logs
     const auditLogs = Array.from(store.audit_logs.values());
     const consentAudit = auditLogs.find((a: any) => a.action === 'marketing_consent_updated');
     const unsubAudit = auditLogs.find((a: any) => a.action === 'marketing_unsubscribed');
     const dispatchAudit = auditLogs.find((a: any) => a.action === 'marketing_campaign_dispatched');
 
-    assert(consentAudit !== undefined, '4.7 Audit log records marketing_consent_updated');
-    assert(unsubAudit !== undefined, '4.8 Audit log records marketing_unsubscribed');
-    assert(dispatchAudit !== undefined, '4.9 Audit log records marketing_campaign_dispatched');
+    assert(consentAudit !== undefined, '4.11 Audit log records marketing_consent_updated');
+    assert(unsubAudit !== undefined, '4.12 Audit log records marketing_unsubscribed');
+    assert(dispatchAudit !== undefined, '4.13 Audit log records marketing_campaign_dispatched');
 
   } finally {
     server.close();

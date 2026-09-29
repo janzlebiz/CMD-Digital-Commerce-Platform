@@ -207,5 +207,29 @@ service cloud.firestore {
       );
       allow write: if false; // ADR-009: Server-authoritative writes
     }
+
+    // Priority C Milestone C3: Privacy Consent & Marketing Automation
+    match /marketing_consents/{consentId} {
+      allow get: if isSignedIn() && (
+        isOwner(resource.data.userId) ||
+        isRegionalDirector() ||
+        isSuperAdmin() ||
+        isBranchManager()
+      );
+      allow list: if isSignedIn() && (
+        isRegionalDirector() ||
+        isSuperAdmin()
+      );
+      allow write: if false; // ADR-009: Server-authoritative consent writes
+    }
+
+    match /marketing_campaigns/{campaignId} {
+      allow get, list: if isSignedIn() && (
+        isRegionalDirector() ||
+        isSuperAdmin() ||
+        (isBranchManager() && (resource.data.branchId == 'all' || get(/databases/$(database)/documents/users/$(request.auth.uid)).data.assignedBranchId == resource.data.branchId))
+      );
+      allow write: if false; // ADR-009: Server-authoritative campaign writes
+    }
   }
 }
