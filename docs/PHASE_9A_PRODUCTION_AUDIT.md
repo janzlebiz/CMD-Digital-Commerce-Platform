@@ -50,10 +50,11 @@ In accordance with **Priority E / Original Phase 9 (Production Certification)**,
 * **Affected Components**: `server.ts`, `scripts/testPhase9Performance.ts`.
 
 ### Gate 4: Backup, Restore & Disaster Recovery — **PASS (Phase 9B-3 Verified)**
-* **Identified Gaps (Remediated in Phase 9B-3)**:
-  1. ~~Complete absence of automated backup export scripts~~ -> **Resolved**: Implemented `scripts/backupDatabase.ts` supporting timestamped JSON exports, SHA-256 checksum integrity verification, and encryption.
-  2. ~~Missing disaster recovery runbook~~ -> **Resolved**: Authored comprehensive `docs/RUNBOOK_DISASTER_RECOVERY.md` defining RPO/RTO objectives, automated backup procedures, restore instructions, recovery verification, and failure escalation.
-  3. **Audit Verification Results**: Dedicated test suite (`scripts/testPhase9BackupRecovery.ts`) passing **10/10 assertions** covering automated backup generation, checksum validation, isolated environment restore, and corrupted backup rejection.
+* **Identified Gaps (Remediated & Hardened in Phase 9B-3)**:
+  1. ~~Complete absence of automated backup export scripts~~ -> **Resolved**: Implemented `scripts/backupDatabase.ts` querying the authoritative datastore directly across all collections (`users`, `inventory`, `orders`, `audit_logs`, `marketing_consents`, etc.), replacing raw file copies.
+  2. ~~Insecure or base64 placeholder encryption~~ -> **Resolved**: Implemented authenticated **AES-256-GCM** encryption (`encryptPayloadAES256GCM` / `decryptPayloadAES256GCM`) storing ciphertext, IV, and authTag without embedding encryption keys.
+  3. ~~Missing disaster recovery runbook~~ -> **Resolved**: Authored `docs/RUNBOOK_DISASTER_RECOVERY.md` defining RPO (1 hr), RTO (30 mins), backup/restore SOPs, SHA-256 verification, and incident escalation.
+  4. **Verification Hardening Results**: Dedicated test suite (`scripts/testPhase9BackupRecovery.ts`) passing **10/10 assertions** covering authoritative backup generation, AES-256-GCM encryption, round-trip SHA-256 checksum validation, isolated environment datastore restoration, record integrity checks, and tampered backup rejection.
 * **Affected Components**: `scripts/backupDatabase.ts`, `docs/RUNBOOK_DISASTER_RECOVERY.md`, `scripts/testPhase9BackupRecovery.ts`.
 
 ### Gate 5: Monitoring, Alerting & Operational Runbooks

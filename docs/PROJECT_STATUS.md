@@ -118,9 +118,11 @@ The canonical product roadmap comprises the following ten phases:
   * **Load Testing Suite**: Upgraded `scripts/testPhase9Performance.ts` covering operational analytics KPIs, concurrent FEFO inventory reservations with OCC retries, same-order concurrent refund contention with forced OCC conflict and retry validation, and rate-limiting.
   * **Performance & Concurrency Results**: **16/16 assertions passed** (0 failures). Confirmed zero balance leaks (`refundedAmount: 300`, `remainingRefundableBalance: 400`, `reservedRefundAmount: 0` fully cleared).
   * **Latency Percentiles**: Analytics KPI (p50: 6ms, p95: 11ms, p99: 15ms), Inventory Reservations (p50: 75ms, p95: 85ms, p99: 85ms), Concurrent Refunds (p50: 8ms, p95: 9ms, p99: 9ms).
-* **Phase 9B-3 Backup, Restore & Disaster Recovery**:
-  * **Automated Backup Script**: Implemented `scripts/backupDatabase.ts` supporting timestamped JSON exports, SHA-256 checksum integrity verification, and encryption.
-  * **Disaster Recovery Runbook**: Authored `docs/RUNBOOK_DISASTER_RECOVERY.md` defining RPO/RTO objectives, backup procedures, restore workflows, recovery verification, and escalation steps.
+* **Phase 9B-3 Backup, Restore & Disaster Recovery Verification Hardening**:
+  * **Authoritative Backup Script**: Upgraded `scripts/backupDatabase.ts` to query the authoritative datastore directly across all core collections, replacing raw static file copies.
+  * **Authenticated AES-256-GCM Encryption**: Implemented real authenticated AES-256-GCM encryption (`encryptPayloadAES256GCM` / `decryptPayloadAES256GCM`) storing ciphertext, IV, and authTag without embedding encryption keys.
+  * **Isolated Environment Restore & SHA-256 Verification**: Implemented `restoreDatabaseBackup` supporting payload decryption, SHA-256 recalculation & comparison against stored metadata, isolated datastore record restoration, and rejection of tampered/corrupted backups.
+  * **Disaster Recovery Runbook**: Authored `docs/RUNBOOK_DISASTER_RECOVERY.md` defining RPO (1 hr), RTO (30 mins), SOPs, and recovery steps.
   * **Testing & Regression**: Dedicated backup/recovery test suite (`scripts/testPhase9BackupRecovery.ts`) passing **10/10 assertions**.
 * **Audit Document**: Updated findings, remediation status, and Gate 3 & Gate 4 PASS status in `docs/PHASE_9A_PRODUCTION_AUDIT.md`.
 

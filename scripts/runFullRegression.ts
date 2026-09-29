@@ -29,6 +29,7 @@ const testFiles = [
   'scripts/testPriorityDPwa.ts',
   'scripts/testPhase9SecurityPrivacy.ts',
   'scripts/testPhase9Performance.ts',
+  'scripts/testPhase9BackupRecovery.ts',
 ];
 
 console.log('========================================================================');
