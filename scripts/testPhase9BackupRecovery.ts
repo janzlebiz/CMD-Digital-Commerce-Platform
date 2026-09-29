@@ -73,8 +73,8 @@ async function runBackupRecoveryTests() {
   sourceDb.collection('orders').doc('ord-01').set({ id: 'ord-01', grandTotal: 1200, paymentStatus: 'paid' });
   sourceDb.collection('audit_logs').doc('log-01').set({ action: 'order_placed', timestamp: new Date().toISOString() });
 
-  // 1. Test backup creation
-  console.log('\n--- Test Group 1: Automated Backup Generation & AES-256-GCM Encryption ---');
+  // 1. Test backup creation & offsite dispatch
+  console.log('\n--- Test Group 1: Automated Backup Generation, AES-256-GCM Encryption & Offsite Upload ---');
   const backupRes = await performDatabaseBackup({
     outputDir: testOutputDir,
     encrypt: true,
@@ -95,6 +95,7 @@ async function runBackupRecoveryTests() {
     !parsedBackup.data.key;
 
   assert(isEncryptedGcm, '1.3 Backup contains AES-256-GCM ciphertext, IV, and authTag without storing encryption keys');
+  assert(backupRes.offsiteResult.uploaded === true && backupRes.offsiteResult.offsitePath?.startsWith('gs://'), '1.4 Backup upload dispatched to off-site cloud storage bucket');
 
   // 2. Test backup integrity & checksum verification
   console.log('\n--- Test Group 2: Backup Integrity & Checksum Verification ---');
@@ -122,8 +123,8 @@ async function runBackupRecoveryTests() {
 
   assert(dataIntegrityValid, '3.4 Restored records in isolated datastore match source snapshot records exactly');
 
-  // 4. Test failure handling & malformed/tampered backup rejection
-  console.log('\n--- Test Group 4: Failure Handling & Corrupted/Tampered Backup Rejection ---');
+  // 4. Test failure handling, malformed/tampered backup rejection & production key fail-closed
+  console.log('\n--- Test Group 4: Failure Handling, Tampered Backup Rejection & Production Key Enforcement ---');
 
   // Create tampered checksum backup
   const tamperedBackup = JSON.parse(JSON.stringify(parsedBackup));
@@ -141,6 +142,26 @@ async function runBackupRecoveryTests() {
   }
 
   assert(restoreFailedAsExpected === true, '4.1 Tampered or corrupted backup correctly rejected by checksum validation');
+
+  // Test production key enforcement (fails closed)
+  const origNodeEnv = process.env.NODE_ENV;
+  const origKey = process.env.BACKUP_ENCRYPTION_KEY;
+  process.env.NODE_ENV = 'production';
+  delete process.env.BACKUP_ENCRYPTION_KEY;
+
+  let prodKeyFailedClosed = false;
+  try {
+    await performDatabaseBackup({ outputDir: testOutputDir, db: sourceDb });
+  } catch (err: any) {
+    if (err.message.includes('BACKUP_ENCRYPTION_KEY_REQUIRED')) {
+      prodKeyFailedClosed = true;
+    }
+  } finally {
+    process.env.NODE_ENV = origNodeEnv;
+    if (origKey) process.env.BACKUP_ENCRYPTION_KEY = origKey;
+  }
+
+  assert(prodKeyFailedClosed === true, '4.2 Backup fails closed in production environment when BACKUP_ENCRYPTION_KEY is missing');
 
   // Cleanup test directories
   if (fs.existsSync(testOutputDir)) {

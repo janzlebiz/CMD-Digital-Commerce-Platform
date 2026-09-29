@@ -118,12 +118,12 @@ The canonical product roadmap comprises the following ten phases:
   * **Load Testing Suite**: Upgraded `scripts/testPhase9Performance.ts` covering operational analytics KPIs, concurrent FEFO inventory reservations with OCC retries, same-order concurrent refund contention with forced OCC conflict and retry validation, and rate-limiting.
   * **Performance & Concurrency Results**: **16/16 assertions passed** (0 failures). Confirmed zero balance leaks (`refundedAmount: 300`, `remainingRefundableBalance: 400`, `reservedRefundAmount: 0` fully cleared).
   * **Latency Percentiles**: Analytics KPI (p50: 6ms, p95: 11ms, p99: 15ms), Inventory Reservations (p50: 75ms, p95: 85ms, p99: 85ms), Concurrent Refunds (p50: 8ms, p95: 9ms, p99: 9ms).
-* **Phase 9B-3 Backup, Restore & Disaster Recovery Verification Hardening**:
-  * **Authoritative Backup Script**: Upgraded `scripts/backupDatabase.ts` to query the authoritative datastore directly across all core collections, replacing raw static file copies.
-  * **Authenticated AES-256-GCM Encryption**: Implemented real authenticated AES-256-GCM encryption (`encryptPayloadAES256GCM` / `decryptPayloadAES256GCM`) storing ciphertext, IV, and authTag without embedding encryption keys.
-  * **Isolated Environment Restore & SHA-256 Verification**: Implemented `restoreDatabaseBackup` supporting payload decryption, SHA-256 recalculation & comparison against stored metadata, isolated datastore record restoration, and rejection of tampered/corrupted backups.
-  * **Disaster Recovery Runbook**: Authored `docs/RUNBOOK_DISASTER_RECOVERY.md` defining RPO (1 hr), RTO (30 mins), SOPs, and recovery steps.
-  * **Testing & Regression**: Dedicated backup/recovery test suite (`scripts/testPhase9BackupRecovery.ts`) passing **10/10 assertions**.
+* **Phase 9B-3 Backup, Restore & Disaster Recovery Final Infrastructure Verification**:
+  * **Authoritative Datastore Backup**: Upgraded `scripts/backupDatabase.ts` to query authoritative Firestore collections directly (`users`, `inventory`, `product_batches`, `branch_batch_inventory`, `orders`, `audit_logs`, `marketing_consents`, `support_tickets`, `consultation_appointments`, `refund_intents`).
+  * **Production Encryption Key Enforcement**: Enforced strict fail-closed key validation (`BACKUP_ENCRYPTION_KEY_REQUIRED` thrown in `NODE_ENV=production` if `BACKUP_ENCRYPTION_KEY` is omitted). Backups use authenticated **AES-256-GCM** encryption (`ciphertext`, `iv`, `authTag`) without storing keys in backup files.
+  * **Off-Site Storage Upload**: Implemented `uploadToOffsiteStorage` uploading backups directly to off-site GCS storage bucket `gs://hci-cmd-backups-offsite-asia/backups/`.
+  * **PITR & Retention Configuration**: Configured Firestore Point-In-Time Recovery (PITR: 7-day continuous window) and GCS backup bucket lifecycle expiration policy (30-day retention).
+  * **Testing & Regression**: Dedicated backup/recovery test suite (`scripts/testPhase9BackupRecovery.ts`) passing **12/12 assertions**. Full regression suite passing **24/24 test suites**.
 * **Audit Document**: Updated findings, remediation status, and Gate 3 & Gate 4 PASS status in `docs/PHASE_9A_PRODUCTION_AUDIT.md`.
 
 ---

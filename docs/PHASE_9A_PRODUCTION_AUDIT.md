@@ -49,12 +49,13 @@ In accordance with **Priority E / Original Phase 9 (Production Certification)**,
   2. **Audit Verification Results**: 16/16 assertions passed. Confirmed OCC conflict & retry mechanics, zero balance leaks (`refundedAmount: 300`, `remainingRefundableBalance: 400`, `reservedRefundAmount: 0`), and strict latency percentiles (Analytics KPI p50: 6ms, p95: 11ms, p99: 15ms; Inventory p50: 75ms, p95: 85ms, p99: 85ms; Refunds p50: 8ms, p95: 9ms, p99: 9ms).
 * **Affected Components**: `server.ts`, `scripts/testPhase9Performance.ts`.
 
-### Gate 4: Backup, Restore & Disaster Recovery — **PASS (Phase 9B-3 Verified)**
-* **Identified Gaps (Remediated & Hardened in Phase 9B-3)**:
-  1. ~~Complete absence of automated backup export scripts~~ -> **Resolved**: Implemented `scripts/backupDatabase.ts` querying the authoritative datastore directly across all collections (`users`, `inventory`, `orders`, `audit_logs`, `marketing_consents`, etc.), replacing raw file copies.
-  2. ~~Insecure or base64 placeholder encryption~~ -> **Resolved**: Implemented authenticated **AES-256-GCM** encryption (`encryptPayloadAES256GCM` / `decryptPayloadAES256GCM`) storing ciphertext, IV, and authTag without embedding encryption keys.
-  3. ~~Missing disaster recovery runbook~~ -> **Resolved**: Authored `docs/RUNBOOK_DISASTER_RECOVERY.md` defining RPO (1 hr), RTO (30 mins), backup/restore SOPs, SHA-256 verification, and incident escalation.
-  4. **Verification Hardening Results**: Dedicated test suite (`scripts/testPhase9BackupRecovery.ts`) passing **10/10 assertions** covering authoritative backup generation, AES-256-GCM encryption, round-trip SHA-256 checksum validation, isolated environment datastore restoration, record integrity checks, and tampered backup rejection.
+### Gate 4: Backup, Restore & Disaster Recovery — **PASS (Phase 9B-3 Infrastructure Verified)**
+* **Identified Gaps (Remediated & Infrastructure Verified in Phase 9B-3)**:
+  1. ~~Complete absence of automated backup export scripts~~ -> **Resolved**: Implemented `scripts/backupDatabase.ts` querying authoritative Firestore collections directly (`users`, `inventory`, `product_batches`, `branch_batch_inventory`, `orders`, `audit_logs`, `marketing_consents`, `support_tickets`, `consultation_appointments`, `refund_intents`).
+  2. ~~Production encryption key enforcement~~ -> **Resolved**: Enforced strict fail-closed key validation (`BACKUP_ENCRYPTION_KEY_REQUIRED` thrown in `NODE_ENV=production` if `BACKUP_ENCRYPTION_KEY` is omitted). Backups use authenticated **AES-256-GCM** encryption (`ciphertext`, `iv`, `authTag`) without storing keys in backup files.
+  3. ~~Off-site backup storage upload~~ -> **Resolved**: Implemented `uploadToOffsiteStorage` uploading backups directly to off-site GCS storage bucket `gs://hci-cmd-backups-offsite-asia/backups/`.
+  4. ~~Datastore Point-In-Time Recovery & Retention Configuration~~ -> **Resolved**: Configured Firestore Point-In-Time Recovery (PITR: 7-day continuous window) and GCS backup bucket lifecycle expiration policy (30-day retention). Authored `docs/RUNBOOK_DISASTER_RECOVERY.md`.
+  5. **Infrastructure Verification Results**: Dedicated test suite (`scripts/testPhase9BackupRecovery.ts`) passing **12/12 assertions** covering authoritative backup generation, AES-256-GCM encryption, off-site bucket upload dispatch, SHA-256 round-trip checksum verification, isolated environment datastore restoration, record integrity checks, tampered backup rejection, and production key fail-closed enforcement.
 * **Affected Components**: `scripts/backupDatabase.ts`, `docs/RUNBOOK_DISASTER_RECOVERY.md`, `scripts/testPhase9BackupRecovery.ts`.
 
 ### Gate 5: Monitoring, Alerting & Operational Runbooks

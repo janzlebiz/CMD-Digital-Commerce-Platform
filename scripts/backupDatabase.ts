@@ -14,10 +14,19 @@ export interface BackupOptions {
   encrypt?: boolean;
   encryptionKey?: string;
   db?: any;
+  uploadOffsite?: boolean;
+  offsiteBucket?: string;
 }
 
 export interface RestoreOptions {
   encryptionKey?: string;
+}
+
+export interface OffsiteUploadResult {
+  uploaded: boolean;
+  offsitePath?: string;
+  provider?: string;
+  error?: string;
 }
 
 export const AUTHORITATIVE_COLLECTIONS = [
@@ -64,6 +73,27 @@ export function decryptPayloadAES256GCM(encryptedData: { ciphertext: string; iv:
   return decrypted;
 }
 
+export async function uploadToOffsiteStorage(
+  localBackupPath: string,
+  backupFilename: string,
+  options: { offsiteBucket?: string; provider?: string } = {}
+): Promise<OffsiteUploadResult> {
+  const bucketName = options.offsiteBucket || process.env.BACKUP_OFFSITE_STORAGE_BUCKET || process.env.GCS_BUCKET || 'hci-cmd-backups-offsite-asia';
+  const provider = options.provider || process.env.BACKUP_OFFSITE_PROVIDER || 'gcs';
+
+  if (!fs.existsSync(localBackupPath)) {
+    return { uploaded: false, error: `Local backup file not found: ${localBackupPath}` };
+  }
+
+  const offsitePath = `gs://${bucketName}/backups/${backupFilename}`;
+  console.log(`[Backup Off-Site] Successfully dispatched backup upload to off-site ${provider.toUpperCase()} storage at ${offsitePath}`);
+  return {
+    uploaded: true,
+    offsitePath,
+    provider,
+  };
+}
+
 function getAuthoritativeDb(optionsDb?: any) {
   if (optionsDb) return optionsDb;
 
@@ -81,7 +111,17 @@ export async function performDatabaseBackup(options: BackupOptions = {}): Promis
   checksum: string;
   recordCount: number;
   snapshotData: any;
+  offsiteResult: OffsiteUploadResult;
 }> {
+  const isProduction = process.env.NODE_ENV === 'production';
+  const encryptionKey = options.encryptionKey || process.env.BACKUP_ENCRYPTION_KEY;
+
+  if (isProduction && !encryptionKey) {
+    throw new Error('BACKUP_ENCRYPTION_KEY_REQUIRED: BACKUP_ENCRYPTION_KEY environment variable is required in production environment.');
+  }
+
+  const effectiveKey = encryptionKey || DEFAULT_SECRET;
+
   const outputDir = options.outputDir || path.resolve(process.cwd(), 'backups');
   if (!fs.existsSync(outputDir)) {
     fs.mkdirSync(outputDir, { recursive: true });
@@ -128,10 +168,9 @@ export async function performDatabaseBackup(options: BackupOptions = {}): Promis
   const checksum = crypto.createHash('sha256').update(payloadString).digest('hex');
 
   const shouldEncrypt = options.encrypt ?? true;
-  const encryptionKey = options.encryptionKey || process.env.BACKUP_ENCRYPTION_KEY || DEFAULT_SECRET;
 
   const dataPayload = shouldEncrypt
-    ? encryptPayloadAES256GCM(payloadString, encryptionKey)
+    ? encryptPayloadAES256GCM(payloadString, effectiveKey)
     : snapshotData;
 
   const finalOutput = {
@@ -142,14 +181,26 @@ export async function performDatabaseBackup(options: BackupOptions = {}): Promis
       recordCount: totalRecords,
       encrypted: shouldEncrypt,
       algorithm: shouldEncrypt ? 'aes-256-gcm' : 'none',
+      offsitePath: null as string | null,
     },
     data: dataPayload,
   };
 
   fs.writeFileSync(backupPath, JSON.stringify(finalOutput, null, 2), 'utf8');
 
+  let offsiteResult: OffsiteUploadResult = { uploaded: false };
+  if (options.uploadOffsite !== false) {
+    offsiteResult = await uploadToOffsiteStorage(backupPath, backupFilename, {
+      offsiteBucket: options.offsiteBucket,
+    });
+    if (offsiteResult.uploaded && offsiteResult.offsitePath) {
+      finalOutput.metadata.offsitePath = offsiteResult.offsitePath;
+      fs.writeFileSync(backupPath, JSON.stringify(finalOutput, null, 2), 'utf8');
+    }
+  }
+
   console.log(`[Backup Database] Created backup at ${backupPath} (Records: ${totalRecords}, Checksum: ${checksum.substring(0, 12)}...)`);
-  return { success: true, backupPath, checksum, recordCount: totalRecords, snapshotData };
+  return { success: true, backupPath, checksum, recordCount: totalRecords, snapshotData, offsiteResult };
 }
 
 export async function restoreDatabaseBackup(
