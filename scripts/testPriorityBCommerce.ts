@@ -756,6 +756,11 @@ async function runTests() {
     }
     assert(retryAttemptRes.status === 200, '31. Retry same key K succeeds with HTTP 200 after transient payment gateway timeout resolved');
     assert(retryData.orderId === failedOrderId, '32. Retried checkout uses the exact same order ID');
+    assert(retryData.order?.checkoutStatus === 'completed', '32a. Retry result has checkoutStatus === \'completed\'');
+    const expectedPaymentKey = `pay_chk_demo-customer-uid_${failedOrderId}_${replayKey}`;
+    assert(spyPaymentAdapter.lastPaymentKey === expectedPaymentKey, '32b. Retry uses the same payment idempotency key');
+    const idKeyDoc = store.idempotency_keys.get(`demo-customer-uid_${replayKey}`);
+    assert(idKeyDoc?.checkoutStatus === 'completed', '32c. Idempotency record is completed');
 
     const finalReservedStock = store.branch_batch_inventory.get('daet_BAT-DAET-CMD65-01').reservedQuantity;
     assert(finalReservedStock === initialReservedStock, '33. Retry does NOT run FEFO reservation again or double-reserve inventory');

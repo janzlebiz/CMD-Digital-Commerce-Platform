@@ -73,7 +73,7 @@ The canonical product roadmap comprises the following ten phases:
 * Safe centralized Express error handling and secret masking in production.
 * Production runtime baseline documentation (`PRODUCTION_RUNTIME_BASELINE.md` completed).
 
-### Priority B: E-Commerce & Order Lifecycle (REMEDIATION REQUIRED)
+### Priority B: E-Commerce & Order Lifecycle (COMPLETED / HARDENED)
 * Safe two-phase checkout (`POST /api/orders/checkout`) with transactional Phase A (FEFO inventory reservation), external Phase B provider invocations, and Phase C checkout finalization.
 * Customer-scoped checkout key retry logic hardened to bypass redundant FEFO inventory reservation, reusing existing deterministic orders.
 * Persistent payment compensation state machine (`payment_compensations/${orderId}`) tracked before running external refund operations, fully retryable and recoverable on checkout retry.
@@ -83,7 +83,7 @@ The canonical product roadmap comprises the following ten phases:
 * Failure recovery verified for provider checkout failures, refund failures, cancellation failures, and return approval failures.
 * Authoritative branch inventory restoration enforced on `branch_batch_inventory` and aggregate `/inventory/{branchId_skuId}` documents with double-restoration protection.
 * Client-side React order state in `useEcommerce.ts` strictly advisory.
-* Spied regression suite (`scripts/testPriorityBCommerce.ts`) passing 50/50 safety assertions including failed-checkout replay, compensation recovery, and concurrent refund contention tests.
+* Spied regression suite (`scripts/testPriorityBCommerce.ts`) passing 57/57 safety assertions (with 60 total detailed asserts) including failed-checkout replay, compensation recovery, and concurrent refund contention tests.
 
 ### Priority C: Automation & Analytics (Original Phase 7)
 * Operational dashboards and business intelligence views.
