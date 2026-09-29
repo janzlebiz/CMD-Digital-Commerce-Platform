@@ -9,6 +9,24 @@ import crypto from 'crypto';
 import { getFirestore } from 'firebase-admin/firestore';
 import { initializeApp, getApps } from 'firebase-admin/app';
 import { Storage } from '@google-cloud/storage';
+import { GoogleAuth } from 'google-auth-library';
+
+export async function getGoogleAccessToken(): Promise<string | null> {
+  try {
+    const auth = new GoogleAuth({
+      scopes: [
+        'https://www.googleapis.com/auth/datastore',
+        'https://www.googleapis.com/auth/cloud-platform',
+      ],
+    });
+    const client = await auth.getClient();
+    const tokenResponse = await client.getAccessToken();
+    return tokenResponse.token || null;
+  } catch (err: any) {
+    console.warn(`[GoogleAuth] ADC token lookup warning: ${err.message}`);
+    return null;
+  }
+}
 
 export interface BackupOptions {
   outputDir?: string;
@@ -169,9 +187,18 @@ export async function verifyFirestorePitrConfiguration(options: {
       if (options.fetchHandler) {
         rawConfig = await options.fetchHandler(url);
       } else {
-        const res = await fetch(url);
+        const headers: Record<string, string> = {
+          'Content-Type': 'application/json',
+        };
+        const token = await getGoogleAccessToken();
+        if (token) {
+          headers['Authorization'] = `Bearer ${token}`;
+        }
+        const res = await fetch(url, { headers });
         if (res.ok) {
           rawConfig = await res.json();
+        } else {
+          throw new Error(`HTTP_${res.status}: ${res.statusText}`);
         }
       }
     } catch (err: any) {
