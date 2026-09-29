@@ -1,0 +1,25 @@
+{
+  "id": "/",
+  "name": "HCI CMD Digital Commerce & Naturopathic Wellness Platform",
+  "short_name": "HCI CMD",
+  "description": "Production-grade digital commerce, naturopathic consultation, and branch distribution platform for HCI Cell Mineral Drops (CMD).",
+  "start_url": "/",
+  "scope": "/",
+  "display": "standalone",
+  "theme_color": "#090d16",
+  "background_color": "#020617",
+  "icons": [
+    {
+      "src": "/pwa-192x192.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "any maskable"
+    },
+    {
+      "src": "/pwa-512x512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any maskable"
+    }
+  ]
+}

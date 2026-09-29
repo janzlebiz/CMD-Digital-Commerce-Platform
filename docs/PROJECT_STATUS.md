@@ -95,16 +95,16 @@ The canonical product roadmap comprises the following ten phases:
   * Milestone C2: 88/88 assertions
   * Milestone C3: 57/57 assertions
   * Milestone C4: 87/87 assertions
-  * Current Total Across All 20 Regression Test Files: **916/916 assertions**
-  * Full Regression Suite: **20/20 suites passed**
+  * Milestone D (Phase 8 PWA): 23/23 assertions
+  * Current Total Across All 21 Regression Test Files: **939/939 assertions**
+  * Full Regression Suite: **21/21 suites passed**
 * Priority C Automation & Analytics is fully **COMPLETED**.
 
-### Priority D: Mobile & PWA Hardening (Original Phase 8)
-* PWA Web App Manifest configuration.
-* Service worker installation and offline shell caching.
-* Safe cache eviction and cache-first/network-first policies.
-* Android and network condition validation.
-* Degraded connectivity behavior and native-app evaluation.
+### Priority D: Mobile & PWA Hardening (Original Phase 8) — COMPLETED
+* **Web App Manifest (`public/manifest.json`)**: Configured with valid app identity, icons (192x192 & 512x512 maskable), `standalone` display mode, and short name ≤ 12 chars.
+* **Service Worker (`public/sw.js`)**: Implemented safe offline-shell caching with installation, activation/cleanup, cache-first/network-first strategies, and offline fallback responses for API and navigation requests.
+* **HTML Metadata & Registration**: Configured `index.html` with manifest link, theme-color `#090d16`, and apple-touch-icon, with automatic service worker registration in `src/main.tsx`.
+* **Testing & Regression**: Dedicated test suite (`scripts/testPriorityDPwa.ts`) passing **23/23 assertions**. Full regression suite passing **21/21 suites** with a cumulative total of **939/939 assertions**.
 
 ### Priority E: Production Certification (Original Phase 9)
 * Comprehensive security and penetration testing.
