@@ -3795,68 +3795,78 @@ export function createExpressApp(deps: ServerDependencies = {}): Express {
 
   let db: any = deps.db;
   if (!db) {
-    try {
-      const realDb = getFirestore();
-      const inMemoryDb = createInMemoryDb();
-      let hasPermissionError = false;
+    if (process.env.NODE_ENV === 'production') {
+      db = getFirestore();
+    } else {
+      try {
+        const realDb = getFirestore();
+        const inMemoryDb = createInMemoryDb();
+        let hasPermissionError = false;
 
-      db = new Proxy(realDb, {
-        get(target: any, prop: string) {
-          if (prop === 'collection' || prop === 'runTransaction') {
-            if (hasPermissionError || process.env.USE_MOCK_DB === 'true' || process.env.NODE_ENV !== 'production' && !process.env.FIREBASE_CONFIG && !process.env.GOOGLE_APPLICATION_CREDENTIALS) {
-              return inMemoryDb[prop];
-            }
-            return function(...args: any[]) {
-              try {
-                const res = target[prop](...args);
-                if (prop === 'collection') {
-                  const originalDoc = res.doc;
-                  res.doc = function(...docArgs: any[]) {
-                    const docRef = originalDoc.apply(res, docArgs);
-                    const originalGet = docRef.get;
-                    docRef.get = async function(...getArgs: any[]) {
-                      try {
-                        return await originalGet.apply(docRef, getArgs);
-                      } catch (err: any) {
-                        if (err.message && (err.message.includes('PERMISSION_DENIED') || err.message.includes('Permission denied'))) {
-                          hasPermissionError = true;
-                          console.warn('[Firestore Fallback] Permission denied. Switched server to in-memory database mock.');
-                          return inMemoryDb.collection(args[0]).doc(docArgs[0]).get();
-                        }
-                        throw err;
-                      }
-                    };
-                    return docRef;
-                  };
-                }
-                return res;
-              } catch (err: any) {
-                if (err.message && (err.message.includes('PERMISSION_DENIED') || err.message.includes('Permission denied'))) {
-                  hasPermissionError = true;
-                  console.warn('[Firestore Fallback] Permission denied. Switched server to in-memory database mock.');
-                  return inMemoryDb[prop](...args);
-                }
-                throw err;
+        db = new Proxy(realDb, {
+          get(target: any, prop: string) {
+            if (prop === 'collection' || prop === 'runTransaction') {
+              if (hasPermissionError || process.env.USE_MOCK_DB === 'true' || (!process.env.FIREBASE_CONFIG && !process.env.GOOGLE_APPLICATION_CREDENTIALS)) {
+                return inMemoryDb[prop];
               }
-            };
+              return function(...args: any[]) {
+                try {
+                  const res = target[prop](...args);
+                  if (prop === 'collection') {
+                    const originalDoc = res.doc;
+                    res.doc = function(...docArgs: any[]) {
+                      const docRef = originalDoc.apply(res, docArgs);
+                      const originalGet = docRef.get;
+                      docRef.get = async function(...getArgs: any[]) {
+                        try {
+                          return await originalGet.apply(docRef, getArgs);
+                        } catch (err: any) {
+                          if (err.message && (err.message.includes('PERMISSION_DENIED') || err.message.includes('Permission denied'))) {
+                            hasPermissionError = true;
+                            console.warn('[Firestore Fallback] Permission denied. Switched server to in-memory database mock.');
+                            return inMemoryDb.collection(args[0]).doc(docArgs[0]).get();
+                          }
+                          throw err;
+                        }
+                      };
+                      return docRef;
+                    };
+                  }
+                  return res;
+                } catch (err: any) {
+                  if (err.message && (err.message.includes('PERMISSION_DENIED') || err.message.includes('Permission denied'))) {
+                    hasPermissionError = true;
+                    console.warn('[Firestore Fallback] Permission denied. Switched server to in-memory database mock.');
+                    return inMemoryDb[prop](...args);
+                  }
+                  throw err;
+                }
+              };
+            }
+            return target[prop];
           }
-          return target[prop];
+        });
+      } catch (e) {
+        if (process.env.USE_MOCK_DB === 'true' || (!process.env.FIREBASE_CONFIG && !process.env.GOOGLE_APPLICATION_CREDENTIALS)) {
+          db = createInMemoryDb();
+        } else {
+          throw e;
         }
-      });
-    } catch (e) {
-      db = createInMemoryDb();
+      }
     }
   }
   const auth = deps.auth || getAuth();
   const kmsClient = deps.kmsClient || new KeyManagementServiceClient();
 
   // 1. Health Liveness Check Endpoint
-  app.get('/healthz', (_req: Request, res: Response) => {
+  const handleHealthz = (_req: Request, res: Response) => {
     res.status(200).json({ status: 'ok', timestamp: new Date().toISOString() });
-  });
+  };
+  app.get('/healthz', handleHealthz);
+  app.get('/api/healthz', handleHealthz);
 
   // 2. Readiness Probe Endpoint
-  app.get('/readyz', async (_req: Request, res: Response) => {
+  const handleReadyz = async (_req: Request, res: Response) => {
     if (process.env.MAINTENANCE_MODE === 'true' || process.env.MAINTENANCE_MODE === '1') {
       res.status(503).json({ status: 'maintenance_mode', message: 'Service undergoing scheduled maintenance' });
       return;
@@ -3874,7 +3884,9 @@ export function createExpressApp(deps: ServerDependencies = {}): Express {
       logger.error('Readiness probe failed', { error: err?.message || String(err) });
       res.status(503).json({ status: 'not_ready', error: 'Service initialization or dependency unavailable' });
     }
-  });
+  };
+  app.get('/readyz', handleReadyz);
+  app.get('/api/readyz', handleReadyz);
 
   if (process.env.NODE_ENV === 'test' || process.env.ENABLE_TEST_ROUTES === 'true') {
     app.get('/api/test-uncaught-error', (_req: Request, _res: Response, next: any) => {
