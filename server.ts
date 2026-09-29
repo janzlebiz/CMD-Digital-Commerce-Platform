@@ -4013,12 +4013,16 @@ export function createExpressApp(deps: ServerDependencies = {}): Express {
     try {
       await db.runTransaction(async (transaction: any) => {
         const intentSnap = await transaction.get(intentRef);
+        let alreadyReserved = false;
         if (intentSnap && intentSnap.exists) {
           const existingIntent = typeof intentSnap.data === 'function' ? intentSnap.data() : intentSnap.data;
           if (existingIntent.status === 'completed') {
             isReplay = true;
             orderData = existingIntent.updatedOrder;
             return;
+          }
+          if (existingIntent.reserved) {
+            alreadyReserved = true;
           }
         }
 
@@ -4050,21 +4054,24 @@ export function createExpressApp(deps: ServerDependencies = {}): Express {
         }
 
         // Atomically reserve refund amount on order document to cause transactional contention
-        const newReserved = currentReserved + refundAmount;
-        transaction.update(orderRef, {
-          reservedRefundAmount: newReserved,
-          updatedAt: nowIso,
-        });
+        const newReserved = alreadyReserved ? currentReserved : (currentReserved + refundAmount);
+        if (!alreadyReserved) {
+          transaction.update(orderRef, {
+            reservedRefundAmount: newReserved,
+            updatedAt: nowIso,
+          });
 
-        transaction.set(intentRef, {
-          orderId,
-          refundAmount,
-          reason,
-          refundKey,
-          status: 'processing',
-          createdAt: nowIso,
-          updatedAt: nowIso,
-        });
+          transaction.set(intentRef, {
+            orderId,
+            refundAmount,
+            reason,
+            refundKey,
+            status: 'processing',
+            reserved: true,
+            createdAt: nowIso,
+            updatedAt: nowIso,
+          }, { merge: true });
+        }
       });
     } catch (err: any) {
       return { success: false, isReplay: false, error: err.message };
