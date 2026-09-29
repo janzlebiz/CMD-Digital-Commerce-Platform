@@ -6,7 +6,7 @@
 import fs from 'fs';
 import path from 'path';
 import crypto from 'crypto';
-import { performDatabaseBackup, restoreDatabaseBackup, decryptPayloadAES256GCM, verifyFirestorePitrConfiguration } from './backupDatabase.ts';
+import { performDatabaseBackup, restoreDatabaseBackup, decryptPayloadAES256GCM, verifyFirestorePitrConfiguration, verifyGcsBucketLifecyclePolicy } from './backupDatabase.ts';
 
 console.log('========================================================================');
 console.log('Running Phase 9B-3: Backup, Restore & Disaster Recovery Test Suite');
@@ -200,6 +200,24 @@ async function runBackupRecoveryTests() {
   }
 
   assert(pitrDisabledCaught === true, '5.2 Disabled Firestore PITR configuration correctly rejected by verification script');
+
+  // 6. Test GCS Bucket Lifecycle Policy Verification (30-day expiration)
+  console.log('\n--- Test Group 6: GCS Bucket Lifecycle Expiration Policy Verification ---');
+  const lifecycleRes = await verifyGcsBucketLifecyclePolicy();
+  assert(lifecycleRes.lifecycleVerified === true && lifecycleRes.expirationAgeDays === 30, '6.1 GCS bucket lifecycle policy verified with active 30-day object expiration rule');
+
+  let lifecycleMissingCaught = false;
+  try {
+    await verifyGcsBucketLifecyclePolicy({
+      customLifecycleConfig: [{ action: { type: 'SetStorageClass' }, condition: { age: 60 } }],
+    });
+  } catch (err: any) {
+    if (err.message.includes('GCS_LIFECYCLE_RULE_MISSING')) {
+      lifecycleMissingCaught = true;
+    }
+  }
+
+  assert(lifecycleMissingCaught === true, '6.2 Missing or invalid GCS 30-day lifecycle expiration policy correctly rejected');
 
   // Cleanup test directories
   if (fs.existsSync(testOutputDir)) {
