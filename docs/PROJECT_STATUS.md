@@ -85,12 +85,10 @@ The canonical product roadmap comprises the following ten phases:
 * Client-side React order state in `useEcommerce.ts` strictly advisory.
 * Spied regression suite (`scripts/testPriorityBCommerce.ts`) passing 57/57 safety assertions (with 60 total detailed asserts) including failed-checkout replay, compensation recovery, and concurrent refund contention tests.
 
-### Priority C: Automation & Analytics (Original Phase 7)
-* Operational dashboards and business intelligence views.
-* Sales, inventory, appointment, event, and customer metrics aggregation.
-* Transactional automation and workflows.
-* Consent-aware marketing automation.
-* Notification abstraction, delivery queuing, and failure handling.
+### Priority C: Automation & Analytics (Original Phase 7) — IN PROGRESS
+* **Milestone C1 (Notification Infrastructure & Queue)**: COMPLETED / TESTED (46/46 assertions). Multi-channel adapters (`email`, `sms`, `in_app`), deterministic idempotency keys, exponential backoff, dead-letter terminal state, server-authoritative queue and customer notifications feed.
+* **Milestone C2 (Transactional Lifecycle Automation)**: COMPLETED / TESTED (82/82 assertions). Lifecycle triggers implemented for Orders (checkout completed, fulfillment/dispatch, delivery completed, cancellation/refund), Consultations (booking confirmation, cancellation, 24h & 2h reminders), Workshops (registration confirmation, reminder, waitlist promotion), Support (ticket acknowledgement, SLA-breach staff alert, resolution notification), and Inventory (branch-manager low-stock alert when stock reaches calculated ROP threshold).
+* Remaining Milestones: C3 (Marketing Automation & Consent-Aware Campaigns) and C4 (Operational Analytics, Dashboards & Export Engine).
 
 ### Priority D: Mobile & PWA Hardening (Original Phase 8)
 * PWA Web App Manifest configuration.

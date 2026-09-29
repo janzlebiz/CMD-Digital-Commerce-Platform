@@ -1988,6 +1988,665 @@ export async function processNotificationQueue(
   };
 }
 
+// ============================================================================
+// PHASE 7 MILESTONE C2: Transactional Lifecycle Automation Triggers
+// ============================================================================
+
+/**
+ * 1. Orders: Checkout Completed Notification
+ */
+export async function enqueueOrderCheckoutCompletedNotification(
+  db: any,
+  order: any
+): Promise<EnqueueNotificationResult | null> {
+  const recipientId = order.userId || order.customer?.uid || 'customer';
+  const recipientEmail = order.customer?.email;
+  const channel: NotificationChannel = 'email';
+  const idempotencyKey = generateNotificationIdempotencyKey(channel, recipientId, 'order_checkout_completed', order.id);
+
+  return enqueueNotification(db, {
+    idempotencyKey,
+    recipientId,
+    recipientEmail,
+    channel,
+    templateId: 'order_checkout_completed',
+    title: `Order Confirmation - #${order.id}`,
+    body: `Thank you for your order #${order.id}. Total amount: ₱${order.grandTotal}. We are preparing your items for delivery.`,
+    metadata: {
+      orderId: order.id,
+      branchId: order.branchId,
+      grandTotal: order.grandTotal,
+      status: order.fulfillmentStatus || 'pending_processing',
+    },
+  });
+}
+
+/**
+ * 1. Orders: Fulfillment / Dispatch Notification
+ */
+export async function enqueueOrderDispatchedNotification(
+  db: any,
+  order: any
+): Promise<EnqueueNotificationResult | null> {
+  const recipientId = order.userId || order.customer?.uid || 'customer';
+  const recipientEmail = order.customer?.email;
+  const recipientPhone = order.customer?.mobileNumber;
+  const channel: NotificationChannel = 'email';
+  const idempotencyKey = generateNotificationIdempotencyKey(channel, recipientId, 'order_dispatched', order.id);
+
+  return enqueueNotification(db, {
+    idempotencyKey,
+    recipientId,
+    recipientEmail,
+    recipientPhone,
+    channel,
+    templateId: 'order_dispatched',
+    title: `Order Dispatched - #${order.id}`,
+    body: `Your order #${order.id} has been fulfilled and dispatched from branch ${(order.branchId || 'daet').toUpperCase()}.`,
+    metadata: {
+      orderId: order.id,
+      branchId: order.branchId,
+      fulfillmentStatus: order.fulfillmentStatus || 'fulfilled',
+    },
+  });
+}
+
+/**
+ * 1. Orders: Delivery Completed Notification
+ */
+export async function enqueueOrderDeliveredNotification(
+  db: any,
+  order: any
+): Promise<EnqueueNotificationResult | null> {
+  const recipientId = order.userId || order.customer?.uid || 'customer';
+  const recipientEmail = order.customer?.email;
+  const channel: NotificationChannel = 'email';
+  const idempotencyKey = generateNotificationIdempotencyKey(channel, recipientId, 'order_delivered', order.id);
+
+  return enqueueNotification(db, {
+    idempotencyKey,
+    recipientId,
+    recipientEmail,
+    channel,
+    templateId: 'order_delivered',
+    title: `Order Delivered - #${order.id}`,
+    body: `Your order #${order.id} has been successfully delivered. Thank you for choosing HCI Cell Mineral Drops!`,
+    metadata: {
+      orderId: order.id,
+      branchId: order.branchId,
+      fulfillmentStatus: 'completed',
+    },
+  });
+}
+
+/**
+ * 1. Orders: Cancellation Notification
+ */
+export async function enqueueOrderCancelledNotification(
+  db: any,
+  order: any,
+  reason?: string
+): Promise<EnqueueNotificationResult | null> {
+  const recipientId = order.userId || order.customer?.uid || 'customer';
+  const recipientEmail = order.customer?.email;
+  const channel: NotificationChannel = 'email';
+  const idempotencyKey = generateNotificationIdempotencyKey(channel, recipientId, 'order_cancelled', order.id);
+
+  return enqueueNotification(db, {
+    idempotencyKey,
+    recipientId,
+    recipientEmail,
+    channel,
+    templateId: 'order_cancelled',
+    title: `Order Cancelled - #${order.id}`,
+    body: `Your order #${order.id} has been cancelled. Reason: ${reason || order.cancellationReason || 'Customer cancellation'}.`,
+    metadata: {
+      orderId: order.id,
+      reason: reason || order.cancellationReason,
+      fulfillmentStatus: 'cancelled',
+    },
+  });
+}
+
+/**
+ * 1. Orders: Refund Notification
+ */
+export async function enqueueOrderRefundedNotification(
+  db: any,
+  order: any,
+  amount: number,
+  reason?: string,
+  refundKey?: string
+): Promise<EnqueueNotificationResult | null> {
+  const recipientId = order.userId || order.customer?.uid || 'customer';
+  const recipientEmail = order.customer?.email;
+  const channel: NotificationChannel = 'email';
+  const cleanKey = refundKey ? refundKey.replace(/[^a-zA-Z0-9_-]/g, '_') : order.id;
+  const idempotencyKey = generateNotificationIdempotencyKey(channel, recipientId, 'order_refunded', `${cleanKey}_${amount}`);
+
+  return enqueueNotification(db, {
+    idempotencyKey,
+    recipientId,
+    recipientEmail,
+    channel,
+    templateId: 'order_refunded',
+    title: `Refund Processed - #${order.id}`,
+    body: `A refund of ₱${amount} has been processed for order #${order.id}. Reason: ${reason || 'Approved refund'}.`,
+    metadata: {
+      orderId: order.id,
+      amount,
+      reason,
+      status: 'refunded',
+    },
+  });
+}
+
+/**
+ * 2. Consultations: Booking Confirmation Notification
+ */
+export async function enqueueConsultationBookingConfirmedNotification(
+  db: any,
+  appointment: any
+): Promise<EnqueueNotificationResult | null> {
+  const recipientId = appointment.userId || 'client';
+  const recipientEmail = appointment.customerEmail;
+  const channel: NotificationChannel = 'email';
+  const idempotencyKey = generateNotificationIdempotencyKey(channel, recipientId, 'consultation_booking_confirmed', appointment.id);
+
+  return enqueueNotification(db, {
+    idempotencyKey,
+    recipientId,
+    recipientEmail,
+    channel,
+    templateId: 'consultation_booking_confirmed',
+    title: `Consultation Confirmed: ${appointment.serviceTitle || appointment.serviceCode}`,
+    body: `Your appointment with ${appointment.practitionerName} is confirmed for ${appointment.scheduledDate} at ${appointment.scheduledTime}.`,
+    metadata: {
+      appointmentId: appointment.id,
+      practitionerId: appointment.practitionerId,
+      scheduledDate: appointment.scheduledDate,
+      scheduledTime: appointment.scheduledTime,
+      deliveryMode: appointment.deliveryMode,
+    },
+  });
+}
+
+/**
+ * 2. Consultations: Cancellation Notification
+ */
+export async function enqueueConsultationCancelledNotification(
+  db: any,
+  appointment: any,
+  reason?: string
+): Promise<EnqueueNotificationResult | null> {
+  const recipientId = appointment.userId || 'client';
+  const recipientEmail = appointment.customerEmail;
+  const channel: NotificationChannel = 'email';
+  const idempotencyKey = generateNotificationIdempotencyKey(channel, recipientId, 'consultation_cancelled', appointment.id);
+
+  return enqueueNotification(db, {
+    idempotencyKey,
+    recipientId,
+    recipientEmail,
+    channel,
+    templateId: 'consultation_cancelled',
+    title: `Consultation Cancelled: #${appointment.id}`,
+    body: `Your consultation scheduled for ${appointment.scheduledDate} at ${appointment.scheduledTime} has been cancelled. Reason: ${reason || appointment.cancellationReason || 'Cancelled by user'}.`,
+    metadata: {
+      appointmentId: appointment.id,
+      reason: reason || appointment.cancellationReason,
+      status: 'cancelled',
+    },
+  });
+}
+
+/**
+ * 2. Consultations: 24-hour and 2-hour Reminders
+ */
+export async function enqueueConsultationReminder(
+  db: any,
+  appointmentId: string,
+  reminderType: '24h' | '2h'
+): Promise<EnqueueNotificationResult> {
+  const snap = await db.collection('consultation_appointments').doc(appointmentId).get();
+  if (!snap.exists) {
+    throw new Error(`Appointment not found: ${appointmentId}`);
+  }
+  const appt = typeof snap.data === 'function' ? snap.data() : snap.data;
+  if (appt.status === 'cancelled') {
+    throw new Error(`Cannot send reminder for cancelled appointment: ${appointmentId}`);
+  }
+
+  const recipientId = appt.userId || 'client';
+  const channel: NotificationChannel = reminderType === '2h' ? 'sms' : 'email';
+  const eventTag = reminderType === '2h' ? 'consultation_reminder_2h' : 'consultation_reminder_24h';
+  const idempotencyKey = generateNotificationIdempotencyKey(channel, recipientId, eventTag, appointmentId);
+
+  const title = reminderType === '2h'
+    ? `Reminder: Consultation with ${appt.practitionerName} in 2 Hours`
+    : `Reminder: Consultation with ${appt.practitionerName} Tomorrow`;
+  const body = reminderType === '2h'
+    ? `Your consultation (${appt.serviceTitle || appt.serviceCode}) starts in 2 hours at ${appt.scheduledTime}. Please prepare your connection.`
+    : `Friendly reminder that your wellness consultation is scheduled for tomorrow (${appt.scheduledDate}) at ${appt.scheduledTime}.`;
+
+  return enqueueNotification(db, {
+    idempotencyKey,
+    recipientId,
+    recipientEmail: appt.customerEmail,
+    recipientPhone: appt.customerPhone,
+    channel,
+    templateId: `consultation_reminder_${reminderType}`,
+    title,
+    body,
+    metadata: {
+      appointmentId: appt.id,
+      reminderType,
+      scheduledDate: appt.scheduledDate,
+      scheduledTime: appt.scheduledTime,
+    },
+  });
+}
+
+/**
+ * 3. Workshops: Registration Confirmation
+ */
+export async function enqueueWorkshopRegistrationConfirmedNotification(
+  db: any,
+  registration: any,
+  workshop: any
+): Promise<EnqueueNotificationResult | null> {
+  const recipientId = registration.userId || 'attendee';
+  const channel: NotificationChannel = 'email';
+  const idempotencyKey = generateNotificationIdempotencyKey(channel, recipientId, 'workshop_registration_confirmed', registration.id);
+
+  return enqueueNotification(db, {
+    idempotencyKey,
+    recipientId,
+    recipientEmail: registration.customerEmail,
+    recipientPhone: registration.customerPhone,
+    channel,
+    templateId: 'workshop_registration_confirmed',
+    title: `Registration Confirmed: ${workshop.title}`,
+    body: `You are confirmed for ${workshop.title} on ${workshop.date} at ${workshop.time}. Pass ID: ${registration.id}.`,
+    metadata: {
+      registrationId: registration.id,
+      workshopId: workshop.id,
+      branchId: workshop.branchId,
+      status: 'confirmed',
+    },
+  });
+}
+
+/**
+ * 3. Workshops: Reminder
+ */
+export async function enqueueWorkshopReminders(
+  db: any,
+  workshopId: string
+): Promise<{ enqueuedCount: number; results: EnqueueNotificationResult[] }> {
+  const wsSnap = await db.collection('workshops').doc(workshopId).get();
+  if (!wsSnap.exists) {
+    throw new Error(`Workshop not found: ${workshopId}`);
+  }
+  const ws = typeof wsSnap.data === 'function' ? wsSnap.data() : wsSnap.data;
+
+  const regSnap = await db.collection('workshop_registrations')
+    .where('workshopId', '==', workshopId)
+    .get();
+
+  const results: EnqueueNotificationResult[] = [];
+  let enqueuedCount = 0;
+
+  if (regSnap && !regSnap.empty) {
+    const docs = regSnap.docs || [];
+    for (const d of docs) {
+      const reg = typeof d.data === 'function' ? d.data() : d.data;
+      if (reg.status !== 'confirmed') continue;
+
+      const recipientId = reg.userId || 'attendee';
+      const channel: NotificationChannel = 'email';
+      const idempotencyKey = generateNotificationIdempotencyKey(channel, recipientId, 'workshop_reminder', `${workshopId}_${reg.id}`);
+
+      const res = await enqueueNotification(db, {
+        idempotencyKey,
+        recipientId,
+        recipientEmail: reg.customerEmail,
+        recipientPhone: reg.customerPhone,
+        channel,
+        templateId: 'workshop_reminder',
+        title: `Reminder: Upcoming Workshop - ${ws.title}`,
+        body: `We look forward to seeing you at ${ws.title} on ${ws.date} at ${ws.time} (${ws.location || 'Branch'}).`,
+        metadata: {
+          workshopId,
+          registrationId: reg.id,
+          date: ws.date,
+          time: ws.time,
+        },
+      });
+
+      if (!res.idempotentReplay) enqueuedCount++;
+      results.push(res);
+    }
+  }
+
+  return { enqueuedCount, results };
+}
+
+/**
+ * 3. Workshops: Waitlist Promotion
+ */
+export async function enqueueWorkshopWaitlistPromotedNotification(
+  db: any,
+  registration: any,
+  workshop: any
+): Promise<EnqueueNotificationResult | null> {
+  const recipientId = registration.userId || 'attendee';
+  const channel: NotificationChannel = 'email';
+  const idempotencyKey = generateNotificationIdempotencyKey(channel, recipientId, 'workshop_waitlist_promoted', registration.id);
+
+  return enqueueNotification(db, {
+    idempotencyKey,
+    recipientId,
+    recipientEmail: registration.customerEmail,
+    recipientPhone: registration.customerPhone,
+    channel,
+    templateId: 'workshop_waitlist_promoted',
+    title: `You're In! A Seat Opened for ${workshop.title}`,
+    body: `Great news! A confirmed seat has opened for you at ${workshop.title} on ${workshop.date} at ${workshop.time}. Pass ID: ${registration.id}.`,
+    metadata: {
+      registrationId: registration.id,
+      workshopId: workshop.id,
+      status: 'confirmed',
+    },
+  });
+}
+
+/**
+ * Helper: Promotes the next waitlisted participant for a workshop
+ */
+export async function promoteNextWaitlistedParticipant(
+  db: any,
+  workshopId: string
+): Promise<{ promoted: boolean; registration?: any; workshop?: any; message?: string }> {
+  const wsRef = db.collection('workshops').doc(workshopId);
+  const wsSnap = await wsRef.get();
+  if (!wsSnap.exists) {
+    throw new Error(`Workshop not found: ${workshopId}`);
+  }
+  const ws = typeof wsSnap.data === 'function' ? wsSnap.data() : wsSnap.data;
+
+  // Find waitlisted registrations
+  const regSnap = await db.collection('workshop_registrations')
+    .where('workshopId', '==', workshopId)
+    .get();
+
+  const waitlisted: any[] = [];
+  if (regSnap && !regSnap.empty) {
+    const docs = regSnap.docs || [];
+    for (const d of docs) {
+      const data = typeof d.data === 'function' ? d.data() : d.data;
+      if (data.status === 'waitlisted') {
+        waitlisted.push(data);
+      }
+    }
+  }
+
+  if (waitlisted.length === 0) {
+    return { promoted: false, message: 'No waitlisted participants found for this workshop.' };
+  }
+
+  // Sort by createdAt ascending (FIFO queue)
+  waitlisted.sort((a, b) => (a.createdAt || '').localeCompare(b.createdAt || ''));
+  const target = waitlisted[0];
+
+  const nowIso = new Date().toISOString();
+  const newSignature = generateRegistrationSignature(target.id, target.userId, workshopId, 'confirmed');
+
+  const updatedReg = {
+    ...target,
+    status: 'confirmed',
+    signature: newSignature,
+    promotedAt: nowIso,
+    updatedAt: nowIso,
+  };
+
+  const updatedSeats = (ws.seatsAllocated || 0) + 1;
+  const updatedWaitlist = Math.max(0, (ws.waitlistCount || 1) - 1);
+
+  await db.collection('workshop_registrations').doc(target.id).set(updatedReg);
+  await wsRef.update({
+    seatsAllocated: updatedSeats,
+    waitlistCount: updatedWaitlist,
+    updatedAt: nowIso,
+  });
+
+  const updatedWs = { ...ws, seatsAllocated: updatedSeats, waitlistCount: updatedWaitlist, updatedAt: nowIso };
+
+  // Enqueue waitlist promotion notification
+  await enqueueWorkshopWaitlistPromotedNotification(db, updatedReg, updatedWs);
+
+  return { promoted: true, registration: updatedReg, workshop: updatedWs };
+}
+
+/**
+ * 4. Support: Ticket Acknowledgement Notification
+ */
+export async function enqueueTicketAcknowledgedNotification(
+  db: any,
+  ticket: any
+): Promise<EnqueueNotificationResult | null> {
+  const recipientId = ticket.userId || 'customer';
+  const channel: NotificationChannel = 'email';
+  const idempotencyKey = generateNotificationIdempotencyKey(channel, recipientId, 'ticket_acknowledged', ticket.id);
+
+  return enqueueNotification(db, {
+    idempotencyKey,
+    recipientId,
+    recipientEmail: ticket.customerEmail,
+    recipientPhone: ticket.customerPhone,
+    channel,
+    templateId: 'ticket_acknowledged',
+    title: `Support Ticket Received: #${ticket.id}`,
+    body: `Your consumer inquiry regarding "${ticket.subject}" has been received. Our team will resolve it within standard SLA.`,
+    metadata: {
+      ticketId: ticket.id,
+      branchId: ticket.branchId,
+      category: ticket.category,
+      slaDueAt: ticket.slaDueAt,
+    },
+  });
+}
+
+/**
+ * 4. Support: SLA-Breach Staff Alert
+ */
+export async function enqueueTicketSlaBreachAlert(
+  db: any,
+  ticket: any,
+  reason?: string
+): Promise<EnqueueNotificationResult | null> {
+  const branchId = (ticket.branchId || 'daet').toLowerCase();
+  let staffRecipientId = `staff_mgr_${branchId}`;
+  let staffEmail: string | undefined;
+
+  try {
+    const usersSnap = await db.collection('users')
+      .where('role', '==', 'branch_manager')
+      .where('assignedBranchId', '==', branchId)
+      .get();
+    if (usersSnap && !usersSnap.empty) {
+      const mgrDoc = usersSnap.docs ? usersSnap.docs[0] : null;
+      if (mgrDoc) {
+        const mgrData = typeof mgrDoc.data === 'function' ? mgrDoc.data() : mgrDoc.data;
+        staffRecipientId = mgrData.uid || staffRecipientId;
+        staffEmail = mgrData.email;
+      }
+    }
+  } catch (_e) {
+    // Fallback
+  }
+
+  const channel: NotificationChannel = 'email';
+  const idempotencyKey = generateNotificationIdempotencyKey(channel, staffRecipientId, 'ticket_sla_breach_alert', ticket.id);
+
+  return enqueueNotification(db, {
+    idempotencyKey,
+    recipientId: staffRecipientId,
+    recipientEmail: staffEmail,
+    channel,
+    templateId: 'ticket_sla_breach_staff_alert',
+    title: `URGENT SLA BREACH: Support Ticket #${ticket.id}`,
+    body: `Ticket #${ticket.id} (${ticket.subject}) has breached statutory SLA or been escalated. Immediate branch resolution required. Reason: ${reason || 'SLA threshold reached'}.`,
+    metadata: {
+      ticketId: ticket.id,
+      branchId,
+      slaDueAt: ticket.slaDueAt,
+      priority: 'urgent',
+    },
+  });
+}
+
+/**
+ * 4. Support: Resolution Notification
+ */
+export async function enqueueTicketResolvedNotification(
+  db: any,
+  ticket: any,
+  resolutionSummary: string
+): Promise<EnqueueNotificationResult | null> {
+  const recipientId = ticket.userId || 'customer';
+  const channel: NotificationChannel = 'email';
+  const idempotencyKey = generateNotificationIdempotencyKey(channel, recipientId, 'ticket_resolved', ticket.id);
+
+  return enqueueNotification(db, {
+    idempotencyKey,
+    recipientId,
+    recipientEmail: ticket.customerEmail,
+    channel,
+    templateId: 'ticket_resolved',
+    title: `Support Ticket Resolved: #${ticket.id}`,
+    body: `Your support ticket #${ticket.id} (${ticket.subject}) has been resolved. Resolution: ${resolutionSummary}.`,
+    metadata: {
+      ticketId: ticket.id,
+      resolutionSummary,
+      status: 'resolved',
+    },
+  });
+}
+
+/**
+ * 5. Inventory: Branch-Manager Low-Stock Alert When Stock Reaches ROP
+ */
+export async function checkAndEnqueueLowStockAlert(
+  db: any,
+  branchId: string,
+  skuId: string
+): Promise<{ alertTriggered: boolean; queueResult?: EnqueueNotificationResult; details: any }> {
+  const normalizedBranch = (branchId || 'daet').toLowerCase().trim();
+  const invRef = db.collection('inventory').doc(`${normalizedBranch}_${skuId}`);
+  const invSnap = await invRef.get();
+
+  if (!invSnap.exists) {
+    return { alertTriggered: false, details: { error: 'Inventory not found' } };
+  }
+
+  const invData = typeof invSnap.data === 'function' ? invSnap.data() : invSnap.data;
+  const currentStock = Number(invData.activeStock ?? invData.availableQuantity ?? 0);
+
+  const leadTime = Number(invData.leadTimeDays) || 3;
+  const safetyStock = Number(invData.safetyStock) || 20;
+
+  let salesVelocity = 0;
+  try {
+    const thirtyDaysAgoIso = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString();
+    const ordersSnap = await db.collection('orders')
+      .where('branchId', '==', normalizedBranch)
+      .where('fulfillmentStatus', '==', 'fulfilled')
+      .where('fulfilledAt', '>=', thirtyDaysAgoIso)
+      .get();
+
+    let totalSold = 0;
+    if (ordersSnap && !ordersSnap.empty) {
+      ordersSnap.forEach((doc: any) => {
+        const order = typeof doc.data === 'function' ? doc.data() : doc.data;
+        if (order.status !== 'cancelled' && order.status !== 'refunded') {
+          for (const item of (order.items || [])) {
+            if (item.skuId === skuId) totalSold += Number(item.quantity) || 0;
+          }
+        }
+      });
+    }
+    salesVelocity = totalSold / 30;
+  } catch (_e) {
+    salesVelocity = 0;
+  }
+
+  const calculatedRop = Math.ceil((salesVelocity * leadTime) + safetyStock);
+  const effectiveRop = Math.max(calculatedRop, Number(invData.reorderPoint) || 30);
+
+  const details = {
+    branchId: normalizedBranch,
+    skuId,
+    currentStock,
+    effectiveRop,
+    calculatedRop,
+    salesVelocity,
+    safetyStock,
+    leadTime,
+  };
+
+  if (currentStock <= effectiveRop) {
+    let managerUid = `mgr_${normalizedBranch}`;
+    let managerEmail: string | undefined;
+
+    try {
+      const usersSnap = await db.collection('users')
+        .where('role', '==', 'branch_manager')
+        .where('assignedBranchId', '==', normalizedBranch)
+        .get();
+      if (usersSnap && !usersSnap.empty) {
+        const mgrDoc = usersSnap.docs ? usersSnap.docs[0] : null;
+        if (mgrDoc) {
+          const mData = typeof mgrDoc.data === 'function' ? mgrDoc.data() : mgrDoc.data;
+          managerUid = mData.uid || managerUid;
+          managerEmail = mData.email;
+        }
+      }
+    } catch (_e) {
+      // Fallback
+    }
+
+    const channel: NotificationChannel = 'email';
+    const idempotencyKey = generateNotificationIdempotencyKey(
+      channel,
+      managerUid,
+      'inventory_low_stock_rop',
+      `${normalizedBranch}_${skuId}`
+    );
+
+    const queueResult = await enqueueNotification(db, {
+      idempotencyKey,
+      recipientId: managerUid,
+      recipientEmail: managerEmail,
+      channel,
+      templateId: 'inventory_low_stock_rop_alert',
+      title: `Low Stock Alert: ${skuId} at ${normalizedBranch.toUpperCase()} Reached ROP (${currentStock} <= ${effectiveRop})`,
+      body: `Stock for SKU ${skuId} at branch ${normalizedBranch} has dropped to ${currentStock}, reaching or falling below the Reorder Point of ${effectiveRop} units. Please initiate branch replenishment immediately.`,
+      metadata: {
+        branchId: normalizedBranch,
+        skuId,
+        currentStock,
+        effectiveRop,
+        calculatedRop,
+      },
+    });
+
+    return { alertTriggered: true, queueResult, details };
+  }
+
+  return { alertTriggered: false, details };
+}
+
 export interface ServerDependencies {
   db?: any;
   auth?: any;
@@ -3237,6 +3896,11 @@ export function createExpressApp(deps: ServerDependencies = {}): Express {
         req
       );
 
+      // C2: Enqueue transactional order confirmation notification
+      await enqueueOrderCheckoutCompletedNotification(db, orderRecord).catch((e) => {
+        logger.warn('Failed to enqueue order checkout completed notification', { error: e.message, orderId });
+      });
+
       res.status(200).json({ success: true, orderId, order: orderRecord, idempotentReplay: false });
     } catch (err: any) {
       if (err.message && err.message.startsWith('INSUFFICIENT_ELIGIBLE_STOCK:')) {
@@ -3457,6 +4121,11 @@ export function createExpressApp(deps: ServerDependencies = {}): Express {
         { reason, grandTotal: updatedOrder.grandTotal },
         req
       );
+
+      // C2: Enqueue transactional order cancellation notification
+      await enqueueOrderCancelledNotification(db, updatedOrder, reason).catch((e) => {
+        logger.warn('Failed to enqueue order cancellation notification', { error: e.message, orderId: strOrderId });
+      });
 
       res.status(200).json({ success: true, orderId: strOrderId, order: updatedOrder, refundResult });
     } catch (err: any) {
@@ -3780,6 +4449,19 @@ export function createExpressApp(deps: ServerDependencies = {}): Express {
         return;
       }
 
+      // C2: Enqueue transactional order refund notification (if not an idempotent replay)
+      if (!refundResult.isReplay) {
+        await enqueueOrderRefundedNotification(
+          db,
+          refundResult.order || orderData,
+          refundAmount,
+          reason,
+          idempotencyKey
+        ).catch((e) => {
+          logger.warn('Failed to enqueue order refund notification', { error: e.message, orderId: strOrderId });
+        });
+      }
+
       res.status(200).json({
         success: true,
         orderId: strOrderId,
@@ -4065,6 +4747,12 @@ export function createExpressApp(deps: ServerDependencies = {}): Express {
       });
 
       await logAuditEvent(user.uid, user.role, appointmentRecord.branchId, 'consultation_appointment_booked', 'consultation_appointments', appointmentId, true, {}, req);
+
+      // C2: Enqueue transactional consultation booking confirmation notification
+      await enqueueConsultationBookingConfirmedNotification(db, appointmentRecord).catch((e) => {
+        logger.warn('Failed to enqueue consultation booking notification', { error: e.message, appointmentId });
+      });
+
       res.status(201).json({ success: true, appointmentId, appointment: appointmentRecord });
     } catch (err: any) {
       if (err.message === 'SLOT_ALREADY_BOOKED') {
@@ -4146,9 +4834,37 @@ export function createExpressApp(deps: ServerDependencies = {}): Express {
       });
 
       await logAuditEvent(user.uid, user.role, appt.branchId, 'consultation_appointment_cancelled', 'consultation_appointments', appointmentId, true, { reason }, req);
+
+      // C2: Enqueue transactional consultation cancellation notification
+      await enqueueConsultationCancelledNotification(db, { ...appt, id: appointmentId }, reason).catch((e) => {
+        logger.warn('Failed to enqueue consultation cancellation notification', { error: e.message, appointmentId });
+      });
+
       res.json({ success: true, message: 'Cancelled successfully.' });
     } catch (err: any) {
       res.status(500).json({ error: err.message });
+    }
+  });
+
+  // --- C2: POST /api/consultations/:appointmentId/reminder - Trigger 24h or 2h Reminder ---
+  app.post('/api/consultations/:appointmentId/reminder', async (req: Request, res: Response): Promise<void> => {
+    const user = await requireAuth(req, res);
+    if (!user) return;
+
+    const { appointmentId } = req.params;
+    const strAppointmentId = String(appointmentId || '');
+    const { reminderType = '24h' } = req.body || {};
+
+    if (reminderType !== '24h' && reminderType !== '2h') {
+      res.status(400).json({ error: "Invalid reminderType: must be '24h' or '2h'." });
+      return;
+    }
+
+    try {
+      const result = await enqueueConsultationReminder(db, strAppointmentId, reminderType as '24h' | '2h');
+      res.status(result.idempotentReplay ? 200 : 201).json(result);
+    } catch (err: any) {
+      res.status(400).json({ error: err.message });
     }
   });
 
@@ -4250,6 +4966,14 @@ export function createExpressApp(deps: ServerDependencies = {}): Express {
       });
 
       await logAuditEvent(user.uid, user.role, result.workshop.branchId, 'workshop_registered', 'workshop_registrations', result.registration.id, true, { status: result.registration.status }, req);
+
+      // C2: Enqueue transactional workshop registration confirmation notification (for confirmed registrations)
+      if (result.registration.status === 'confirmed') {
+        await enqueueWorkshopRegistrationConfirmedNotification(db, result.registration, result.workshop).catch((e) => {
+          logger.warn('Failed to enqueue workshop registration notification', { error: e.message, registrationId: result.registration.id });
+        });
+      }
+
       res.status(201).json({ success: true, registration: result.registration, workshop: result.workshop });
     } catch (err: any) {
       if (err.message === 'WORKSHOP_NOT_FOUND') {
@@ -4408,6 +5132,52 @@ export function createExpressApp(deps: ServerDependencies = {}): Express {
       });
     } catch (err: any) {
       res.status(500).json({ error: err.message });
+    }
+  });
+
+  // --- C2: POST /api/workshops/:workshopId/reminders - Send Reminders to Confirmed Attendees ---
+  app.post('/api/workshops/:workshopId/reminders', async (req: Request, res: Response): Promise<void> => {
+    const user = await requireAuth(req, res);
+    if (!user) return;
+
+    const isStaff = user.role === 'branch_manager' || user.role === 'regional_director' || user.role === 'super_admin';
+    if (!isStaff) {
+      res.status(403).json({ error: 'Access Denied: Only staff can send workshop reminders.' });
+      return;
+    }
+
+    const { workshopId } = req.params;
+    const strWorkshopId = String(workshopId || '');
+    try {
+      const summary = await enqueueWorkshopReminders(db, strWorkshopId);
+      res.status(200).json({ success: true, ...summary });
+    } catch (err: any) {
+      res.status(400).json({ error: err.message });
+    }
+  });
+
+  // --- C2: POST /api/workshops/:workshopId/promote-waitlist - Promote Next Waitlisted Participant ---
+  app.post('/api/workshops/:workshopId/promote-waitlist', async (req: Request, res: Response): Promise<void> => {
+    const user = await requireAuth(req, res);
+    if (!user) return;
+
+    const isStaff = user.role === 'branch_manager' || user.role === 'regional_director' || user.role === 'super_admin';
+    if (!isStaff) {
+      res.status(403).json({ error: 'Access Denied: Only staff can promote waitlisted participants.' });
+      return;
+    }
+
+    const { workshopId } = req.params;
+    const strWorkshopId = String(workshopId || '');
+    try {
+      const result = await promoteNextWaitlistedParticipant(db, strWorkshopId);
+      if (!result.promoted) {
+        res.status(404).json({ error: result.message || 'No waitlisted participants available.' });
+        return;
+      }
+      res.status(200).json({ success: true, ...result });
+    } catch (err: any) {
+      res.status(400).json({ error: err.message });
     }
   });
 
@@ -4578,6 +5348,11 @@ export function createExpressApp(deps: ServerDependencies = {}): Express {
         { category, branchId: newTicket.branchId, slaDueAt },
         req
       );
+
+      // C2: Enqueue transactional support ticket acknowledgement notification
+      await enqueueTicketAcknowledgedNotification(db, newTicket).catch((e) => {
+        logger.warn('Failed to enqueue ticket acknowledgement notification', { error: e.message, ticketId });
+      });
 
       res.status(201).json({
         ticket: newTicket,
@@ -4776,6 +5551,13 @@ export function createExpressApp(deps: ServerDependencies = {}): Express {
         req
       );
 
+      // C2: Enqueue transactional support ticket resolution notification
+      if (updated.status === 'resolved' && resolutionSummary) {
+        await enqueueTicketResolvedNotification(db, updated, resolutionSummary.trim()).catch((e) => {
+          logger.warn('Failed to enqueue ticket resolved notification', { error: e.message, ticketId: updated.id });
+        });
+      }
+
       res.json({ ticket: updated });
     } catch (err: any) {
       if (err.message.startsWith('NOT_FOUND')) {
@@ -4852,6 +5634,11 @@ export function createExpressApp(deps: ServerDependencies = {}): Express {
         req
       );
 
+      // C2: Enqueue transactional SLA-breach staff alert notification
+      await enqueueTicketSlaBreachAlert(db, updated, req.body.reason).catch((e) => {
+        logger.warn('Failed to enqueue ticket SLA breach alert', { error: e.message, ticketId: updated.id });
+      });
+
       res.json({ ticket: updated });
     } catch (err: any) {
       if (err.message.startsWith('NOT_FOUND')) {
@@ -4861,6 +5648,49 @@ export function createExpressApp(deps: ServerDependencies = {}): Express {
       } else {
         res.status(500).json({ error: err.message });
       }
+    }
+  });
+
+  // --- C2: POST /api/support/check-sla-breaches - Scan Open Tickets and Trigger SLA Breach Alerts ---
+  app.post('/api/support/check-sla-breaches', async (req: Request, res: Response): Promise<void> => {
+    const user = await requireAuth(req, res);
+    if (!user) return;
+
+    const isStaff = user.role === 'branch_manager' || user.role === 'regional_director' || user.role === 'super_admin';
+    if (!isStaff) {
+      res.status(403).json({ error: 'Access Denied: Only staff can trigger SLA breach audits.' });
+      return;
+    }
+
+    try {
+      const nowIso = new Date().toISOString();
+      const snap = await db.collection('support_tickets').get();
+      const breachedTickets: any[] = [];
+      const alertResults: any[] = [];
+
+      if (snap && !snap.empty) {
+        const docs = snap.docs || [];
+        for (const d of docs) {
+          const t = typeof d.data === 'function' ? d.data() : d.data;
+          const isOpen = t.status === 'submitted' || t.status === 'in_progress';
+          const isBreached = isOpen && t.slaDueAt && t.slaDueAt <= nowIso;
+
+          if (isBreached || t.status === 'escalated_sla_breach') {
+            breachedTickets.push(t);
+            const alertRes = await enqueueTicketSlaBreachAlert(db, t, 'Automated SLA deadline evaluation').catch(() => null);
+            if (alertRes) alertResults.push(alertRes);
+          }
+        }
+      }
+
+      res.status(200).json({
+        success: true,
+        breachedCount: breachedTickets.length,
+        alertCount: alertResults.length,
+        tickets: breachedTickets.map((t) => ({ id: t.id, branchId: t.branchId, slaDueAt: t.slaDueAt })),
+      });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
     }
   });
 
@@ -6177,9 +7007,122 @@ export function createExpressApp(deps: ServerDependencies = {}): Express {
         req
       );
 
+      // C2: Enqueue transactional order dispatch notification
+      const updatedOrderSnap = await orderRef.get();
+      const fulfilledOrder = updatedOrderSnap.exists ? updatedOrderSnap.data() : orderData;
+      await enqueueOrderDispatchedNotification(db, fulfilledOrder).catch((e) => {
+        logger.warn('Failed to enqueue order dispatch notification', { error: e.message, orderId: strOrderId });
+      });
+
+      // C2: Check and trigger low-stock ROP alerts for affected SKUs
+      const affectedSkuKeys = Object.keys(orderData.batchAllocations || {});
+      for (const skuId of affectedSkuKeys) {
+        await checkAndEnqueueLowStockAlert(db, normalizedBranch, skuId).catch((e) => {
+          logger.warn('Failed to check inventory ROP alert after fulfillment', { error: e.message, skuId, branch: normalizedBranch });
+        });
+      }
+
       res.status(200).json({ success: true, orderId: strOrderId, allocationsCreated: createdAllocations });
     } catch (err: any) {
       res.status(500).json({ error: `Fulfillment failed: ${err.message}` });
+    }
+  });
+
+  // --- C2: POST /api/orders/:orderId/deliver - Mark Order Delivered & Enqueue Notification ---
+  app.post('/api/orders/:orderId/deliver', async (req: Request, res: Response): Promise<void> => {
+    const user = await requireAuth(req, res);
+    if (!user) return;
+
+    if (user.role !== 'branch_manager' && user.role !== 'regional_director' && user.role !== 'super_admin') {
+      res.status(403).json({ error: 'Access Denied: Only staff can mark orders as delivered.' });
+      return;
+    }
+
+    const { orderId } = req.params;
+    const strOrderId = String(orderId || '');
+
+    try {
+      const orderRef = db.collection('orders').doc(strOrderId);
+      const snap = await orderRef.get();
+      if (!snap || !snap.exists) {
+        res.status(404).json({ error: `Order not found: ${strOrderId}` });
+        return;
+      }
+
+      const orderData = snap.data();
+      const normalizedBranch = (orderData.branchId || 'daet').toLowerCase().trim();
+
+      if (user.role === 'branch_manager') {
+        const assigned = (user.assignedBranchId || 'daet').toLowerCase().trim();
+        if (normalizedBranch !== assigned) {
+          res.status(403).json({ error: 'Access Denied: Branch managers cannot update delivery for other branches.' });
+          return;
+        }
+      }
+
+      const nowIso = new Date().toISOString();
+      const updatedOrder = {
+        ...orderData,
+        fulfillmentStatus: 'completed',
+        deliveredAt: nowIso,
+        updatedAt: nowIso,
+      };
+
+      await orderRef.set(updatedOrder, { merge: true });
+
+      // Enqueue transactional delivery completed notification
+      await enqueueOrderDeliveredNotification(db, updatedOrder).catch((e) => {
+        logger.warn('Failed to enqueue order delivered notification', { error: e.message, orderId: strOrderId });
+      });
+
+      await logAuditEvent(
+        user.uid,
+        user.role,
+        normalizedBranch,
+        'order_delivered',
+        'orders',
+        strOrderId,
+        true,
+        {},
+        req
+      );
+
+      res.status(200).json({ success: true, orderId: strOrderId, order: updatedOrder });
+    } catch (err: any) {
+      res.status(500).json({ error: `Failed to mark order delivered: ${err.message}` });
+    }
+  });
+
+  // --- C2: POST /api/inventory/check-rop-alerts - Check Low-Stock ROP and Alert Branch Manager ---
+  app.post('/api/inventory/check-rop-alerts', async (req: Request, res: Response): Promise<void> => {
+    const user = await requireAuth(req, res);
+    if (!user) return;
+
+    if (user.role !== 'branch_manager' && user.role !== 'regional_director' && user.role !== 'super_admin') {
+      res.status(403).json({ error: 'Access Denied: Only staff can evaluate inventory ROP alerts.' });
+      return;
+    }
+
+    const { branchId, skuId } = req.body || {};
+    if (!branchId || !skuId) {
+      res.status(400).json({ error: 'branchId and skuId are required.' });
+      return;
+    }
+
+    const targetBranch = String(branchId).toLowerCase().trim();
+    if (user.role === 'branch_manager') {
+      const assigned = (user.assignedBranchId || 'daet').toLowerCase().trim();
+      if (targetBranch !== assigned) {
+        res.status(403).json({ error: 'Access Denied: Branch managers can only check inventory for their assigned branch.' });
+        return;
+      }
+    }
+
+    try {
+      const result = await checkAndEnqueueLowStockAlert(db, targetBranch, String(skuId).trim());
+      res.status(200).json({ success: true, ...result });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
     }
   });
 

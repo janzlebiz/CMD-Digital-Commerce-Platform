@@ -23,6 +23,7 @@ const testFiles = [
   'scripts/testPriorityAFoundation.ts',
   'scripts/testPriorityBCommerce.ts',
   'scripts/testPriorityCAutomation.ts',
+  'scripts/testPriorityC2Lifecycle.ts',
 ];
 
 console.log('========================================================================');
