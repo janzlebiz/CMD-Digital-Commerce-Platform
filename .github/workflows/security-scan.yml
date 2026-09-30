@@ -1,0 +1,32 @@
+name: Automated Security Scan (SAST & DAST)
+
+on:
+  push:
+    branches: [ main, master ]
+  pull_request:
+    branches: [ main, master ]
+
+jobs:
+  security-scan:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Run Dependency Vulnerability Audit (SAST)
+        run: npm audit --audit-level=high
+
+      - name: Run Static Code Analysis & Linting (SAST)
+        run: npm run lint
+
+      - name: Run Platform Security Test Suite
+        run: npx tsx scripts/testPhase9SecurityAudit.ts

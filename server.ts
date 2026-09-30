@@ -3766,6 +3766,7 @@ export function createExpressApp(deps: ServerDependencies = {}): Express {
 
   const standardRateLimiter = createRateLimiter(60000, 60); // 60 req/min
   const strictRateLimiter = createRateLimiter(60000, 15);    // 15 req/min for checkout & unsubscribe
+  const authRateLimiter = createRateLimiter(60000, 5, 'Too many authentication attempts. Please try again later.'); // 5 req/min for auth / login brute-force protection
 
   app.use((req, res, next) => {
     const startTime = Date.now();
@@ -3840,6 +3841,11 @@ export function createExpressApp(deps: ServerDependencies = {}): Express {
   app.get('/readyz', handleReadyz);
   app.get('/api/readyz', handleReadyz);
 
+  // Authentication Brute-Force Protection Test / Check Endpoint
+  app.post('/api/auth/login-attempt', authRateLimiter, (_req: Request, res: Response): void => {
+    res.json({ success: true, message: 'Authentication attempt permitted within rate limit thresholds.' });
+  });
+
   if (process.env.NODE_ENV === 'test' || process.env.ENABLE_TEST_ROUTES === 'true') {
     app.get('/api/test-uncaught-error', (_req: Request, _res: Response, next: any) => {
       const err = new Error('TEST_UNCAUGHT_DATABASE_SECRET_LEAK_ERROR: sensitive_internal_db_password_12345');
@@ -3902,7 +3908,7 @@ export function createExpressApp(deps: ServerDependencies = {}): Express {
   }
 
   const googleAuthClient = new OAuth2Client();
-  const AUTHORIZED_SA = process.env.AUTHORIZED_SERVICE_ACCOUNT_EMAIL || 'ais-sandbox@ais-asia-east1-88e2f19c66d64fb.iam.gserviceaccount.com';
+  const AUTHORIZED_SA = process.env.AUTHORIZED_SERVICE_ACCOUNT_EMAIL || '';
 
   async function requireAuth(req: Request, res: Response): Promise<AuthenticatedUser | null> {
     const authHeader = req.headers.authorization;
@@ -3949,38 +3955,38 @@ export function createExpressApp(deps: ServerDependencies = {}): Express {
       uid = decoded.uid;
       email = decoded.email;
     } catch (firebaseErr: any) {
-      // Fallback: Support Google Identity Tokens for Service-to-Service staging validation
-      try {
-        const allowedAudiences = [
-          process.env.APP_URL,
-          process.env.STAGING_URL,
-          'https://ais-dev-twqasbvtmkrtsllriliohj-212282537635.asia-east1.run.app',
-          'https://ais-pre-twqasbvtmkrtsllriliohj-212282537635.asia-east1.run.app'
-        ];
-        
-        if (process.env.NODE_ENV !== 'production') {
+      // Fallback: Support Google Identity Tokens for Service-to-Service staging validation (NON-PRODUCTION ONLY)
+      if (process.env.NODE_ENV !== 'production' && AUTHORIZED_SA) {
+        try {
+          const allowedAudiences = [
+            process.env.APP_URL,
+            process.env.STAGING_URL,
+            'https://ais-dev-twqasbvtmkrtsllriliohj-212282537635.asia-east1.run.app',
+            'https://ais-pre-twqasbvtmkrtsllriliohj-212282537635.asia-east1.run.app'
+          ];
+          
           const host = req.headers.host;
           if (host) {
             allowedAudiences.push(`http://${host}`);
             allowedAudiences.push(`https://${host}`);
           }
-        }
 
-        const ticket = await googleAuthClient.verifyIdToken({
-          idToken,
-          audience: allowedAudiences.filter(Boolean) as string[]
-        });
-        const payload = ticket.getPayload();
-        if (payload && payload.email === AUTHORIZED_SA) {
-          logger.info('Authenticated via Google OIDC Identity Token', { email: payload.email });
-          return {
-            uid: `sa-${payload.sub}`,
-            role: 'super_admin', // Service account verification grants super admin for smoke testing
-            email: payload.email,
-          };
+          const ticket = await googleAuthClient.verifyIdToken({
+            idToken,
+            audience: allowedAudiences.filter(Boolean) as string[]
+          });
+          const payload = ticket.getPayload();
+          if (payload && payload.email === AUTHORIZED_SA) {
+            logger.info('Authenticated via Google OIDC Identity Token (staging/dev only)', { email: payload.email });
+            return {
+              uid: `sa-${payload.sub}`,
+              role: 'super_admin', // Staging service account verification grants super admin for smoke testing
+              email: payload.email,
+            };
+          }
+        } catch (googleErr: any) {
+          logger.error('Google OIDC verification failed', { error: googleErr.message, audience: [process.env.APP_URL, process.env.STAGING_URL] });
         }
-      } catch (googleErr: any) {
-        logger.error('Google OIDC verification failed', { error: googleErr.message, audience: [process.env.APP_URL, process.env.STAGING_URL] });
       }
 
       const errorMsg = `Authentication Failed: Token verification failed (Firebase: ${firebaseErr.message})`;

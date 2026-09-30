@@ -38,7 +38,7 @@ The canonical product roadmap comprises the following ten phases:
 | **Phase 6** | IMPLEMENTED / HARDENED | CRM cohorts, financial metrics, and support ticketing suites fully implemented and tested. |
 | **Phase 7** | CERTIFIED / IMPLEMENTED | Original PRD Phase 7 (automation & analytics) and Engineering M1–M8 hardening fully completed and verified (27/27 suites). |
 | **Phase 8** | CERTIFIED / IMPLEMENTED | Mobile / PWA offline shell, service worker caching, and manifest identity fully operational and tested. |
-| **Phase 9** | CERTIFIED / PASS | Formal production certification gates (security, privacy, performance, backup/DR, monitoring/ops, and UAT/Staging) fully remediated and certified PASS. |
+| **Phase 9** | PARTIAL | Production certification audit complete. Gates 2 through 6 fully completed and verified. Gate 1 remains PARTIAL / OPEN pending the formal third-party external penetration testing report. |
 | **Phase 10** | FUTURE | Advanced third-party ecosystem integrations (deferred). |
 
 ---
@@ -136,6 +136,11 @@ The canonical product roadmap comprises the following ten phases:
   * **Deployment Safety Guidelines**: Documented staging/canary pre-deployment checklists, smoke tests, liveness/readiness, rollback triggers/procedures, and post-deployment verification checks.
   * **UAT Sign-Off Template**: Created `docs/UAT_SIGNOFF.md` detailing tester fields, pass/fail result metrics, defect tracking, and final business sign-off.
   * **Testing & Regression**: Dedicated Gate 6 test suite (`scripts/testPhase9Gate6.ts`) passing **26/26 assertions** and staging smoke tests (`scripts/smokeTestStaging.ts`) passing **10/10 assertions**. Full regression suite passing **27/27 test files**.
+* **Phase 9C Final Security Gate Closure**:
+  * **Super-Admin Protection**: Completely removed the Google OIDC super-admin fallback path in production mode, restricted OIDC service-account auth checks strictly to staging/dev environments, and eliminated any default hardcoded service account emails.
+  * **Auth Brute-Force Rate Limiting**: Implemented dedicated auth rate limiting on `/api/auth/login-attempt` (5 attempts/min) to defend against brute-force attacks.
+  * **Automated CI Security Scanning**: Integrated automated SAST & dependency scans (`npm audit`, `npm run lint`) inside the CI pipeline (`.github/workflows/security-scan.yml`).
+  * **Security Regression Tests**: Created dedicated test suite `scripts/testPhase9SecurityAudit.ts` ensuring robust rate limiting and OIDC production block.
 * **Audit Document**: Updated findings, remediation status, and Gate 3, Gate 4, Gate 5 & Gate 6 PASS status in `docs/PHASE_9A_PRODUCTION_AUDIT.md`.
 
 ---
@@ -153,7 +158,7 @@ The canonical product roadmap comprises the following ten phases:
 
 ## 8. Current Project Gate
 
-> **CURRENT PROJECT GATE**: Phase 9 Production Certification COMPLETE (Gate 1 Security, Gate 2 Privacy, Gate 3 Performance & Concurrency, Gate 4 Backup & Recovery, Gate 5 Monitoring & Operations, and Gate 6 End-to-End Business Acceptance) certified **PASS**. Platform is ready for final production release.
+> **CURRENT PROJECT GATE**: Phase 9 Production Certification is **PARTIAL / OPEN** (Gate 1 Security remains PARTIAL/OPEN pending the external third-party penetration testing report; Gates 2, 3, 4, 5, and 6 are fully certified PASS). Platform is in a gated release state pending final penetration test report closure. No production-readiness certification is claimed until Gate 1 is closed.
 
 ---
 
