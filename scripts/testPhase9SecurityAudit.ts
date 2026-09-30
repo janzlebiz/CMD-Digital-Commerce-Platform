@@ -88,7 +88,17 @@ async function runSecurityAuditTests() {
   if (ciWorkflowExists) {
     const content = fs.readFileSync(ciWorkflowPath, 'utf8');
     assert(content.includes('npm audit') && content.includes('npm run lint'), '3.2 CI workflow performs dependency audit and static code analysis linting');
-    assert(content.includes('semgrep') && content.includes('zaproxy'), '3.3 CI workflow performs genuine Semgrep SAST and OWASP ZAP DAST scans');
+    
+    // Check Semgrep genuine SAST and ensure no soft-fail override exists
+    const hasSemgrep = content.includes('semgrep');
+    const hasSemgrepSoftFail = content.includes('semgrep') && content.includes('|| true');
+    assert(hasSemgrep && !hasSemgrepSoftFail, '3.3 Semgrep SAST is configured and runs without soft-fail overrides (e.g. || true)');
+
+    // Check OWASP ZAP genuine DAST and ensure fail_action is true
+    const hasZap = content.includes('zaproxy');
+    const hasZapEnforced = content.includes('fail_action: true');
+    const hasZapSoftFail = content.includes('fail_action: false');
+    assert(hasZap && hasZapEnforced && !hasZapSoftFail, '3.4 OWASP ZAP DAST is configured and enforces build failure on findings (fail_action: true)');
   }
 
   // Cleanup server

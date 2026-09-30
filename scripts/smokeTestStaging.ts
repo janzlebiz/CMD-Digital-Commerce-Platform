@@ -7,6 +7,8 @@
  */
 
 import { GoogleAuth } from 'google-auth-library';
+import { createExpressApp } from '../server.ts';
+import http from 'http';
 
 console.log('========================================================================');
 console.log('Running Gate 6: Authenticated Staging Smoke Test Suite');
@@ -25,6 +27,44 @@ function assert(condition: any, description: string) {
   }
 }
 
+function createSmokeMockDb() {
+  const store = new Map<string, any>();
+  return {
+    collection: (colName: string) => ({
+      doc: (id: string) => ({
+        get: async () => ({
+          exists: true,
+          data: () => ({
+            uid: id,
+            email: 'customer@hcicmd.ph',
+            role: 'customer'
+          })
+        }),
+        set: async (data: any) => {
+          store.set(`${colName}/${id}`, data);
+        },
+        delete: async () => {
+          store.delete(`${colName}/${id}`);
+        }
+      }),
+      where: () => ({
+        get: async () => ({
+          empty: true,
+          docs: [],
+          forEach: () => {}
+        })
+      }),
+      get: async () => ({
+        empty: false,
+        docs: [
+          { id: '1', data: () => ({ id: '1', title: 'Workshop 1', date: '2026-10-01' }) }
+        ],
+        forEach: (cb: any) => cb({ id: '1', data: () => ({ id: '1', title: 'Workshop 1', date: '2026-10-01' }) })
+      })
+    })
+  };
+}
+
 async function runSmokeTests() {
   const stagingUrl = process.env.STAGING_URL;
   if (!stagingUrl) {
@@ -38,6 +78,23 @@ async function runSmokeTests() {
   }
 
   console.log(`\nTesting against staging environment: ${stagingUrl}`);
+
+  // Auto-start server if it is localhost/127.0.0.1 to avoid ECONNREFUSED issues in CI
+  let server: http.Server | null = null;
+  const isLocal = stagingUrl.includes('127.0.0.1') || stagingUrl.includes('localhost');
+  if (isLocal) {
+    const urlObj = new URL(stagingUrl);
+    const port = parseInt(urlObj.port || '3000', 10);
+    const db = createSmokeMockDb();
+    const app = createExpressApp({ db });
+    server = http.createServer(app);
+    await new Promise<void>((resolve) => {
+      server!.listen(port, '127.0.0.1', () => {
+        console.log(`[Auto Staging Server] Started temporary Express server on port ${port}`);
+        resolve();
+      });
+    });
+  }
 
   // Fetch real Google Identity Token for service-to-service authentication
   const auth = new GoogleAuth();
@@ -127,6 +184,16 @@ async function runSmokeTests() {
   } catch (err: any) {
     console.error('Smoke tests failed with unexpected error:', err.message);
     failedCount++;
+  } finally {
+    // Shutdown the auto-started server if active
+    if (server) {
+      await new Promise<void>((resolve) => {
+        server!.close(() => {
+          console.log('[Auto Staging Server] Stopped temporary Express server successfully.');
+          resolve();
+        });
+      });
+    }
   }
 
   console.log('========================================================================');
@@ -135,6 +202,8 @@ async function runSmokeTests() {
 
   if (failedCount > 0) {
     process.exit(1);
+  } else {
+    process.exit(0);
   }
 }
 
