@@ -28,7 +28,7 @@ jobs:
           bun install
 
       - name: Run Dependency Vulnerability Audit
-        run: npm audit --audit-level=high
+        run: bun audit
 
       - name: Run Static Code Analysis & Linting
         run: npm run lint
