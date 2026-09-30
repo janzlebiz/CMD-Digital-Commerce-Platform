@@ -11012,6 +11012,9 @@ async function startServer() {
       res.setHeader('Strict-Transport-Security', 'max-age=63072000; includeSubDomains; preload');
       res.setHeader('Content-Security-Policy', "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline';");
       res.setHeader('Permissions-Policy', 'camera=(), microphone=(), geolocation=()');
+      res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate, proxy-revalidate');
+      res.setHeader('Pragma', 'no-cache');
+      res.setHeader('Expires', '0');
       next();
     });
     app.get('*', (_req, res) => {
