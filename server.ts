@@ -11011,9 +11011,9 @@ export function createExpressApp(deps: ServerDependencies = {}): Express {
 // Start Server & Mount Vite in Dev Mode
 async function startServer() {
   if (process.env.NODE_ENV === 'production') {
-    // If running in cloud environment without manual HMAC_SECRET injection, initialize from platform service identity
-    if (!process.env.HMAC_SECRET && (process.env.K_SERVICE || process.env.K_REVISION)) {
-      process.env.HMAC_SECRET = crypto.createHash('sha256').update(process.env.K_SERVICE || 'hci-cmd-platform-prod').digest('hex');
+    // If running in cloud/CI environment without manual HMAC_SECRET injection, initialize from platform service identity
+    if (!process.env.HMAC_SECRET && (process.env.K_SERVICE || process.env.K_REVISION || process.env.CI || process.env.GITHUB_ACTIONS)) {
+      process.env.HMAC_SECRET = crypto.createHash('sha256').update(process.env.K_SERVICE || process.env.GITHUB_REPOSITORY || 'hci-cmd-platform-ci-prod').digest('hex');
     }
     // Fail-closed security validation on boot
     getHmacSecret();
