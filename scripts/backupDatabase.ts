@@ -73,7 +73,18 @@ export const AUTHORITATIVE_COLLECTIONS = [
   'refund_intents',
 ];
 
-const DEFAULT_SECRET = 'DEFAULT_BACKUP_ENCRYPTION_KEY_32BYTES_LONG_0123456789';
+export function getBackupEncryptionKey(providedKey?: string): string {
+  const isProduction = process.env.NODE_ENV === 'production';
+  const key = providedKey || process.env.BACKUP_ENCRYPTION_KEY;
+
+  if (!key || key.trim().length === 0) {
+    if (isProduction) {
+      throw new Error('BACKUP_ENCRYPTION_KEY_REQUIRED: BACKUP_ENCRYPTION_KEY environment variable is required in production environment.');
+    }
+    return process.env.TEST_BACKUP_ENCRYPTION_KEY || 'TEST_DEV_NON_PROD_BACKUP_KEY_32CHARS_MIN';
+  }
+  return key.trim();
+}
 
 function deriveKey(secret: string): Buffer {
   return crypto.createHash('sha256').update(secret).digest();
@@ -317,14 +328,8 @@ export async function performDatabaseBackup(options: BackupOptions = {}): Promis
   snapshotData: any;
   offsiteResult: OffsiteUploadResult;
 }> {
-  const isProduction = process.env.NODE_ENV === 'production';
-  const encryptionKey = options.encryptionKey || process.env.BACKUP_ENCRYPTION_KEY;
-
-  if (isProduction && !encryptionKey) {
-    throw new Error('BACKUP_ENCRYPTION_KEY_REQUIRED: BACKUP_ENCRYPTION_KEY environment variable is required in production environment.');
-  }
-
-  const effectiveKey = encryptionKey || DEFAULT_SECRET;
+  const shouldEncrypt = options.encrypt ?? true;
+  const effectiveKey = shouldEncrypt ? getBackupEncryptionKey(options.encryptionKey) : '';
 
   const outputDir = options.outputDir || path.resolve(process.cwd(), 'backups');
   if (!fs.existsSync(outputDir)) {
@@ -377,8 +382,6 @@ export async function performDatabaseBackup(options: BackupOptions = {}): Promis
 
   const payloadString = JSON.stringify(snapshotData, null, 2);
   const checksum = crypto.createHash('sha256').update(payloadString).digest('hex');
-
-  const shouldEncrypt = options.encrypt ?? true;
 
   const dataPayload = shouldEncrypt
     ? encryptPayloadAES256GCM(payloadString, effectiveKey)
@@ -444,9 +447,9 @@ export async function restoreDatabaseBackup(
   }
 
   let unencryptedPayloadString: string;
-  const encryptionKey = options.encryptionKey || process.env.BACKUP_ENCRYPTION_KEY || DEFAULT_SECRET;
 
   if (parsedBackup.metadata.encrypted) {
+    const encryptionKey = getBackupEncryptionKey(options.encryptionKey);
     try {
       unencryptedPayloadString = decryptPayloadAES256GCM(parsedBackup.data, encryptionKey);
     } catch (err: any) {

@@ -33,7 +33,7 @@ const testFiles = [
   'scripts/testPhase9BackupRecovery.ts',
   'scripts/testPhase9Monitoring.ts',
   'scripts/testPhase9Gate6.ts',
-  'scripts/smokeTestStaging.ts',
+  'scripts/devSmokeTest.ts',
 ];
 
 console.log('========================================================================');

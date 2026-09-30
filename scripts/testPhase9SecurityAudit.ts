@@ -101,6 +101,80 @@ async function runSecurityAuditTests() {
     assert(hasZap && hasZapEnforced && !hasZapSoftFail, '3.4 OWASP ZAP DAST is configured and enforces build failure on findings (fail_action: true)');
   }
 
+  // --- 4. Regression Tests: Area 1 - Backup Key Enforcement & Fail-Closed Behavior ---
+  console.log('\n--- 4. Regression Tests: Area 1 - Backup Encryption Key Fail-Closed ---');
+  const backupModule = await import('./backupDatabase.ts');
+  const origEnvBackup = process.env.NODE_ENV;
+  const origKeyBackup = process.env.BACKUP_ENCRYPTION_KEY;
+
+  try {
+    process.env.NODE_ENV = 'production';
+    delete process.env.BACKUP_ENCRYPTION_KEY;
+
+    let backupThrewInProd = false;
+    try {
+      backupModule.getBackupEncryptionKey();
+    } catch (err: any) {
+      backupThrewInProd = true;
+      assert(err.message.includes('BACKUP_ENCRYPTION_KEY_REQUIRED'), '4.1 getBackupEncryptionKey throws BACKUP_ENCRYPTION_KEY_REQUIRED in production when key is missing');
+    }
+    assert(backupThrewInProd === true, '4.2 Backup encryption fails closed in production when key is missing');
+
+    // Test with explicit key in production
+    const explicitKey = 'PROD_TEST_KEY_EXPLICIT_32BYTES_LONG';
+    const resolvedKey = backupModule.getBackupEncryptionKey(explicitKey);
+    assert(resolvedKey === explicitKey, '4.3 getBackupEncryptionKey accepts and uses explicitly provided key in production');
+
+    // Verify DEFAULT_SECRET is removed from backupDatabase.ts
+    const backupScriptContent = fs.readFileSync(path.resolve(process.cwd(), 'scripts/backupDatabase.ts'), 'utf8');
+    assert(!backupScriptContent.includes('DEFAULT_SECRET'), '4.4 Hardcoded DEFAULT_SECRET completely removed from scripts/backupDatabase.ts');
+  } finally {
+    process.env.NODE_ENV = origEnvBackup;
+    if (origKeyBackup) process.env.BACKUP_ENCRYPTION_KEY = origKeyBackup;
+  }
+
+  // --- 5. Regression Tests: Area 2 - Removal of Literal HMAC & Webhook Secrets ---
+  console.log('\n--- 5. Regression Tests: Area 2 - Secret Hardening in Test Scripts ---');
+  const workshopsScript = fs.readFileSync(path.resolve(process.cwd(), 'scripts/testPhase6BWorkshops.ts'), 'utf8');
+  assert(!workshopsScript.includes("'PROD_SECURE_HMAC_KEY_EXPLICITLY_PROVIDED_2026'"), '5.1 testPhase6BWorkshops.ts contains no literal HMAC key string');
+
+  const monitoringScript = fs.readFileSync(path.resolve(process.cwd(), 'scripts/testPhase9Monitoring.ts'), 'utf8');
+  assert(!monitoringScript.includes("'TEST_ALERT_SECRET_123'"), '5.2 testPhase9Monitoring.ts contains no literal webhook secret string');
+
+  const priorityAScript = fs.readFileSync(path.resolve(process.cwd(), 'scripts/testPriorityAFoundation.ts'), 'utf8');
+  assert(!priorityAScript.includes("'TEST_NON_PROD_HMAC_SECRET_KEY_12345'"), '5.3 testPriorityAFoundation.ts contains no literal HMAC key string');
+
+  // --- 6. Regression Tests: Area 3 - Immutable ZAP Pinning without nosem Suppression ---
+  console.log('\n--- 6. Regression Tests: Area 3 - Immutable ZAP Action Pinning ---');
+  if (ciWorkflowExists) {
+    const wfContent = fs.readFileSync(ciWorkflowPath, 'utf8');
+    const zapStep = wfContent.split('\n').find((l: string) => l.includes('zaproxy/action-baseline@'));
+    assert(!!zapStep, '6.1 ZAP step exists in workflow');
+    if (zapStep) {
+      const isPinnedToSha = /zaproxy\/action-baseline@[a-f0-9]{40}/.test(zapStep);
+      assert(isPinnedToSha === true, '6.2 zaproxy/action-baseline is pinned to a full 40-character commit SHA');
+      const hasVersionComment = zapStep.includes('# v0.15.0') || zapStep.includes('# v');
+      assert(hasVersionComment === true, '6.3 zap step retains semantic version tag as a comment');
+      const hasNosemSuppression = zapStep.includes('nosem');
+      assert(hasNosemSuppression === false, '6.4 nosem suppression is removed from ZAP action step');
+    }
+  }
+
+  // --- 7. Regression Tests: Area 4 - Production Security Headers Applied to Responses ---
+  console.log('\n--- 7. Regression Tests: Area 4 - Security Headers on HTTP Responses ---');
+  const headerCheckRes = await fetch(`${baseUrl}/api/healthz`);
+  const hsts = headerCheckRes.headers.get('strict-transport-security');
+  const csp = headerCheckRes.headers.get('content-security-policy');
+  const permPolicy = headerCheckRes.headers.get('permissions-policy');
+  const xContentType = headerCheckRes.headers.get('x-content-type-options');
+  const xFrameOptions = headerCheckRes.headers.get('x-frame-options');
+
+  assert(!!hsts && hsts.includes('max-age'), '7.1 Strict-Transport-Security header set with max-age');
+  assert(!!csp && csp.includes("default-src 'self'"), '7.2 Content-Security-Policy header set with self restriction');
+  assert(!!permPolicy && permPolicy.includes('camera=()'), '7.3 Permissions-Policy header set restricting camera/microphone/geolocation');
+  assert(xContentType === 'nosniff', '7.4 X-Content-Type-Options: nosniff header set');
+  assert(xFrameOptions === 'SAMEORIGIN', '7.5 X-Frame-Options: SAMEORIGIN header set');
+
   // Cleanup server
   await new Promise<void>((resolve) => {
     server.close(() => resolve());

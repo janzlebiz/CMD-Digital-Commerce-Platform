@@ -659,10 +659,11 @@ async function runPhase6BTests() {
       assert(errorMsg.includes('FATAL SECURITY ERROR'), '6.3 Fatal security error thrown in production when HMAC_SECRET is absent');
 
       // 6.3 Production environment succeeds when configured with non-empty HMAC_SECRET
+      const testConfiguredSecret = process.env.TEST_HMAC_SECRET || `DYNAMIC_TEST_HMAC_${Date.now()}_KEY`;
       process.env.NODE_ENV = 'production';
-      process.env.HMAC_SECRET = 'PROD_SECURE_HMAC_KEY_EXPLICITLY_PROVIDED_2026';
+      process.env.HMAC_SECRET = testConfiguredSecret;
       const prodSecret = getHmacSecret();
-      assert(prodSecret === 'PROD_SECURE_HMAC_KEY_EXPLICITLY_PROVIDED_2026', '6.4 Production uses configured HMAC_SECRET accurately');
+      assert(prodSecret === testConfiguredSecret, '6.4 Production uses configured HMAC_SECRET accurately');
 
       const prodSignature = generateRegistrationSignature('REG-PROD-01', 'user-123', 'wk-01', 'confirmed');
       assert(typeof prodSignature === 'string' && prodSignature.length === 64, '6.5 Production generates valid SHA256 signature when secret is configured');

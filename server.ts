@@ -3736,6 +3736,16 @@ export function createExpressApp(deps: ServerDependencies = {}): Express {
   const app = express();
   app.use(express.json());
 
+  // Base Security Headers Middleware (CSP, HSTS, Permissions-Policy, X-Content-Type-Options, X-Frame-Options)
+  app.use((_req, res, next) => {
+    res.setHeader('Strict-Transport-Security', 'max-age=63072000; includeSubDomains; preload');
+    res.setHeader('Content-Security-Policy', "default-src 'self'; script-src 'self' 'unsafe-inline' 'unsafe-eval'; style-src 'self' 'unsafe-inline'; font-src 'self' data:; img-src 'self' data: https:; connect-src 'self' https:;");
+    res.setHeader('Permissions-Policy', 'camera=(), microphone=(), geolocation=()');
+    res.setHeader('X-Content-Type-Options', 'nosniff');
+    res.setHeader('X-Frame-Options', 'SAMEORIGIN');
+    next();
+  });
+
   // Phase 9B-1: In-Memory Rate Limiting Store & Middleware
   const rateLimitStore = new Map<string, { count: number; resetAt: number }>();
   function createRateLimiter(windowMs: number, maxRequests: number, message = 'Rate limit exceeded. Please try again later.') {
@@ -11007,7 +11017,7 @@ async function startServer() {
     const distPath = fs.existsSync(path.resolve(process.cwd(), 'dist'))
       ? path.resolve(process.cwd(), 'dist')
       : path.resolve(__dirname, '..', 'dist');
-    app.use(express.static(distPath));
+    // Production Security Headers: MUST be applied BEFORE express.static() and SPA routing
     app.use((_req, res, next) => {
       res.setHeader('Strict-Transport-Security', 'max-age=63072000; includeSubDomains; preload');
       res.setHeader('Content-Security-Policy', "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline';");
@@ -11017,6 +11027,7 @@ async function startServer() {
       res.setHeader('Expires', '0');
       next();
     });
+    app.use(express.static(distPath));
     app.get('*', (_req, res) => {
       res.sendFile(path.resolve(distPath, 'index.html'));
     });

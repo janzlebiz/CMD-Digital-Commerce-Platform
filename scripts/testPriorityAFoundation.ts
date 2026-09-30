@@ -85,7 +85,7 @@ async function runTests() {
     ...process.env,
     NODE_ENV: 'production',
     PORT: String(testPort),
-    HMAC_SECRET: 'TEST_NON_PROD_HMAC_SECRET_KEY_12345'
+    HMAC_SECRET: process.env.TEST_HMAC_SECRET || `DYNAMIC_TEST_HMAC_${Date.now()}_KEY`
   };
 
   const child = spawn('npm', ['start'], {

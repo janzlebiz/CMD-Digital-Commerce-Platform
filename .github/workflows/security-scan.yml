@@ -40,7 +40,7 @@ jobs:
           semgrep --config=auto --error --exclude=node_modules
 
       - name: OWASP ZAP Baseline Scan (Genuine DAST)
-        uses: zaproxy/action-baseline@v0.15.0 # nosem yaml.github-actions.security.github-actions-mutable-action-tag
+        uses: zaproxy/action-baseline@de8ad967d3548d44ef623df22cf95c3b0baf8b25 # v0.15.0
         with:
           token: ${{ secrets.GITHUB_TOKEN }}
           target: 'https://ais-pre-twqasbvtmkrtsllriliohj-212282537635.asia-east1.run.app'

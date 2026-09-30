@@ -256,7 +256,7 @@ async function runMonitoringTests() {
 
   // Mock webhook URL for remaining tests
   process.env.ALERT_WEBHOOK_URL = 'http://localhost/mock-alert-webhook';
-  process.env.ALERT_WEBHOOK_SECRET = 'TEST_ALERT_SECRET_123';
+  process.env.ALERT_WEBHOOK_SECRET = process.env.TEST_ALERT_WEBHOOK_SECRET || `DYNAMIC_TEST_WEBHOOK_SECRET_${Date.now()}`;
 
   // 2.2 Application Payment Provider Failure Alert Wiring Test
   clearAlertHistory();
