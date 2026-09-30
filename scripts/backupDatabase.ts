@@ -334,7 +334,8 @@ export async function performDatabaseBackup(options: BackupOptions = {}): Promis
   const db = getAuthoritativeDb(options.db);
   const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
   const backupFilename = `backup-${timestamp}.json`;
-  const backupPath = path.join(outputDir, backupFilename); // nosem
+  // nosem javascript.lang.security.audit.path-traversal.path-join-resolve-traversal
+  const backupPath = path.join(outputDir, backupFilename);
   const resolvedBackupPath = path.resolve(backupPath);
   if (!resolvedBackupPath.startsWith(path.resolve(outputDir))) {
     throw new Error('SECURITY_VIOLATION: Path traversal detected');
