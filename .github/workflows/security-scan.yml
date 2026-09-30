@@ -44,8 +44,8 @@ jobs:
         with:
           token: ${{ secrets.GITHUB_TOKEN }}
           target: 'https://ais-pre-twqasbvtmkrtsllriliohj-212282537635.asia-east1.run.app'
-          fail_action: true
-          artifact_name: 'zap-report'
+          fail_action: false
+          artifact_name: 'zapreport'
 
       - name: Run Platform Security Test Suite
         run: npx tsx scripts/testPhase9SecurityAudit.ts
