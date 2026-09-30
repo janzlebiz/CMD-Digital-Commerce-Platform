@@ -11008,6 +11008,12 @@ async function startServer() {
       ? path.resolve(process.cwd(), 'dist')
       : path.resolve(__dirname, '..', 'dist');
     app.use(express.static(distPath));
+    app.use((_req, res, next) => {
+      res.setHeader('Strict-Transport-Security', 'max-age=63072000; includeSubDomains; preload');
+      res.setHeader('Content-Security-Policy', "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline';");
+      res.setHeader('Permissions-Policy', 'camera=(), microphone=(), geolocation=()');
+      next();
+    });
     app.get('*', (_req, res) => {
       res.sendFile(path.resolve(distPath, 'index.html'));
     });
