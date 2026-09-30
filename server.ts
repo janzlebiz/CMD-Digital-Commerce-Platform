@@ -3744,15 +3744,18 @@ export function createInMemoryDb() {
 
 export function createExpressApp(deps: ServerDependencies = {}): Express {
   const app = express();
+  app.disable('x-powered-by');
   app.use(express.json());
 
-  // Base Security Headers Middleware (CSP, HSTS, Permissions-Policy, X-Content-Type-Options, X-Frame-Options, Cache-Control)
+  // Base Security Headers Middleware (CSP, HSTS, Permissions-Policy, X-Content-Type-Options, X-Frame-Options, Referrer-Policy, Cache-Control)
   app.use((_req, res, next) => {
+    res.removeHeader('X-Powered-By');
     res.setHeader('Strict-Transport-Security', 'max-age=63072000; includeSubDomains; preload');
     res.setHeader('Content-Security-Policy', "default-src 'self'; script-src 'self' 'unsafe-inline' 'unsafe-eval'; style-src 'self' 'unsafe-inline'; font-src 'self' data:; img-src 'self' data: https:; connect-src 'self' https:;");
     res.setHeader('Permissions-Policy', 'camera=(), microphone=(), geolocation=()');
     res.setHeader('X-Content-Type-Options', 'nosniff');
     res.setHeader('X-Frame-Options', 'SAMEORIGIN');
+    res.setHeader('Referrer-Policy', 'strict-origin-when-cross-origin');
     res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate, proxy-revalidate');
     res.setHeader('Pragma', 'no-cache');
     next();
@@ -11036,9 +11039,13 @@ async function startServer() {
       : path.resolve(__dirname, '..', 'dist');
     // Production Security Headers: MUST be applied BEFORE express.static() and SPA routing
     app.use((_req, res, next) => {
+      res.removeHeader('X-Powered-By');
       res.setHeader('Strict-Transport-Security', 'max-age=63072000; includeSubDomains; preload');
-      res.setHeader('Content-Security-Policy', "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline';");
+      res.setHeader('Content-Security-Policy', "default-src 'self'; script-src 'self' 'unsafe-inline' 'unsafe-eval'; style-src 'self' 'unsafe-inline'; font-src 'self' data:; img-src 'self' data: https:; connect-src 'self' https:;");
       res.setHeader('Permissions-Policy', 'camera=(), microphone=(), geolocation=()');
+      res.setHeader('X-Content-Type-Options', 'nosniff');
+      res.setHeader('X-Frame-Options', 'SAMEORIGIN');
+      res.setHeader('Referrer-Policy', 'strict-origin-when-cross-origin');
       res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate, proxy-revalidate');
       res.setHeader('Pragma', 'no-cache');
       res.setHeader('Expires', '0');

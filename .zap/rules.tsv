@@ -1,3 +1,4 @@
 # ZAP Baseline scan rules file
 # Format: AlertID	ACTION	(Description)
+10035	IGNORE	(Strict-Transport-Security Header Not Set on Localhost HTTP)
 10049	IGNORE	(Storable and Cacheable Content)
