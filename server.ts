@@ -181,22 +181,16 @@ export const PRACTITIONER_ROSTER: Record<string, {
 };
 
 export function getHmacSecret(): string {
-  if (process.env.HMAC_SECRET && process.env.HMAC_SECRET.trim().length > 0) {
-    return process.env.HMAC_SECRET.trim();
+  const secret = process.env.HMAC_SECRET;
+  if (!secret || secret.trim().length === 0) {
+    if (process.env.NODE_ENV === 'production' || process.env.NODE_ENV === 'staging') {
+      throw new Error('FATAL SECURITY ERROR: HMAC_SECRET environment variable is missing. System failing closed.');
+    }
+    return process.env.NODE_ENV === 'test' 
+      ? 'TEST_ENVIRONMENT_ONLY_HMAC_SECRET_NON_PRODUCTION_0123456789'
+      : 'DEV_ENVIRONMENT_ONLY_HMAC_SECRET_NON_PRODUCTION_FALLBACK';
   }
-
-  // Fail closed immediately in production if HMAC_SECRET is missing or empty
-  if (process.env.NODE_ENV === 'production') {
-    throw new Error('FATAL SECURITY ERROR: HMAC_SECRET environment variable is missing in production. System failing closed.');
-  }
-
-  // Test-only secret for automated test environments
-  if (process.env.NODE_ENV === 'test') {
-    return 'TEST_ENVIRONMENT_ONLY_HMAC_SECRET_NON_PRODUCTION_0123456789';
-  }
-
-  // Development fallback for local prototyping
-  return 'DEV_ENVIRONMENT_ONLY_HMAC_SECRET_NON_PRODUCTION_FALLBACK';
+  return secret.trim();
 }
 
 export const SEED_WORKSHOPS = [
