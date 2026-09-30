@@ -97,7 +97,7 @@ export function decryptPayloadAES256GCM(encryptedData: { ciphertext: string; iv:
   const key = deriveKey(secretKey);
   const iv = Buffer.from(encryptedData.iv, 'hex');
   const authTag = Buffer.from(encryptedData.authTag, 'hex');
-  const decipher = crypto.createDecipheriv('aes-256-gcm', key, iv);
+  const decipher = crypto.createDecipheriv('aes-256-gcm', key, iv, { authTagLength: 16 });
   decipher.setAuthTag(authTag);
   let decrypted = decipher.update(encryptedData.ciphertext, 'hex', 'utf8');
   decrypted += decipher.final('utf8');
