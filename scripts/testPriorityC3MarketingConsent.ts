@@ -18,6 +18,7 @@ import {
   MarketingCampaign,
 } from '../server.ts';
 import http from 'http';
+import crypto from 'crypto';
 
 console.log('========================================================================');
 console.log('Running Priority C Milestone C3: Privacy Consent & Marketing Automation Suite');
@@ -369,7 +370,7 @@ async function runTests() {
       assert(threwSecurityError === true, '1.17 Missing HMAC_SECRET in production fails closed with SECURITY_ERROR');
 
       // (b) Configured secret token verification
-      process.env.HMAC_SECRET = 'PROD_SECURE_HMAC_TEST_KEY_2026';
+      process.env.HMAC_SECRET = process.env.TEST_HMAC_SECRET || crypto.randomBytes(32).toString('hex');
       const prodToken = generateUnsubscribeToken('test-user-prod');
       assert(typeof prodToken === 'string' && prodToken.length === 32, '1.18 Deterministic HMAC token generated when secret configured');
     } finally {

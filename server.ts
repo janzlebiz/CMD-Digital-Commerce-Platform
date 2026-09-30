@@ -3736,13 +3736,15 @@ export function createExpressApp(deps: ServerDependencies = {}): Express {
   const app = express();
   app.use(express.json());
 
-  // Base Security Headers Middleware (CSP, HSTS, Permissions-Policy, X-Content-Type-Options, X-Frame-Options)
+  // Base Security Headers Middleware (CSP, HSTS, Permissions-Policy, X-Content-Type-Options, X-Frame-Options, Cache-Control)
   app.use((_req, res, next) => {
     res.setHeader('Strict-Transport-Security', 'max-age=63072000; includeSubDomains; preload');
     res.setHeader('Content-Security-Policy', "default-src 'self'; script-src 'self' 'unsafe-inline' 'unsafe-eval'; style-src 'self' 'unsafe-inline'; font-src 'self' data:; img-src 'self' data: https:; connect-src 'self' https:;");
     res.setHeader('Permissions-Policy', 'camera=(), microphone=(), geolocation=()');
     res.setHeader('X-Content-Type-Options', 'nosniff');
     res.setHeader('X-Frame-Options', 'SAMEORIGIN');
+    res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate, proxy-revalidate');
+    res.setHeader('Pragma', 'no-cache');
     next();
   });
 

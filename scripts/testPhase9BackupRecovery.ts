@@ -91,7 +91,7 @@ async function runBackupRecoveryTests() {
     fs.rmSync(testOutputDir, { recursive: true, force: true });
   }
 
-  const testKey = 'SECRET_TEST_ENCRYPTION_KEY_0123456789_32BYTES!';
+  const testKey = process.env.TEST_BACKUP_ENCRYPTION_KEY || crypto.randomBytes(32).toString('hex');
   const mockStorage = createMockStorageClient();
 
   // Populate authoritative source datastore

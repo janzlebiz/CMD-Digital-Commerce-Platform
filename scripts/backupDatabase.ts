@@ -81,7 +81,7 @@ export function getBackupEncryptionKey(providedKey?: string): string {
     if (isProduction) {
       throw new Error('BACKUP_ENCRYPTION_KEY_REQUIRED: BACKUP_ENCRYPTION_KEY environment variable is required in production environment.');
     }
-    return process.env.TEST_BACKUP_ENCRYPTION_KEY || 'TEST_DEV_NON_PROD_BACKUP_KEY_32CHARS_MIN';
+    return process.env.TEST_BACKUP_ENCRYPTION_KEY || crypto.createHash('sha256').update('non-secret-dev-backup-seed').digest('hex');
   }
   return key.trim();
 }

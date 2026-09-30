@@ -1,6 +1,3 @@
 # ZAP Baseline scan rules file
-# Format: AlertID[tab]ACTION[tab](Description)
-10035	IGNORE	(Strict-Transport-Security Header Not Set)
-10038	IGNORE	(Content Security Policy (CSP) Header Not Set)
+# Format: AlertID	ACTION	(Description)
 10049	IGNORE	(Storable and Cacheable Content)
-10063	IGNORE	(Permissions Policy Header Not Set)
