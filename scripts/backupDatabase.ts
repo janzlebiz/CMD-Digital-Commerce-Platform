@@ -98,7 +98,7 @@ export function decryptPayloadAES256GCM(encryptedData: { ciphertext: string; iv:
   const iv = Buffer.from(encryptedData.iv, 'hex');
   const authTag = Buffer.from(encryptedData.authTag, 'hex');
   const decipher = crypto.createDecipheriv('aes-256-gcm', key, iv);
-  decipher.setAuthTag(authTag, { authTagLength: 16 });
+  decipher.setAuthTag(authTag);
   let decrypted = decipher.update(encryptedData.ciphertext, 'hex', 'utf8');
   decrypted += decipher.final('utf8');
   return decrypted;
@@ -333,7 +333,7 @@ export async function performDatabaseBackup(options: BackupOptions = {}): Promis
 
   const db = getAuthoritativeDb(options.db);
   const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
-  const backupFilename = path.basename(rawBackupFilename).replace(/[^a-zA-Z0-9.-]/g, '_');
+  const backupFilename = `backup-${timestamp}.json`;
   const backupPath = path.join(outputDir, backupFilename);
   const resolvedBackupPath = path.resolve(backupPath);
   if (!resolvedBackupPath.startsWith(path.resolve(outputDir))) {
