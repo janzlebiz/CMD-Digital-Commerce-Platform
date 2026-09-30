@@ -3,7 +3,11 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import { logger } from '../../server.js';
+const alertLogger = {
+  info: (msg: string, meta?: any) => console.log(JSON.stringify({ timestamp: new Date().toISOString(), level: 'info', message: msg, ...meta })),
+  error: (msg: string, meta?: any) => console.error(JSON.stringify({ timestamp: new Date().toISOString(), level: 'error', message: msg, ...meta })),
+  warn: (msg: string, meta?: any) => console.warn(JSON.stringify({ timestamp: new Date().toISOString(), level: 'warn', message: msg, ...meta })),
+};
 
 export type AlertSeverity = 'SEV-1' | 'SEV-2' | 'SEV-3' | 'SEV-4';
 export type AlertCategory =
@@ -187,7 +191,7 @@ export async function dispatchAlert(options: DispatchAlertOptions): Promise<Aler
       };
 
       try {
-        logger.info(`[Alert Delivered] Category: ${options.category} (${severity}) - ID: ${alertId}`, {
+        alertLogger.info(`[Alert Delivered] Category: ${options.category} (${severity}) - ID: ${alertId}`, {
           alertId,
           category: options.category,
           severity,
@@ -210,7 +214,7 @@ export async function dispatchAlert(options: DispatchAlertOptions): Promise<Aler
       };
 
       try {
-        logger.error(`[Alert Delivery Failed] Category: ${options.category} (${severity}) - ID: ${alertId}`, {
+        alertLogger.error(`[Alert Delivery Failed] Category: ${options.category} (${severity}) - ID: ${alertId}`, {
           alertId,
           category: options.category,
           severity,
@@ -233,7 +237,7 @@ export async function dispatchAlert(options: DispatchAlertOptions): Promise<Aler
     };
 
     try {
-      logger.error(`[Alert Dispatch Error] Category: ${options.category} (${severity}) - ID: ${alertId}`, {
+      alertLogger.error(`[Alert Dispatch Error] Category: ${options.category} (${severity}) - ID: ${alertId}`, {
         alertId,
         category: options.category,
         severity,

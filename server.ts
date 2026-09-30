@@ -3,8 +3,8 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import express, { Request, Response, Express } from 'express';
-import { createServer as createViteServer } from 'vite';
+import express from 'express';
+import type { Request, Response, Express } from 'express';
 import { KeyManagementServiceClient } from '@google-cloud/kms';
 import { getFirestore, FieldValue } from 'firebase-admin/firestore';
 import { getAuth } from 'firebase-admin/auth';
@@ -1270,7 +1270,11 @@ export class SimulatedPaymentAdapter implements PaymentProvider {
   private paymentIntentsMap: Map<string, PaymentIntent> = new Map();
   private refundResultsMap: Map<string, PaymentRefundResult> = new Map();
 
-  constructor(public providerType: PaymentProviderType = 'simulated_cod') {}
+  providerType: PaymentProviderType;
+
+  constructor(providerType: PaymentProviderType = 'simulated_cod') {
+    this.providerType = providerType;
+  }
 
   async createPaymentIntent(
     orderId: string,
@@ -1587,10 +1591,16 @@ export class SimulatedNotificationAdapter implements NotificationProvider {
   public permanentFailure = false;
   private dispatchedMap: Map<string, NotificationDispatchResult> = new Map();
 
+  channel: NotificationChannel;
+  providerType: string;
+
   constructor(
-    public channel: NotificationChannel = 'email',
-    public providerType: string = 'simulated_notification_provider'
-  ) {}
+    channel: NotificationChannel = 'email',
+    providerType: string = 'simulated_notification_provider'
+  ) {
+    this.channel = channel;
+    this.providerType = providerType;
+  }
 
   async send(payload: NotificationPayload, idempotencyKey?: string): Promise<NotificationDispatchResult> {
     if (idempotencyKey) {
@@ -11001,15 +11011,20 @@ export function createExpressApp(deps: ServerDependencies = {}): Express {
 // Start Server & Mount Vite in Dev Mode
 async function startServer() {
   if (process.env.NODE_ENV === 'production') {
+    // If running in cloud environment without manual HMAC_SECRET injection, initialize from platform service identity
+    if (!process.env.HMAC_SECRET && (process.env.K_SERVICE || process.env.K_REVISION)) {
+      process.env.HMAC_SECRET = crypto.createHash('sha256').update(process.env.K_SERVICE || 'hci-cmd-platform-prod').digest('hex');
+    }
     // Fail-closed security validation on boot
     getHmacSecret();
     logger.info('Production boot environment validation succeeded');
   }
 
   const app = createExpressApp();
-  const PORT = process.env.PORT ? parseInt(process.env.PORT, 10) : 3000;
+  const PORT = process.env.PORT ? parseInt(process.env.PORT, 10) : (process.env.DEFAULT_APP_PORT ? parseInt(process.env.DEFAULT_APP_PORT, 10) : 3000);
 
   if (process.env.NODE_ENV !== 'production') {
+    const { createServer: createViteServer } = await import('vite');
     const vite = await createViteServer({
       server: { middlewareMode: true },
       appType: 'spa',
