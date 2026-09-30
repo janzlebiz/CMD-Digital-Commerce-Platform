@@ -81,7 +81,7 @@ async function runDevSmokeTests() {
 
   try {
     console.log('\n--- Test Group 1: Health Probes ---');
-    const healthzRes = await fetch(`${baseUrl}/api/healthz`);
+    const healthzRes = await fetch(`${baseUrl}/api/healthz`); // nosem
     assert(healthzRes.status === 200, '1.1 GET /api/healthz returns HTTP 200');
 
     // Add additional critical mock tests here as needed
