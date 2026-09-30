@@ -2698,8 +2698,8 @@ export function generateUnsubscribeToken(userIdOrEmail: string): string {
     if (process.env.NODE_ENV === 'production') {
       throw new Error('SECURITY_ERROR: HMAC_SECRET environment variable is missing in production environment. Unsubscribe token generation failed closed.');
     }
-    // Development/Test fallback only
-    const devSecret = 'HCI_CMD_DEV_NON_PROD_HMAC_SECRET_KEY';
+    // Use environment variable in non-prod
+    const devSecret = process.env.HMAC_SECRET || 'HCI_CMD_DEV_NON_PROD_HMAC_SECRET_KEY';
     return crypto.createHmac('sha256', devSecret).update(String(userIdOrEmail).toLowerCase().trim()).digest('hex').slice(0, 32);
   }
   return crypto.createHmac('sha256', secret).update(String(userIdOrEmail).toLowerCase().trim()).digest('hex').slice(0, 32);
@@ -4099,7 +4099,7 @@ export function createExpressApp(deps: ServerDependencies = {}): Express {
     }
 
     try {
-      const decipher = crypto.createDecipheriv('aes-256-gcm', dek, iv);
+      const decipher = crypto.createDecipheriv('aes-256-gcm', dek, iv, { authTagLength: 16 });
       decipher.setAuthTag(tag);
       let plaintext = decipher.update(ciphertext, 'base64', 'utf8');
       plaintext += decipher.final('utf8');
