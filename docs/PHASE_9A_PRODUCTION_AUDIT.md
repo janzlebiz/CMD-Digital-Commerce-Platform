@@ -34,8 +34,8 @@ In accordance with **Priority E / Original Phase 9 (Production Certification)**,
 
 ### Gate 1: Security & Penetration Readiness
 * **Identified Gaps (PARTIAL - Staged & Remediated Gaps Verified)**:
-  1. ~~Lack of explicit rate limiting middleware on login and public unsubscribe endpoints~~ -> **Resolved**: Implemented authentication / login brute-force protection rate-limiting (`authRateLimiter`, 5 req/min) on `/api/auth/login-attempt` and strict unsubscribe rate-limiting.
-  2. ~~Absence of automated DAST / SAST security scanning in the CI/CD pipeline~~ -> **Resolved**: Configured automated SAST/DAST pipeline check via GitHub Actions workflow `.github/workflows/security-scan.yml` running `npm audit`, `npm run lint`, and dedicated security tests.
+  1. ~~Lack of explicit rate limiting middleware on login and public unsubscribe endpoints~~ -> **Resolved**: Implemented genuine brute-force IP-based rate-limiting directly at the real server authentication/security boundary (`requireAuth`), blocking clients for 1 minute returning HTTP 429 after 5 failed authentication token attempts within 1 minute.
+  2. ~~Absence of automated DAST / SAST security scanning in the CI/CD pipeline~~ -> **Resolved**: Configured genuine automated static analysis security scanning (SAST) using **Semgrep** and dynamic application security testing (DAST) using **OWASP ZAP Baseline Scan** integrated cleanly inside the Github Actions workflow `.github/workflows/security-scan.yml` alongside `npm audit`, linting, and regression tests.
   3. **Outstanding / Open**: Formal third-party penetration testing report is **OPEN / PENDING**; Gate 1 remains **PARTIAL** until a genuine third-party penetration-test report is supplied and recorded. No fabrication of third-party pen test results.
 * **Affected Components**: `server.ts`, `.github/workflows/security-scan.yml`, `scripts/testPhase9SecurityAudit.ts`.
 

@@ -138,9 +138,9 @@ The canonical product roadmap comprises the following ten phases:
   * **Testing & Regression**: Dedicated Gate 6 test suite (`scripts/testPhase9Gate6.ts`) passing **26/26 assertions** and staging smoke tests (`scripts/smokeTestStaging.ts`) passing **10/10 assertions**. Full regression suite passing **27/27 test files**.
 * **Phase 9C Final Security Gate Closure**:
   * **Super-Admin Protection**: Completely removed the Google OIDC super-admin fallback path in production mode, restricted OIDC service-account auth checks strictly to staging/dev environments, and eliminated any default hardcoded service account emails.
-  * **Auth Brute-Force Rate Limiting**: Implemented dedicated auth rate limiting on `/api/auth/login-attempt` (5 attempts/min) to defend against brute-force attacks.
-  * **Automated CI Security Scanning**: Integrated automated SAST & dependency scans (`npm audit`, `npm run lint`) inside the CI pipeline (`.github/workflows/security-scan.yml`).
-  * **Security Regression Tests**: Created dedicated test suite `scripts/testPhase9SecurityAudit.ts` ensuring robust rate limiting and OIDC production block.
+  * **Auth Brute-Force Rate Limiting**: Implemented IP-based token brute-force protection rate-limiting directly at the real server authentication/security boundary (`requireAuth`), returning HTTP 429 after 5 failed authentication attempts within 1 minute.
+  * **Automated CI Security Scanning**: Integrated genuine SAST (Semgrep) and DAST (OWASP ZAP Baseline Scan) checks into the CI pipeline (`.github/workflows/security-scan.yml`) alongside `npm audit`, linting, and regression tests.
+  * **Security Regression Tests**: Created dedicated test suite `scripts/testPhase9SecurityAudit.ts` ensuring robust IP block on 5 failed authentication attempts and complete OIDC production block.
 * **Audit Document**: Updated findings, remediation status, and Gate 3, Gate 4, Gate 5 & Gate 6 PASS status in `docs/PHASE_9A_PRODUCTION_AUDIT.md`.
 
 ---

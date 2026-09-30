@@ -48,25 +48,8 @@ async function runSecurityAuditTests() {
   const port = (server.address() as any).port;
   const baseUrl = `http://127.0.0.1:${port}`;
 
-  // 1. Verify brute-force rate limiting on auth / login-attempt
-  console.log('\n--- 1. Verification of Brute-Force Rate Limiting ---');
-  let hitRateLimit = false;
-
-  for (let i = 0; i < 10; i++) {
-    const res = await fetch(`${baseUrl}/api/auth/login-attempt`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ email: 'test@hcicmd.ph', password: 'wrong-password' })
-    });
-    if (res.status === 429) {
-      hitRateLimit = true;
-      break;
-    }
-  }
-  assert(hitRateLimit === true, '1.1 Authentication / login-attempt route triggers HTTP 429 after exceeding max requests');
-
-  // 2. Verify Google OIDC super-admin path is absent in production
-  console.log('\n--- 2. Verification of Production OIDC Fallback Block ---');
+  // 1. Verify Google OIDC super-admin path is absent in production
+  console.log('\n--- 1. Verification of Production OIDC Fallback Block ---');
   const originalEnv = process.env.NODE_ENV;
   process.env.NODE_ENV = 'production';
 
@@ -74,9 +57,27 @@ async function runSecurityAuditTests() {
     headers: { 'Authorization': 'Bearer SOME_GOOGLE_OIDC_TOKEN' }
   });
   
-  assert(res.status === 401, '2.1 Google OIDC fallback is completely blocked and ignored when NODE_ENV=production');
+  assert(res.status === 401, '1.1 Google OIDC fallback is completely blocked and ignored when NODE_ENV=production');
 
   process.env.NODE_ENV = originalEnv;
+
+  // 2. Verify brute-force rate limiting on real security boundary (requireAuth)
+  console.log('\n--- 2. Verification of Brute-Force Rate Limiting ---');
+  let hitRateLimit = false;
+
+  for (let i = 0; i < 10; i++) {
+    const res = await fetch(`${baseUrl}/api/user/export-data`, {
+      headers: { 
+        'Authorization': `Bearer INVALID_TOKEN_${i}`,
+        'X-Forwarded-For': '192.168.99.99'
+      }
+    });
+    if (res.status === 429) {
+      hitRateLimit = true;
+      break;
+    }
+  }
+  assert(hitRateLimit === true, '2.1 Real requireAuth boundary triggers HTTP 429 after 5 failed authentication attempts');
 
   // 3. Verify that CI security scan workflow exists and is valid
   console.log('\n--- 3. Verification of Automated CI Security Scan ---');
@@ -87,6 +88,7 @@ async function runSecurityAuditTests() {
   if (ciWorkflowExists) {
     const content = fs.readFileSync(ciWorkflowPath, 'utf8');
     assert(content.includes('npm audit') && content.includes('npm run lint'), '3.2 CI workflow performs dependency audit and static code analysis linting');
+    assert(content.includes('semgrep') && content.includes('zaproxy'), '3.3 CI workflow performs genuine Semgrep SAST and OWASP ZAP DAST scans');
   }
 
   // Cleanup server

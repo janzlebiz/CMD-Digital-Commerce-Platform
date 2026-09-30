@@ -3841,11 +3841,6 @@ export function createExpressApp(deps: ServerDependencies = {}): Express {
   app.get('/readyz', handleReadyz);
   app.get('/api/readyz', handleReadyz);
 
-  // Authentication Brute-Force Protection Test / Check Endpoint
-  app.post('/api/auth/login-attempt', authRateLimiter, (_req: Request, res: Response): void => {
-    res.json({ success: true, message: 'Authentication attempt permitted within rate limit thresholds.' });
-  });
-
   if (process.env.NODE_ENV === 'test' || process.env.ENABLE_TEST_ROUTES === 'true') {
     app.get('/api/test-uncaught-error', (_req: Request, _res: Response, next: any) => {
       const err = new Error('TEST_UNCAUGHT_DATABASE_SECRET_LEAK_ERROR: sensitive_internal_db_password_12345');
@@ -3910,7 +3905,35 @@ export function createExpressApp(deps: ServerDependencies = {}): Express {
   const googleAuthClient = new OAuth2Client();
   const AUTHORIZED_SA = process.env.AUTHORIZED_SERVICE_ACCOUNT_EMAIL || '';
 
+  // Auth boundary rate limiting (protects against token brute-forcing / enumeration)
+  const failedAuthAttemptsStore = new Map<string, { count: number; resetAt: number }>();
+  function checkAuthBruteForce(ip: string): boolean {
+    const record = failedAuthAttemptsStore.get(ip);
+    const now = Date.now();
+    if (record && now < record.resetAt && record.count >= 5) {
+      return true; // Blocked
+    }
+    return false;
+  }
+  function recordAuthFailure(ip: string) {
+    const now = Date.now();
+    let record = failedAuthAttemptsStore.get(ip);
+    if (!record || now > record.resetAt) {
+      failedAuthAttemptsStore.set(ip, { count: 1, resetAt: now + 60000 });
+    } else {
+      record.count++;
+    }
+  }
+
   async function requireAuth(req: Request, res: Response): Promise<AuthenticatedUser | null> {
+    const clientIp = (req.ip || req.headers['x-forwarded-for'] || req.socket.remoteAddress || 'unknown') as string;
+    if (checkAuthBruteForce(clientIp)) {
+      const errorMsg = 'Authentication Blocked: Too many failed authentication attempts. Please try again in 1 minute.';
+      await logAuditEvent(null, null, null, 'authorization_failure', 'auth', null, false, { error: errorMsg, path: req.path }, req);
+      res.status(429).json({ error: errorMsg });
+      return null;
+    }
+
     const authHeader = req.headers.authorization;
     if (!authHeader || !authHeader.startsWith('Bearer ')) {
       const errorMsg = 'Authentication Required: Missing or malformed Bearer token in Authorization header.';
@@ -3934,6 +3957,7 @@ export function createExpressApp(deps: ServerDependencies = {}): Express {
     if (idToken.startsWith('DEMO_TOKEN_')) {
       if (process.env.NODE_ENV === 'production') {
         const errorMsg = 'Authentication Failed: Demo tokens are strictly forbidden in production.';
+        recordAuthFailure(clientIp);
         await logAuditEvent(null, null, null, 'authorization_failure', 'auth', null, false, { error: errorMsg, path: req.path }, req);
         res.status(401).json({ error: errorMsg });
         return null;
@@ -3989,6 +4013,7 @@ export function createExpressApp(deps: ServerDependencies = {}): Express {
         }
       }
 
+      recordAuthFailure(clientIp);
       const errorMsg = `Authentication Failed: Token verification failed (Firebase: ${firebaseErr.message})`;
       await logAuditEvent(null, null, null, 'authorization_failure', 'auth', null, false, { error: errorMsg, path: req.path }, req);
       res.status(401).json({ error: errorMsg });
