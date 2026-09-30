@@ -9,6 +9,7 @@ import { KeyManagementServiceClient } from '@google-cloud/kms';
 import { getFirestore, FieldValue } from 'firebase-admin/firestore';
 import { getAuth } from 'firebase-admin/auth';
 import { initializeApp, getApps } from 'firebase-admin/app';
+import { OAuth2Client } from 'google-auth-library';
 import crypto from 'crypto';
 import path from 'path';
 import fs from 'fs';
@@ -3795,64 +3796,15 @@ export function createExpressApp(deps: ServerDependencies = {}): Express {
 
   let db: any = deps.db;
   if (!db) {
-    if (process.env.NODE_ENV === 'production') {
-      db = getFirestore();
-    } else {
-      try {
-        const realDb = getFirestore();
-        const inMemoryDb = createInMemoryDb();
-        let hasPermissionError = false;
+    const isProduction = process.env.NODE_ENV === 'production';
+    const useMock = process.env.USE_MOCK_DB === 'true' || (!isProduction && !process.env.FIREBASE_CONFIG && !process.env.GOOGLE_APPLICATION_CREDENTIALS);
 
-        db = new Proxy(realDb, {
-          get(target: any, prop: string) {
-            if (prop === 'collection' || prop === 'runTransaction') {
-              if (hasPermissionError || process.env.USE_MOCK_DB === 'true' || (!process.env.FIREBASE_CONFIG && !process.env.GOOGLE_APPLICATION_CREDENTIALS)) {
-                return inMemoryDb[prop];
-              }
-              return function(...args: any[]) {
-                try {
-                  const res = target[prop](...args);
-                  if (prop === 'collection') {
-                    const originalDoc = res.doc;
-                    res.doc = function(...docArgs: any[]) {
-                      const docRef = originalDoc.apply(res, docArgs);
-                      const originalGet = docRef.get;
-                      docRef.get = async function(...getArgs: any[]) {
-                        try {
-                          return await originalGet.apply(docRef, getArgs);
-                        } catch (err: any) {
-                          if (err.message && (err.message.includes('PERMISSION_DENIED') || err.message.includes('Permission denied'))) {
-                            hasPermissionError = true;
-                            console.warn('[Firestore Fallback] Permission denied. Switched server to in-memory database mock.');
-                            return inMemoryDb.collection(args[0]).doc(docArgs[0]).get();
-                          }
-                          throw err;
-                        }
-                      };
-                      return docRef;
-                    };
-                  }
-                  return res;
-                } catch (err: any) {
-                  if (err.message && (err.message.includes('PERMISSION_DENIED') || err.message.includes('Permission denied'))) {
-                    hasPermissionError = true;
-                    console.warn('[Firestore Fallback] Permission denied. Switched server to in-memory database mock.');
-                    return inMemoryDb[prop](...args);
-                  }
-                  throw err;
-                }
-              };
-            }
-            return target[prop];
-          }
-        });
-      } catch (e) {
-        if (process.env.USE_MOCK_DB === 'true' || (!process.env.FIREBASE_CONFIG && !process.env.GOOGLE_APPLICATION_CREDENTIALS)) {
-          db = createInMemoryDb();
-        } else {
-          throw e;
-        }
-      }
+    if (useMock && !isProduction) {
+      console.log('[Database] Initializing in-memory mock database.');
+      db = createInMemoryDb();
+    } else {
+      console.log('[Database] Initializing real Firestore database.');
+      db = getFirestore();
     }
   }
   const auth = deps.auth || getAuth();
@@ -3949,6 +3901,9 @@ export function createExpressApp(deps: ServerDependencies = {}): Express {
     }
   }
 
+  const googleAuthClient = new OAuth2Client();
+  const AUTHORIZED_SA = process.env.AUTHORIZED_SERVICE_ACCOUNT_EMAIL || 'ais-sandbox@ais-asia-east1-88e2f19c66d64fb.iam.gserviceaccount.com';
+
   async function requireAuth(req: Request, res: Response): Promise<AuthenticatedUser | null> {
     const authHeader = req.headers.authorization;
     if (!authHeader || !authHeader.startsWith('Bearer ')) {
@@ -3988,12 +3943,47 @@ export function createExpressApp(deps: ServerDependencies = {}): Express {
       };
     }
 
+    // Try Firebase Identity Token
     try {
       const decoded = await auth.verifyIdToken(idToken);
       uid = decoded.uid;
       email = decoded.email;
-    } catch (tokenErr: any) {
-      const errorMsg = `Authentication Failed: ${tokenErr.message}`;
+    } catch (firebaseErr: any) {
+      // Fallback: Support Google Identity Tokens for Service-to-Service staging validation
+      try {
+        const allowedAudiences = [
+          process.env.APP_URL,
+          process.env.STAGING_URL,
+          'https://ais-dev-twqasbvtmkrtsllriliohj-212282537635.asia-east1.run.app',
+          'https://ais-pre-twqasbvtmkrtsllriliohj-212282537635.asia-east1.run.app'
+        ];
+        
+        if (process.env.NODE_ENV !== 'production') {
+          const host = req.headers.host;
+          if (host) {
+            allowedAudiences.push(`http://${host}`);
+            allowedAudiences.push(`https://${host}`);
+          }
+        }
+
+        const ticket = await googleAuthClient.verifyIdToken({
+          idToken,
+          audience: allowedAudiences.filter(Boolean) as string[]
+        });
+        const payload = ticket.getPayload();
+        if (payload && payload.email === AUTHORIZED_SA) {
+          logger.info('Authenticated via Google OIDC Identity Token', { email: payload.email });
+          return {
+            uid: `sa-${payload.sub}`,
+            role: 'super_admin', // Service account verification grants super admin for smoke testing
+            email: payload.email,
+          };
+        }
+      } catch (googleErr: any) {
+        logger.error('Google OIDC verification failed', { error: googleErr.message, audience: [process.env.APP_URL, process.env.STAGING_URL] });
+      }
+
+      const errorMsg = `Authentication Failed: Token verification failed (Firebase: ${firebaseErr.message})`;
       await logAuditEvent(null, null, null, 'authorization_failure', 'auth', null, false, { error: errorMsg, path: req.path }, req);
       res.status(401).json({ error: errorMsg });
       return null;

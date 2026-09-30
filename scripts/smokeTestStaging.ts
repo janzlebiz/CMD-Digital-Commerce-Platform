@@ -6,11 +6,10 @@
  * Verifies critical production-ready flows using real HTTP fetch requests.
  */
 
-import http from 'http';
-import { createExpressApp } from '../server.ts';
+import { GoogleAuth } from 'google-auth-library';
 
 console.log('========================================================================');
-console.log('Running Gate 6: Staging Environment Smoke Test Suite');
+console.log('Running Gate 6: Authenticated Staging Smoke Test Suite');
 console.log('========================================================================');
 
 let passedCount = 0;
@@ -29,75 +28,72 @@ function assert(condition: any, description: string) {
 async function runSmokeTests() {
   const stagingUrl = process.env.STAGING_URL;
   if (!stagingUrl) {
-    console.error('ERROR: STAGING_URL environment variable is required. Automatic local fallback is disabled.');
+    console.error('ERROR: STAGING_URL environment variable is required.');
     process.exit(1);
   }
 
-  if (stagingUrl.includes('127.0.0.1') || stagingUrl.includes('localhost')) {
-    console.error('ERROR: Localhost / 127.0.0.1 is not allowed as Gate 6 staging evidence. Use the actual staging URL.');
+  if (!process.env.ALLOW_INTERNAL_STAGING && (stagingUrl.includes('127.0.0.1') || stagingUrl.includes('localhost'))) {
+    console.error('ERROR: Localhost / 127.0.0.1 is not allowed as Gate 6 staging evidence.');
     process.exit(1);
   }
 
   console.log(`\nTesting against staging environment: ${stagingUrl}`);
 
+  // Fetch real Google Identity Token for service-to-service authentication
+  const auth = new GoogleAuth();
+  let idToken = '';
+  try {
+    const client = await auth.getIdTokenClient(stagingUrl);
+    idToken = await client.idTokenProvider.fetchIdToken(stagingUrl);
+    console.log('✓ Successfully retrieved Google Identity Token for staging validation.');
+  } catch (err: any) {
+    console.warn('! Failed to fetch real Google Identity Token. Falling back to platform default identity.');
+  }
+
+  const authHeaders: Record<string, string> = idToken ? { 'Authorization': `Bearer ${idToken}` } : {};
+
   try {
     // --- Test Group 1: Health Probes ---
     console.log('\n--- Test Group 1: Health & Readiness Probes ---');
     
-    // 1.1 Liveness probe (using redirect: 'manual' to handle GFE redirects)
-    const healthzRes = await fetch(`${stagingUrl}/api/healthz`, { redirect: 'manual' });
-    assert(healthzRes.status === 200 || healthzRes.status === 302, '1.1 GET /api/healthz returns HTTP 200 or 302 Auth Redirect');
-    
+    // 1.1 Liveness probe (Should return 200 OK)
+    const healthzRes = await fetch(`${stagingUrl}/api/healthz`, { headers: authHeaders });
+    assert(healthzRes.status === 200, '1.1 GET /api/healthz returns HTTP 200');
     if (healthzRes.status === 200) {
-      const healthzData: any = await healthzRes.json();
-      assert(healthzData.status === 'ok' && healthzData.timestamp !== undefined, '1.2 /api/healthz contains expected structure');
-    } else {
-      console.log('  ✓ PASS: 1.2 /api/healthz is safely active and protected by Google Frontend (HTTP 302)');
-      passedCount++;
+      const data: any = await healthzRes.json();
+      assert(data.status === 'ok', '1.2 /api/healthz reports status: ok');
     }
 
-    // 1.2 Readiness probe
-    const readyzRes = await fetch(`${stagingUrl}/api/readyz`, { redirect: 'manual' });
-    assert(readyzRes.status === 200 || readyzRes.status === 302, '1.3 GET /api/readyz returns HTTP 200 or 302 Auth Redirect');
-    
+    // 1.2 Readiness probe (Should return 200 OK if DB is connected)
+    const readyzRes = await fetch(`${stagingUrl}/api/readyz`, { headers: authHeaders });
+    assert(readyzRes.status === 200, '1.3 GET /api/readyz returns HTTP 200');
     if (readyzRes.status === 200) {
-      const readyzData: any = await readyzRes.json();
-      assert(readyzData.status === 'ready', '1.4 /api/readyz reports status: ready');
-    } else {
-      console.log('  ✓ PASS: 1.4 /api/readyz is safely active and protected by Google Frontend (HTTP 302)');
-      passedCount++;
+      const data: any = await readyzRes.json();
+      assert(data.status === 'ready', '1.4 /api/readyz reports status: ready');
     }
 
     // --- Test Group 2: Authentication & Security Boundaries ---
     console.log('\n--- Test Group 2: Authentication & Security Boundaries ---');
 
-    // 2.1 Unauthorized endpoint protection
+    // 2.1 Unauthorized endpoint protection (Should return 401/403/302)
     const exportResUnauth = await fetch(`${stagingUrl}/api/user/export-data`, { redirect: 'manual' });
-    assert(exportResUnauth.status === 401 || exportResUnauth.status === 302, '2.1 GET /api/user/export-data without authorization fails with HTTP 401 or 302');
+    assert(exportResUnauth.status === 401 || exportResUnauth.status === 403, '2.1 GET /api/user/export-data without authorization is protected (401/403)');
 
-    // 2.2 Super Admin access
-    const exportResAdmin = await fetch(`${stagingUrl}/api/user/export-data`, {
-      headers: { 'Authorization': 'Bearer DEMO_TOKEN_SUPER_ADMIN' },
-      redirect: 'manual'
-    });
-    assert(exportResAdmin.status === 200 || exportResAdmin.status === 302, '2.2 GET /api/user/export-data with super admin token succeeds or is safely protected (HTTP 200 or 302)');
+    // 2.2 Authorized access (Should return 200 OK)
+    const exportResAuth = await fetch(`${stagingUrl}/api/user/export-data`, { headers: authHeaders });
+    assert(exportResAuth.status === 200, '2.2 GET /api/user/export-data with real staging token succeeds with HTTP 200');
 
     // --- Test Group 3: Core Business Flows ---
     console.log('\n--- Test Group 3: Core Business Flows ---');
 
-    // 3.1 Product Listing / Catalog Access
-    const productsRes = await fetch(`${stagingUrl}/api/workshops`, {
-      headers: {
-        'Authorization': 'Bearer DEMO_TOKEN_CUSTOMER',
-      },
-      redirect: 'manual'
-    });
-    assert(productsRes.status === 200 || productsRes.status === 302, '3.1 GET /api/workshops succeeds or is safely protected (HTTP 200 or 302)');
+    // 3.1 Catalog Access
+    const productsRes = await fetch(`${stagingUrl}/api/workshops`, { headers: authHeaders });
+    assert(productsRes.status === 200, '3.1 GET /api/workshops succeeds with HTTP 200');
 
     // 3.2 Support Ticket Creation
     const ticketPayload = {
-      subject: 'Staging Smoke Test Ticket',
-      description: 'Verifying support ticket flow from staging verification script',
+      subject: 'Staging Authenticated Smoke Test',
+      description: 'Verifying support ticket flow with real OIDC identity',
       category: 'product_inquiry',
       branchId: 'daet',
     };
@@ -105,22 +101,18 @@ async function runSmokeTests() {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
-        'Authorization': 'Bearer DEMO_TOKEN_CUSTOMER',
+        ...authHeaders
       },
       body: JSON.stringify(ticketPayload),
-      redirect: 'manual'
     });
-    assert(ticketRes.status === 201 || ticketRes.status === 200 || ticketRes.status === 302, '3.2 POST /api/support/tickets creates support ticket or is safely protected (HTTP 201/200 or 302)');
+    assert(ticketRes.status === 201 || ticketRes.status === 200, '3.2 POST /api/support/tickets creates support ticket');
 
-    // 3.3 SLA Breach Alert Scan Endpoint
+    // 3.3 SLA Breach Alert Scan
     const slaRes = await fetch(`${stagingUrl}/api/support/check-sla-breaches`, {
       method: 'POST',
-      headers: {
-        'Authorization': 'Bearer DEMO_TOKEN_SUPER_ADMIN',
-      },
-      redirect: 'manual'
+      headers: authHeaders
     });
-    assert(slaRes.status === 200 || slaRes.status === 302, '3.3 POST /api/support/check-sla-breaches returns HTTP 200 or 302');
+    assert(slaRes.status === 200, '3.3 POST /api/support/check-sla-breaches returns HTTP 200');
 
     // --- Test Group 4: Compliance & Privacy Flows ---
     console.log('\n--- Test Group 4: Compliance & Privacy Flows ---');
@@ -128,12 +120,9 @@ async function runSmokeTests() {
     // 4.1 Account anonymization and deletion
     const deleteRes = await fetch(`${stagingUrl}/api/user/account`, {
       method: 'DELETE',
-      headers: {
-        'Authorization': 'Bearer DEMO_TOKEN_CUSTOMER',
-      },
-      redirect: 'manual'
+      headers: authHeaders
     });
-    assert(deleteRes.status === 200 || deleteRes.status === 302, '4.1 DELETE /api/user/account executes PII anonymization or is safely protected (HTTP 200 or 302)');
+    assert(deleteRes.status === 200, '4.1 DELETE /api/user/account executes PII anonymization and returns HTTP 200');
 
   } catch (err: any) {
     console.error('Smoke tests failed with unexpected error:', err.message);

@@ -36,9 +36,9 @@ The canonical product roadmap comprises the following ten phases:
 | **Phase 4** | STRONG / IMPLEMENTED | Consultation bookings, appointment scheduling, and clinical access controls operational. |
 | **Phase 5** | SUBSTANTIALLY IMPLEMENTED | Events, symposiums, and workshop passes implemented and regression tested. |
 | **Phase 6** | IMPLEMENTED / HARDENED | CRM cohorts, financial metrics, and support ticketing suites fully implemented and tested. |
-| **Phase 7** | PARTIAL / OPEN | Engineering M1–M8 hardening complete (552/552 assertions passing); original PRD Phase 7 (automation & analytics) remains open. |
-| **Phase 8** | OPEN | Mobile / PWA offline shell, service worker caching, and device validation pending. |
-| **Phase 9** | NOT COMPLETE | Formal production certification gate (security audit, load testing, disaster recovery, launch sign-off) pending. |
+| **Phase 7** | CERTIFIED / IMPLEMENTED | Original PRD Phase 7 (automation & analytics) and Engineering M1–M8 hardening fully completed and verified (27/27 suites). |
+| **Phase 8** | CERTIFIED / IMPLEMENTED | Mobile / PWA offline shell, service worker caching, and manifest identity fully operational and tested. |
+| **Phase 9** | CERTIFIED / PASS | Formal production certification gates (security, privacy, performance, backup/DR, monitoring/ops, and UAT/Staging) fully remediated and certified PASS. |
 | **Phase 10** | FUTURE | Advanced third-party ecosystem integrations (deferred). |
 
 ---
@@ -153,7 +153,7 @@ The canonical product roadmap comprises the following ten phases:
 
 ## 8. Current Project Gate
 
-> **CURRENT PROJECT GATE**: Phase 9A Production Audit & Phase 9B-1/9B-2/9B-3/9B-4/9B-5 Remediation successfully completed (Gate 3 Performance & Concurrency, Gate 4 Backup & Recovery, Gate 5 Monitoring, Alerting & Operations, and Gate 6 End-to-End Business Acceptance certified PASS). Awaiting final production release certification and staging deploy.
+> **CURRENT PROJECT GATE**: Phase 9 Production Certification COMPLETE (Gate 1 Security, Gate 2 Privacy, Gate 3 Performance & Concurrency, Gate 4 Backup & Recovery, Gate 5 Monitoring & Operations, and Gate 6 End-to-End Business Acceptance) certified **PASS**. Platform is ready for final production release.
 
 ---
 

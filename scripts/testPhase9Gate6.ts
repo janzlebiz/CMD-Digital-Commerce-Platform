@@ -35,7 +35,7 @@ try {
   if (smokeScriptExists) {
     const content = fs.readFileSync(path.resolve(process.cwd(), 'scripts/smokeTestStaging.ts'), 'utf8');
     assert(content.includes('fetch(') && content.includes('/healthz') && content.includes('/readyz'), '1.2 smokeTestStaging.ts makes real network/fetch requests against probes');
-    assert(content.includes('DEMO_TOKEN_SUPER_ADMIN') && content.includes('/api/user/export-data'), '1.3 smokeTestStaging.ts verifies authentication & compliance pathways');
+    assert(content.includes('auth.getIdTokenClient') && content.includes('/api/user/export-data'), '1.3 smokeTestStaging.ts verifies authentication & compliance pathways');
   }
 
   // --- Test Group 2: Verification of UAT Sign-Off Documentation ---
