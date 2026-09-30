@@ -54,6 +54,7 @@ jobs:
           token: ${{ secrets.GITHUB_TOKEN }}
           target: 'http://127.0.0.1:3000'
           rules_file_name: '.zap/rules.tsv'
+          cmd_options: '-I'
           fail_action: true
 
       - name: Run Platform Security Test Suite
