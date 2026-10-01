@@ -5,7 +5,6 @@
 
 import React, { useState, useEffect } from 'react';
 import { PageView } from './types';
-import { StatutoryBanner } from './components/layout/StatutoryBanner';
 import { Navbar } from './components/layout/Navbar';
 import { Footer } from './components/layout/Footer';
 
@@ -21,7 +20,7 @@ import { TermsView } from './views/TermsView';
 import { PrivacyView } from './views/PrivacyView';
 import { ReturnsView } from './views/ReturnsView';
 
-// Phase 2 E-Commerce Views & Hooks
+// E-Commerce Views & Hooks
 import { CartView } from './views/CartView';
 import { CheckoutView } from './views/CheckoutView';
 import { OrdersView } from './views/OrdersView';
@@ -31,12 +30,15 @@ import { WorkshopsView } from './views/WorkshopsView';
 import { SupportTicketsView } from './views/SupportTicketsView';
 import { useEcommerce } from './hooks/useEcommerce';
 import { AuthProvider } from './context/AuthContext';
+import { ThemeProvider } from './context/ThemeContext';
 
 export default function App() {
   return (
-    <AuthProvider>
-      <MainLayout />
-    </AuthProvider>
+    <ThemeProvider>
+      <AuthProvider>
+        <MainLayout />
+      </AuthProvider>
+    </ThemeProvider>
   );
 }
 
@@ -161,8 +163,7 @@ function MainLayout() {
   const totalCartCount = ecommerce.cart.reduce((sum, item) => sum + item.quantity, 0);
 
   return (
-    <div className="min-h-screen bg-slate-950 text-slate-100 flex flex-col font-sans selection:bg-amber-500 selection:text-slate-950">
-      <StatutoryBanner />
+    <div className="min-h-screen bg-slate-50 dark:bg-slate-950 text-slate-900 dark:text-slate-100 flex flex-col font-sans transition-colors selection:bg-sky-500 selection:text-white">
       <Navbar currentView={currentView} onNavigate={handleNavigate} cartCount={totalCartCount} />
       <main id="main-content" className="flex-1 focus:outline-none">
         {renderCurrentView()}

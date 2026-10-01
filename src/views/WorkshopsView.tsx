@@ -20,6 +20,7 @@ import {
   RefreshCw,
   Search,
   ScanLine,
+  Sparkles,
 } from 'lucide-react';
 
 export const WorkshopsView: React.FC = () => {
@@ -177,36 +178,36 @@ export const WorkshopsView: React.FC = () => {
   };
 
   return (
-    <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8 space-y-8">
-      {/* Header Banner */}
-      <div className="bg-gradient-to-r from-amber-950 via-slate-900 to-slate-900 rounded-2xl p-6 sm:p-8 text-white border border-slate-800 shadow-xl">
-        <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
-          <div>
-            <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-amber-500/20 text-amber-300 text-xs font-semibold mb-3">
-              <QrCode className="w-4 h-4 text-amber-400" />
-              Community Wellness Symposiums & Workshops
+    <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8 sm:py-12 space-y-8">
+      {/* Header Banner matching White & Blue Branding */}
+      <div className="bg-gradient-to-br from-sky-600 via-sky-700 to-blue-900 rounded-3xl p-6 sm:p-10 text-white shadow-xl border border-sky-400/30">
+        <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-6">
+          <div className="space-y-3">
+            <div className="inline-flex items-center gap-2 px-3.5 py-1.5 rounded-full bg-white/20 backdrop-blur-md text-sky-100 text-xs font-extrabold tracking-wide">
+              <QrCode className="w-4 h-4 text-cyan-300" />
+              <span>Community Wellness Symposiums & Workshops</span>
             </div>
-            <h1 className="text-2xl sm:text-3xl font-bold tracking-tight text-white">
+            <h1 className="text-2xl sm:text-4xl font-black tracking-tight text-white">
               Mineral Science & Hydration Seminars
             </h1>
-            <p className="text-slate-300 text-xs sm:text-sm mt-2 max-w-3xl">
+            <p className="text-sky-100 text-xs sm:text-base max-w-3xl leading-relaxed">
               Register for upcoming local branch seminars across Daet, Labo, and Capalonga. Secure real-time seats or join waitlists with dynamic HMAC-SHA256 secure attendance passes.
             </p>
           </div>
 
-          <div className="flex items-center gap-2 bg-slate-800/80 border border-slate-700 rounded-xl p-1 text-xs self-stretch sm:self-auto">
+          <div className="flex items-center gap-2 bg-white/10 dark:bg-slate-900/60 backdrop-blur-md border border-white/20 dark:border-slate-700 rounded-2xl p-1.5 text-xs self-stretch sm:self-auto shrink-0 shadow-sm">
             <button
               onClick={() => setActiveTab('catalog')}
-              className={`flex-1 sm:flex-initial px-4 py-2 rounded-lg font-semibold transition ${
-                activeTab === 'catalog' ? 'bg-amber-500 text-slate-950 shadow' : 'text-slate-300 hover:text-white'
+              className={`flex-1 sm:flex-initial px-4 py-2.5 rounded-xl font-bold transition ${
+                activeTab === 'catalog' ? 'bg-white text-sky-900 shadow-md' : 'text-sky-100 hover:text-white'
               }`}
             >
               Seminars
             </button>
             <button
               onClick={() => setActiveTab('passes')}
-              className={`flex-1 sm:flex-initial px-4 py-2 rounded-lg font-semibold transition ${
-                activeTab === 'passes' ? 'bg-amber-500 text-slate-950 shadow' : 'text-slate-300 hover:text-white'
+              className={`flex-1 sm:flex-initial px-4 py-2.5 rounded-xl font-bold transition ${
+                activeTab === 'passes' ? 'bg-white text-sky-900 shadow-md' : 'text-sky-100 hover:text-white'
               }`}
             >
               My Attendance Passes
@@ -214,8 +215,8 @@ export const WorkshopsView: React.FC = () => {
             {isStaff && (
               <button
                 onClick={() => setActiveTab('scanner')}
-                className={`flex-1 sm:flex-initial px-4 py-2 rounded-lg font-semibold transition ${
-                  activeTab === 'scanner' ? 'bg-amber-500 text-slate-950 shadow' : 'text-slate-300 hover:text-white'
+                className={`flex-1 sm:flex-initial px-4 py-2.5 rounded-xl font-bold transition ${
+                  activeTab === 'scanner' ? 'bg-white text-sky-900 shadow-md' : 'text-sky-100 hover:text-white'
                 }`}
               >
                 Staff QR Scanner
@@ -227,16 +228,16 @@ export const WorkshopsView: React.FC = () => {
 
       {feedbackMsg && (
         <div
-          className={`p-4 rounded-xl border flex items-start gap-3 text-xs ${
+          className={`p-4 rounded-2xl border flex items-start gap-3 text-xs ${
             feedbackMsg.type === 'success'
-              ? 'bg-emerald-950/40 border-emerald-500/40 text-emerald-300'
-              : 'bg-red-950/40 border-red-500/40 text-red-300'
+              ? 'bg-emerald-50 dark:bg-emerald-950/40 border-emerald-200 dark:border-emerald-500/40 text-emerald-800 dark:text-emerald-300'
+              : 'bg-red-50 dark:bg-red-950/40 border-red-200 dark:border-red-500/40 text-red-800 dark:text-red-300'
           }`}
         >
           {feedbackMsg.type === 'success' ? (
-            <CheckCircle className="w-5 h-5 text-emerald-400 shrink-0 mt-0.5" />
+            <CheckCircle className="w-5 h-5 text-emerald-600 dark:text-emerald-400 shrink-0 mt-0.5" />
           ) : (
-            <AlertTriangle className="w-5 h-5 text-red-400 shrink-0 mt-0.5" />
+            <AlertTriangle className="w-5 h-5 text-red-600 dark:text-red-400 shrink-0 mt-0.5" />
           )}
           <span>{feedbackMsg.text}</span>
         </div>
@@ -246,42 +247,42 @@ export const WorkshopsView: React.FC = () => {
       {activeTab === 'catalog' && (
         <div className="space-y-6">
           {registeringWs ? (
-            <div className="bg-slate-900 border border-slate-800 rounded-2xl p-6 sm:p-8 max-w-xl mx-auto space-y-4">
-              <h3 className="text-base font-bold text-white">Workshop Seminar Registration</h3>
-              <div className="p-3 bg-slate-950 border border-slate-800 rounded-lg text-xs">
-                <p className="font-bold text-amber-400">{registeringWs.title}</p>
-                <p className="text-slate-400 mt-1">{registeringWs.description}</p>
+            <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-3xl p-6 sm:p-8 max-w-xl mx-auto space-y-5 shadow-md">
+              <h3 className="text-base font-bold text-slate-900 dark:text-white">Workshop Seminar Registration</h3>
+              <div className="p-4 bg-sky-50 dark:bg-slate-950 border border-sky-100 dark:border-slate-800 rounded-2xl text-xs">
+                <p className="font-bold text-sky-800 dark:text-sky-300">{registeringWs.title}</p>
+                <p className="text-slate-600 dark:text-slate-400 mt-1">{registeringWs.description}</p>
               </div>
 
               <form onSubmit={handleRegister} className="space-y-4 text-xs">
                 <div>
-                  <label className="text-xs font-semibold text-slate-400 block mb-1">Full Name</label>
+                  <label className="text-xs font-semibold text-slate-700 dark:text-slate-300 block mb-1">Full Name</label>
                   <input
                     type="text"
                     value={customerName}
                     onChange={(e) => setCustomerName(e.target.value)}
-                    className="w-full px-3 py-2 bg-slate-950 border border-slate-700 rounded-lg text-white text-xs"
+                    className="w-full px-3.5 py-2.5 bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-700 rounded-xl text-slate-900 dark:text-white text-xs"
                     required
                   />
                 </div>
                 <div>
-                  <label className="text-xs font-semibold text-slate-400 block mb-1">Email Address</label>
+                  <label className="text-xs font-semibold text-slate-700 dark:text-slate-300 block mb-1">Email Address</label>
                   <input
                     type="email"
                     value={customerEmail}
                     onChange={(e) => setCustomerEmail(e.target.value)}
-                    className="w-full px-3 py-2 bg-slate-950 border border-slate-700 rounded-lg text-white text-xs"
+                    className="w-full px-3.5 py-2.5 bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-700 rounded-xl text-slate-900 dark:text-white text-xs"
                     required
                   />
                 </div>
                 <div>
-                  <label className="text-xs font-semibold text-slate-400 block mb-1">Mobile Phone Number</label>
+                  <label className="text-xs font-semibold text-slate-700 dark:text-slate-300 block mb-1">Mobile Phone Number</label>
                   <input
                     type="text"
                     value={customerPhone}
                     onChange={(e) => setCustomerPhone(e.target.value)}
                     placeholder="+63 9xx xxx xxxx"
-                    className="w-full px-3 py-2 bg-slate-950 border border-slate-700 rounded-lg text-white text-xs"
+                    className="w-full px-3.5 py-2.5 bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-700 rounded-xl text-slate-900 dark:text-white text-xs"
                     required
                   />
                 </div>
@@ -290,14 +291,14 @@ export const WorkshopsView: React.FC = () => {
                   <button
                     type="submit"
                     disabled={regLoading}
-                    className="flex-1 py-2 px-4 bg-amber-500 hover:bg-amber-400 text-slate-950 font-bold rounded-xl transition"
+                    className="flex-1 py-3 px-4 bg-sky-600 hover:bg-sky-700 text-white font-bold rounded-xl transition shadow-sm cursor-pointer"
                   >
                     {regLoading ? 'Registering...' : 'Confirm Registration'}
                   </button>
                   <button
                     type="button"
                     onClick={() => setRegisteringWs(null)}
-                    className="py-2 px-4 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-xl transition"
+                    className="py-3 px-4 bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-300 rounded-xl transition cursor-pointer"
                   >
                     Cancel
                   </button>
@@ -305,8 +306,8 @@ export const WorkshopsView: React.FC = () => {
               </form>
             </div>
           ) : workshops.length === 0 ? (
-            <div className="p-8 text-center bg-slate-900 border border-slate-800 rounded-xl text-slate-400 text-xs flex flex-col items-center gap-2">
-              <RefreshCw className="w-8 h-8 text-slate-500 animate-spin" />
+            <div className="p-8 text-center bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-3xl text-slate-500 dark:text-slate-400 text-xs flex flex-col items-center gap-2">
+              <RefreshCw className="w-8 h-8 text-sky-600 dark:text-sky-400 animate-spin" />
               <span>Fetching available workshop dates across Camarines Norte...</span>
             </div>
           ) : (
@@ -317,43 +318,43 @@ export const WorkshopsView: React.FC = () => {
                 return (
                   <div
                     key={ws.id}
-                    className="bg-slate-900 border border-slate-800 rounded-2xl p-5 flex flex-col justify-between space-y-4 hover:border-amber-500/50 transition"
+                    className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-3xl p-6 flex flex-col justify-between space-y-4 hover:border-sky-400 transition shadow-sm"
                   >
-                    <div className="space-y-2">
+                    <div className="space-y-2.5">
                       <div className="flex justify-between items-center">
-                        <span className="text-[10px] font-mono font-bold text-amber-400 uppercase bg-amber-500/10 px-2.5 py-0.5 rounded border border-amber-500/20">
-                          {ws.branchId}
+                        <span className="text-[10px] font-mono font-bold text-sky-700 dark:text-sky-400 uppercase bg-sky-50 dark:bg-sky-950/80 px-2.5 py-0.5 rounded-lg border border-sky-200 dark:border-sky-800">
+                          {ws.branchId} Branch
                         </span>
-                        <span className="text-xs text-slate-400 font-semibold flex items-center gap-1">
-                          <Users className="w-3.5 h-3.5" />
+                        <span className="text-xs text-slate-500 dark:text-slate-400 font-semibold flex items-center gap-1">
+                          <Users className="w-3.5 h-3.5 text-slate-400" />
                           Capacity: {ws.capacity}
                         </span>
                       </div>
 
-                      <h3 className="text-sm font-bold text-white line-clamp-2">{ws.title}</h3>
-                      <p className="text-xs text-slate-400 leading-relaxed line-clamp-3">{ws.description}</p>
+                      <h3 className="text-base font-bold text-slate-900 dark:text-white line-clamp-2">{ws.title}</h3>
+                      <p className="text-xs text-slate-600 dark:text-slate-400 leading-relaxed line-clamp-3">{ws.description}</p>
                     </div>
 
-                    <div className="space-y-2.5 pt-2 border-t border-slate-800">
-                      <div className="flex items-center gap-1.5 text-xs text-slate-300">
-                        <Calendar className="w-4 h-4 text-slate-500 shrink-0" />
+                    <div className="space-y-2.5 pt-3 border-t border-slate-100 dark:border-slate-800">
+                      <div className="flex items-center gap-1.5 text-xs text-slate-600 dark:text-slate-400">
+                        <Calendar className="w-4 h-4 text-sky-600 dark:text-sky-400 shrink-0" />
                         <span>{ws.scheduledDate}</span>
                       </div>
-                      <div className="flex items-center gap-1.5 text-xs text-slate-300">
-                        <Clock className="w-4 h-4 text-slate-500 shrink-0" />
+                      <div className="flex items-center gap-1.5 text-xs text-slate-600 dark:text-slate-400">
+                        <Clock className="w-4 h-4 text-sky-600 dark:text-sky-400 shrink-0" />
                         <span>{ws.scheduledTime}</span>
                       </div>
 
                       {/* Seats & Waitlist Handles */}
                       <div className="flex justify-between items-center text-xs pt-1">
-                        <span className="text-slate-400 font-medium">Availability:</span>
+                        <span className="text-slate-500 font-medium">Availability:</span>
                         {isFull ? (
-                          <span className="text-amber-400 font-bold bg-amber-500/10 px-2 py-0.5 rounded border border-amber-500/20 flex items-center gap-1">
+                          <span className="text-amber-700 dark:text-amber-300 font-bold bg-amber-50 dark:bg-amber-950/40 px-2 py-0.5 rounded border border-amber-200 dark:border-amber-800 flex items-center gap-1">
                             <AlertTriangle className="w-3 h-3" />
                             Waitlist Only (+{ws.waitlistCount})
                           </span>
                         ) : (
-                          <span className="text-emerald-400 font-bold bg-emerald-500/10 px-2 py-0.5 rounded border border-emerald-500/20">
+                          <span className="text-emerald-700 dark:text-emerald-300 font-bold bg-emerald-50 dark:bg-emerald-950/40 px-2 py-0.5 rounded border border-emerald-200 dark:border-emerald-800">
                             {seatsLeft} Seats Left
                           </span>
                         )}
@@ -361,10 +362,10 @@ export const WorkshopsView: React.FC = () => {
 
                       <button
                         onClick={() => setRegisteringWs(ws)}
-                        className={`w-full py-2.5 rounded-xl font-bold text-xs transition ${
+                        className={`w-full py-3 rounded-xl font-bold text-xs transition cursor-pointer shadow-xs ${
                           isFull
-                            ? 'bg-slate-800 hover:bg-slate-700 text-amber-300 border border-amber-500/30'
-                            : 'bg-amber-500 hover:bg-amber-400 text-slate-950'
+                            ? 'bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-300 border border-slate-300 dark:border-slate-700'
+                            : 'bg-sky-600 hover:bg-sky-700 text-white'
                         }`}
                       >
                         {isFull ? 'Join Waitlist' : 'Reserve Seat'}
@@ -382,9 +383,9 @@ export const WorkshopsView: React.FC = () => {
       {activeTab === 'passes' && (
         <div className="space-y-6">
           {registrations.length === 0 ? (
-            <div className="p-12 text-center bg-slate-900 border border-slate-800 rounded-2xl text-slate-400 text-xs space-y-2">
-              <Calendar className="w-8 h-8 text-slate-500 mx-auto" />
-              <p className="font-semibold">No Seminar Registrations Found</p>
+            <div className="p-12 text-center bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-3xl text-slate-500 dark:text-slate-400 text-xs space-y-2">
+              <Calendar className="w-8 h-8 text-sky-600 dark:text-sky-400 mx-auto" />
+              <p className="font-semibold text-slate-900 dark:text-white">No Seminar Registrations Found</p>
               <p className="text-slate-500 text-[11px]">Join our upcoming mineral science workshops above.</p>
             </div>
           ) : (
@@ -394,28 +395,27 @@ export const WorkshopsView: React.FC = () => {
                 return (
                   <div
                     key={reg.id}
-                    className="bg-slate-900 border border-slate-800 rounded-2xl p-5 flex flex-col md:flex-row gap-5 items-stretch hover:border-slate-700 transition"
+                    className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-3xl p-5 flex flex-col md:flex-row gap-5 items-stretch hover:border-sky-400 transition shadow-sm"
                   >
                     {/* Visual QR Pass Segment */}
-                    <div className="bg-slate-950 border border-slate-800 rounded-xl p-4 flex flex-col items-center justify-between min-w-[150px] shrink-0 text-center">
-                      <div className="w-24 h-24 bg-white p-2 rounded-lg relative flex items-center justify-center">
-                        {/* Dynamic SVG Mock QR representing HMAC-SHA256 fingerprint */}
-                        <div className="w-full h-full bg-slate-950 grid grid-cols-4 gap-1 p-1">
+                    <div className="bg-sky-50 dark:bg-slate-950 border border-sky-100 dark:border-slate-800 rounded-2xl p-4 flex flex-col items-center justify-between min-w-[150px] shrink-0 text-center">
+                      <div className="w-24 h-24 bg-white p-2 rounded-xl relative flex items-center justify-center shadow-xs">
+                        <div className="w-full h-full bg-slate-950 grid grid-cols-4 gap-1 p-1 rounded-lg">
                           {Array.from({ length: 16 }).map((_, i) => (
                             <div
                               key={i}
-                              className={`rounded-sm ${
+                              className={`rounded-xs ${
                                 (reg.signature.charCodeAt(i % reg.signature.length) + i) % 2 === 0
-                                  ? 'bg-amber-400'
+                                  ? 'bg-sky-400'
                                   : 'bg-slate-800'
                               }`}
                             />
                           ))}
                         </div>
-                        <div className="absolute inset-0 border-2 border-amber-500/50 rounded-lg pointer-events-none"></div>
+                        <div className="absolute inset-0 border-2 border-sky-500/50 rounded-xl pointer-events-none"></div>
                       </div>
-                      <div className="mt-3 text-[10px] font-mono text-slate-400 break-all leading-tight">
-                        <span className="font-bold text-white block mb-0.5">FINGERPRINT</span>
+                      <div className="mt-3 text-[10px] font-mono text-slate-600 dark:text-slate-400 break-all leading-tight">
+                        <span className="font-bold text-sky-700 dark:text-sky-300 block mb-0.5">FINGERPRINT</span>
                         {reg.signature.slice(0, 16)}...
                       </div>
                     </div>
@@ -424,36 +424,36 @@ export const WorkshopsView: React.FC = () => {
                     <div className="flex-1 flex flex-col justify-between space-y-3">
                       <div>
                         <div className="flex justify-between items-center">
-                          <span className="text-[10px] font-mono font-bold text-amber-400 bg-amber-500/10 px-2 py-0.5 rounded border border-amber-500/20">
+                          <span className="text-[10px] font-mono font-bold text-sky-700 dark:text-sky-400 bg-sky-50 dark:bg-sky-950/80 px-2 py-0.5 rounded border border-sky-200 dark:border-sky-800">
                             ID: {reg.id}
                           </span>
                           <span
-                            className={`text-[10px] font-bold uppercase tracking-wide px-2 py-0.5 rounded-full ${
+                            className={`text-[10px] font-bold uppercase tracking-wide px-2.5 py-0.5 rounded-full ${
                               reg.status === 'confirmed'
-                                ? 'bg-emerald-500/10 text-emerald-400 border border-emerald-500/20'
+                                ? 'bg-emerald-100 text-emerald-800 dark:bg-emerald-950/80 dark:text-emerald-300 border border-emerald-200'
                                 : reg.status === 'waitlisted'
-                                ? 'bg-amber-500/10 text-amber-300 border border-amber-500/20'
+                                ? 'bg-amber-100 text-amber-800 dark:bg-amber-950/80 dark:text-amber-300 border border-amber-200'
                                 : reg.status === 'attended'
-                                ? 'bg-blue-500/10 text-blue-400 border border-blue-500/20'
-                                : 'bg-slate-800 text-slate-400'
+                                ? 'bg-sky-100 text-sky-800 dark:bg-sky-950/80 dark:text-sky-300 border border-sky-200'
+                                : 'bg-slate-200 text-slate-700 dark:bg-slate-800 dark:text-slate-400'
                             }`}
                           >
                             {reg.status}
                           </span>
                         </div>
 
-                        <h4 className="text-sm font-bold text-white mt-2 line-clamp-1">
+                        <h4 className="text-sm font-bold text-slate-900 dark:text-white mt-2 line-clamp-1">
                           {targetWs?.title || 'Educational Workshop'}
                         </h4>
-                        <p className="text-xs text-slate-400">{reg.customerName}</p>
+                        <p className="text-xs text-slate-500 dark:text-slate-400">{reg.customerName}</p>
 
-                        <div className="grid grid-cols-2 gap-2 text-[11px] text-slate-400 mt-2.5 pt-2.5 border-t border-slate-800">
+                        <div className="grid grid-cols-2 gap-2 text-[11px] text-slate-600 dark:text-slate-400 mt-2.5 pt-2.5 border-t border-slate-100 dark:border-slate-800">
                           <div className="flex items-center gap-1">
-                            <Calendar className="w-3.5 h-3.5 text-slate-500 shrink-0" />
+                            <Calendar className="w-3.5 h-3.5 text-slate-400 shrink-0" />
                             <span>{targetWs?.scheduledDate}</span>
                           </div>
                           <div className="flex items-center gap-1">
-                            <Clock className="w-3.5 h-3.5 text-slate-500 shrink-0" />
+                            <Clock className="w-3.5 h-3.5 text-slate-400 shrink-0" />
                             <span>{targetWs?.scheduledTime}</span>
                           </div>
                         </div>
@@ -463,15 +463,15 @@ export const WorkshopsView: React.FC = () => {
                         {isStaff && reg.status === 'confirmed' && (
                           <button
                             onClick={() => prefillScan(reg)}
-                            className="flex-1 py-1.5 px-3 bg-slate-800 hover:bg-slate-700 text-xs font-bold text-amber-400 rounded-lg flex items-center justify-center gap-1.5 transition"
+                            className="flex-1 py-2 px-3 bg-sky-50 dark:bg-sky-950/60 hover:bg-sky-100 dark:hover:bg-sky-900/60 text-xs font-bold text-sky-700 dark:text-sky-300 rounded-xl flex items-center justify-center gap-1.5 border border-sky-200 dark:border-sky-800 transition cursor-pointer"
                           >
                             <ScanLine className="w-3.5 h-3.5" />
                             Test QR Check-in
                           </button>
                         )}
                         <span className="text-[9px] text-slate-500 flex items-center gap-1">
-                          <Lock className="w-3 h-3 text-emerald-400" />
-                          HMAC-SHA256 Secured
+                          <Lock className="w-3 h-3 text-sky-600 dark:text-sky-400" />
+                          HMAC-SHA256
                         </span>
                       </div>
                     </div>
@@ -485,12 +485,14 @@ export const WorkshopsView: React.FC = () => {
 
       {/* Staff QR Check-in Simulator */}
       {activeTab === 'scanner' && isStaff && (
-        <div className="bg-slate-900 border border-slate-800 rounded-2xl p-6 sm:p-8 max-w-2xl mx-auto space-y-6">
-          <div className="flex items-center gap-2">
-            <ScanLine className="w-6 h-6 text-amber-400" />
+        <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-3xl p-6 sm:p-8 max-w-2xl mx-auto space-y-6 shadow-md">
+          <div className="flex items-center gap-3">
+            <div className="w-10 h-10 rounded-2xl bg-sky-100 dark:bg-sky-950 text-sky-700 dark:text-sky-400 flex items-center justify-center">
+              <ScanLine className="w-6 h-6" />
+            </div>
             <div>
-              <h3 className="text-base font-bold text-white">Staff Mobile QR Scanner & Check-in Simulator</h3>
-              <p className="text-xs text-slate-400">
+              <h3 className="text-base font-bold text-slate-900 dark:text-white">Staff Mobile QR Scanner & Verification</h3>
+              <p className="text-xs text-slate-500 dark:text-slate-400">
                 Authorized staff role detected. Re-evaluates HMAC signatures on the server to prevent attendance forgery.
               </p>
             </div>
@@ -499,24 +501,24 @@ export const WorkshopsView: React.FC = () => {
           <form onSubmit={handleCheckIn} className="space-y-4 text-xs">
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
               <div>
-                <label className="text-xs font-semibold text-slate-400 block mb-1">Pass Registration ID</label>
+                <label className="text-xs font-semibold text-slate-700 dark:text-slate-300 block mb-1">Pass Registration ID</label>
                 <input
                   type="text"
                   value={scanRegId}
                   onChange={(e) => setScanRegId(e.target.value)}
                   placeholder="e.g. REG-1234-5678"
-                  className="w-full px-3 py-2 bg-slate-950 border border-slate-700 rounded-lg text-white font-mono"
+                  className="w-full px-3.5 py-2.5 bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-700 rounded-xl text-slate-900 dark:text-white font-mono"
                   required
                 />
               </div>
               <div>
-                <label className="text-xs font-semibold text-slate-400 block mb-1">Pass Cryptographic Signature</label>
+                <label className="text-xs font-semibold text-slate-700 dark:text-slate-300 block mb-1">Pass Cryptographic Signature</label>
                 <input
                   type="text"
                   value={scanSignature}
                   onChange={(e) => setScanSignature(e.target.value)}
                   placeholder="64-character SHA256 signature"
-                  className="w-full px-3 py-2 bg-slate-950 border border-slate-700 rounded-lg text-white font-mono text-[10px]"
+                  className="w-full px-3.5 py-2.5 bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-700 rounded-xl text-slate-900 dark:text-white font-mono text-[10px]"
                   required
                 />
               </div>
@@ -525,7 +527,7 @@ export const WorkshopsView: React.FC = () => {
             <button
               type="submit"
               disabled={scanLoading}
-              className="w-full py-2.5 bg-amber-500 hover:bg-amber-400 text-slate-950 font-bold rounded-xl transition flex items-center justify-center gap-2"
+              className="w-full py-3 bg-sky-600 hover:bg-sky-700 text-white font-bold rounded-xl transition flex items-center justify-center gap-2 shadow-md cursor-pointer"
             >
               <ShieldCheck className="w-4 h-4" />
               {scanLoading ? 'Verifying Pass Signature...' : 'Scan & Record Check-In'}
@@ -534,25 +536,25 @@ export const WorkshopsView: React.FC = () => {
 
           {scanResult && (
             <div
-              className={`p-4 rounded-xl border space-y-2 text-xs ${
+              className={`p-4 rounded-2xl border space-y-2 text-xs ${
                 scanResult.success
-                  ? 'bg-emerald-950/30 border-emerald-500/30 text-emerald-300'
-                  : 'bg-red-950/30 border-red-500/30 text-red-300'
+                  ? 'bg-emerald-50 dark:bg-emerald-950/30 border-emerald-200 dark:border-emerald-500/30 text-emerald-800 dark:text-emerald-300'
+                  : 'bg-red-50 dark:bg-red-950/30 border-red-200 dark:border-red-500/30 text-red-800 dark:text-red-300'
               }`}
             >
               <div className="font-bold flex items-center gap-1.5">
                 {scanResult.success ? (
-                  <CheckCircle className="w-4 h-4 text-emerald-400" />
+                  <CheckCircle className="w-4 h-4 text-emerald-600 dark:text-emerald-400" />
                 ) : (
-                  <AlertTriangle className="w-4 h-4 text-red-400" />
+                  <AlertTriangle className="w-4 h-4 text-red-600 dark:text-red-400" />
                 )}
                 <span>{scanResult.success ? 'Attendance Verified' : 'Check-In Refused'}</span>
               </div>
-              <p className="text-[11px] text-slate-300">{scanResult.message}</p>
+              <p className="text-[11px] text-slate-700 dark:text-slate-300">{scanResult.message}</p>
               {scanResult.registration && (
-                <div className="p-3 bg-slate-950/60 rounded border border-slate-800 text-[10px] font-mono text-slate-400 space-y-1 mt-2">
-                  <div>Participant: {scanResult.registration.customerName}</div>
-                  <div>Status: <span className="text-emerald-400 font-bold uppercase">{scanResult.registration.status}</span></div>
+                <div className="p-3.5 bg-white dark:bg-slate-950/60 rounded-xl border border-slate-200 dark:border-slate-800 text-[10px] font-mono text-slate-600 dark:text-slate-400 space-y-1 mt-2">
+                  <div>Participant: <span className="font-bold text-slate-900 dark:text-white">{scanResult.registration.customerName}</span></div>
+                  <div>Status: <span className="text-emerald-600 dark:text-emerald-400 font-bold uppercase">{scanResult.registration.status}</span></div>
                   <div className="break-all">Signature: {scanResult.registration.signature}</div>
                 </div>
               )}

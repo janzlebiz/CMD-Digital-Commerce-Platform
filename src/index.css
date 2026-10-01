@@ -1,7 +1,40 @@
 @import "tailwindcss";
 
 @layer base {
+  :root {
+    --font-scale: 1;
+  }
+
+  :root[data-font-size="normal"] {
+    --font-scale: 1;
+    font-size: 16px;
+  }
+
+  :root[data-font-size="large"] {
+    --font-scale: 1.125;
+    font-size: 18px;
+  }
+
+  :root[data-font-size="xlarge"] {
+    --font-scale: 1.25;
+    font-size: 20px;
+  }
+
+  :root[data-font-size="huge"] {
+    --font-scale: 1.5;
+    font-size: 24px;
+  }
+
+  html {
+    scroll-behavior: smooth;
+  }
+
   body {
+    transition: background-color 0.2s ease, color 0.2s ease;
+    @apply bg-slate-50 text-slate-800 antialiased font-sans;
+  }
+
+  html.dark body {
     @apply bg-slate-950 text-slate-100;
   }
 }
