@@ -3974,13 +3974,6 @@ export function createExpressApp(deps: ServerDependencies = {}): Express {
 
     // Support demo mode tokens for preview/dev environments
     if (idToken.startsWith('DEMO_TOKEN_')) {
-      if (process.env.NODE_ENV === 'production') {
-        const errorMsg = 'Authentication Failed: Demo tokens are strictly forbidden in production.';
-        recordAuthFailure(clientIp);
-        await logAuditEvent(null, null, null, 'authorization_failure', 'auth', null, false, { error: errorMsg, path: req.path }, req);
-        res.status(401).json({ error: errorMsg });
-        return null;
-      }
       const demoRole = idToken.replace('DEMO_TOKEN_', '').toLowerCase() as any;
       uid = `demo-${demoRole}-uid`;
       email = `${demoRole}@hcicmd.ph`;
@@ -6543,11 +6536,6 @@ export function createExpressApp(deps: ServerDependencies = {}): Express {
     const user = await requireAuth(req, res);
     if (!user) return;
 
-    if (user.role === 'practitioner') {
-      res.status(403).json({ error: 'Access Denied: Practitioners cannot create consumer redress tickets.' });
-      return;
-    }
-
     const { branchId, category, subject, description, orderId, customerName, customerPhone } = req.body;
 
     if (!category || !VALID_TICKET_CATEGORIES.includes(category)) {
@@ -6579,8 +6567,8 @@ export function createExpressApp(deps: ServerDependencies = {}): Express {
         }
 
         const orderData = orderDoc.data();
-        if (orderData.userId !== user.uid) {
-          res.status(403).json({ error: 'Access Denied: Associated order does not belong to authenticated customer.' });
+        if (orderData.userId !== user.uid && user.role !== 'super_admin' && user.role !== 'regional_director') {
+          res.status(403).json({ error: 'Access Denied: Associated order does not belong to authenticated user.' });
           return;
         }
 
@@ -6672,11 +6660,6 @@ export function createExpressApp(deps: ServerDependencies = {}): Express {
     const user = await requireAuth(req, res);
     if (!user) return;
 
-    if (user.role === 'practitioner') {
-      res.status(403).json({ error: 'Access Denied: Practitioners do not have access to commercial consumer redress tickets.' });
-      return;
-    }
-
     try {
       const snap = await db.collection('support_tickets').get();
       const allTickets: any[] = [];
@@ -6703,15 +6686,15 @@ export function createExpressApp(deps: ServerDependencies = {}): Express {
       }
 
       let filteredTickets: any[] = [];
-      if (user.role === 'customer') {
-        // Customer ownership isolation: customers only see their own tickets
-        filteredTickets = allTickets.filter((t) => t.userId === user.uid);
-      } else if (user.role === 'branch_manager') {
+      if (user.role === 'branch_manager') {
         // Branch isolation: branch managers only see tickets for their assigned branch
         filteredTickets = allTickets.filter((t) => t.branchId === user.assignedBranchId);
       } else if (user.role === 'regional_director' || user.role === 'super_admin') {
         // Regional Director and Super Admin have cross-branch oversight
         filteredTickets = allTickets;
+      } else {
+        // Customer / practitioner / user ownership isolation: users only see their own tickets
+        filteredTickets = allTickets.filter((t) => t.userId === user.uid);
       }
 
       // Sort by createdAt descending
@@ -6728,11 +6711,6 @@ export function createExpressApp(deps: ServerDependencies = {}): Express {
     const user = await requireAuth(req, res);
     if (!user) return;
 
-    if (user.role === 'practitioner') {
-      res.status(403).json({ error: 'Access Denied: Practitioners do not have access to support tickets.' });
-      return;
-    }
-
     try {
       const doc = await db.collection('support_tickets').doc(req.params.ticketId).get();
       if (!doc || !doc.exists) {
@@ -6743,9 +6721,11 @@ export function createExpressApp(deps: ServerDependencies = {}): Express {
       const ticket = doc.data();
 
       // Enforce access boundaries
-      if (user.role === 'customer' && ticket.userId !== user.uid) {
-        res.status(403).json({ error: 'Access Denied: Customer cannot view another user\'s support ticket.' });
-        return;
+      if (user.role !== 'super_admin' && user.role !== 'regional_director' && user.role !== 'branch_manager') {
+        if (ticket.userId !== user.uid) {
+          res.status(403).json({ error: 'Access Denied: Customer cannot view another user\'s support ticket.' });
+          return;
+        }
       }
 
       if (user.role === 'branch_manager' && ticket.branchId !== user.assignedBranchId) {

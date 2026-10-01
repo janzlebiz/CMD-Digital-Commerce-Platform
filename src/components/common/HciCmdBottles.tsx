@@ -88,18 +88,18 @@ export const HciCmdBottles: React.FC<HciCmdBottlesProps> = ({
     </g>
   );
 
-  // 65 mL Flagship Bottle + 3D Packaging Box (Using authentic CMD65.png)
+  // 65 mL Flagship Bottle + 3D Packaging Box (Using authentic CMD_65ml_product_transparent.webp)
   if (variant === 'bottle-65ml') {
     return (
       <div className={`relative flex items-center justify-center select-none ${className}`}>
         <img
-          src="/CMD65.png?v=clean_v2"
+          src="/CMD_65ml_product_transparent.webp"
           alt="HCI Cell Mineral Drops (CMD) 65 mL Flagship Bottle"
           className="w-full h-full max-h-[390px] object-contain drop-shadow-2xl transition-transform duration-300 hover:scale-105"
           loading="eager"
           decoding="async"
           onError={(e) => {
-            (e.target as HTMLImageElement).src = '/CMD65ml.png?v=clean_v2';
+            (e.target as HTMLImageElement).src = '/CMD_65ml_product.webp';
           }}
           referrerPolicy="no-referrer"
         />
@@ -107,18 +107,18 @@ export const HciCmdBottles: React.FC<HciCmdBottlesProps> = ({
     );
   }
 
-  // 30 mL Compact Bottle + Packaging Box (Using authentic CMD30.png)
+  // 30 mL Compact Bottle + Packaging Box (Using authentic CMD_30ml_product_transparent.webp)
   if (variant === 'bottle-30ml') {
     return (
       <div className={`relative flex items-center justify-center select-none ${className}`}>
         <img
-          src="/CMD30.png?v=clean_v2"
+          src="/CMD_30ml_product_transparent.webp"
           alt="HCI Cell Mineral Drops (CMD) 30 mL Compact Bottle"
           className="w-full h-full max-h-[390px] object-contain drop-shadow-2xl transition-transform duration-300 hover:scale-105"
           loading="eager"
           decoding="async"
           onError={(e) => {
-            (e.target as HTMLImageElement).src = '/CMD30ml.png?v=clean_v2';
+            (e.target as HTMLImageElement).src = '/CMD_30ml_product.webp';
           }}
           referrerPolicy="no-referrer"
         />
@@ -169,13 +169,13 @@ export const HciCmdBottles: React.FC<HciCmdBottlesProps> = ({
               {/* 30mL Pack */}
               <div className="relative group w-[45%] flex flex-col items-center transition-transform duration-300 hover:scale-105 cursor-pointer">
                 <img
-                  src="/CMD30.png?v=clean_v2"
+                  src="/CMD_30ml_product_transparent.webp"
                   alt="HCI CMD 30mL Compact Travel Edition"
                   className="w-full h-auto max-h-[260px] sm:max-h-[310px] object-contain drop-shadow-[0_20px_25px_rgba(0,0,0,0.45)] select-none"
                   loading="eager"
                   decoding="async"
                   onError={(e) => {
-                    (e.target as HTMLImageElement).src = '/CMD30ml.png?v=clean_v2';
+                    (e.target as HTMLImageElement).src = '/CMD_30ml_product.webp';
                   }}
                   referrerPolicy="no-referrer"
                 />
@@ -187,13 +187,13 @@ export const HciCmdBottles: React.FC<HciCmdBottlesProps> = ({
               {/* 65mL Pack */}
               <div className="relative group w-[52%] flex flex-col items-center transition-transform duration-300 hover:scale-105 cursor-pointer">
                 <img
-                  src="/CMD65.png?v=clean_v2"
+                  src="/CMD_65ml_product_transparent.webp"
                   alt="HCI CMD 65mL Flagship Family Edition"
                   className="w-full h-auto max-h-[300px] sm:max-h-[360px] object-contain drop-shadow-[0_25px_30px_rgba(0,0,0,0.5)] select-none"
                   loading="eager"
                   decoding="async"
                   onError={(e) => {
-                    (e.target as HTMLImageElement).src = '/CMD65ml.png?v=clean_v2';
+                    (e.target as HTMLImageElement).src = '/CMD_65ml_product.webp';
                   }}
                   referrerPolicy="no-referrer"
                 />
