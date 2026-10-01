@@ -1,8 +1,15 @@
 @import "tailwindcss";
 
+@variant dark (&:where(.dark, .dark *));
+
 @layer base {
   :root {
     --font-scale: 1;
+    color-scheme: light;
+  }
+
+  :root.dark, :root[data-theme="dark"] {
+    color-scheme: dark;
   }
 
   :root[data-font-size="normal"] {
@@ -34,7 +41,7 @@
     @apply bg-slate-50 text-slate-800 antialiased font-sans;
   }
 
-  html.dark body {
+  html.dark body, body.dark {
     @apply bg-slate-950 text-slate-100;
   }
 }

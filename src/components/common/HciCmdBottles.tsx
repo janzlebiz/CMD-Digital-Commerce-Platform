@@ -15,257 +15,118 @@ export const HciCmdBottles: React.FC<HciCmdBottlesProps> = ({
   variant = 'hero',
   className = '',
 }) => {
-  // 65 mL Flagship Bottle based directly on the provided authentic photo
+  // Shared SVG Definitions for authentic lighting, gradients, drops, and boxes
+  const renderDefs = (idPrefix: string) => (
+    <defs>
+      <linearGradient id={`${idPrefix}capGrad`} x1="0" y1="0" x2="1" y2="0">
+        <stop offset="0%" stopColor="#d1d5db" />
+        <stop offset="18%" stopColor="#f8fafc" />
+        <stop offset="55%" stopColor="#ffffff" />
+        <stop offset="85%" stopColor="#f1f5f9" />
+        <stop offset="100%" stopColor="#cbd5e1" />
+      </linearGradient>
+
+      <linearGradient id={`${idPrefix}bodyGrad`} x1="0" y1="0" x2="1" y2="0">
+        <stop offset="0%" stopColor="#e2e8f0" />
+        <stop offset="14%" stopColor="#f8fafc" />
+        <stop offset="42%" stopColor="#ffffff" />
+        <stop offset="80%" stopColor="#f8fafc" />
+        <stop offset="100%" stopColor="#cbd5e1" />
+      </linearGradient>
+
+      {/* Front Box Gradient (Vibrant Cyan-Blue) */}
+      <linearGradient id={`${idPrefix}boxFrontGrad`} x1="0" y1="0" x2="1" y2="1">
+        <stop offset="0%" stopColor="#00b4d8" />
+        <stop offset="35%" stopColor="#0077b6" />
+        <stop offset="100%" stopColor="#023e8a" />
+      </linearGradient>
+
+      {/* Left 3D Box Spine Gradient (Deep Navy Blue Shadow) */}
+      <linearGradient id={`${idPrefix}boxSideGrad`} x1="0" y1="0" x2="1" y2="0">
+        <stop offset="0%" stopColor="#002855" />
+        <stop offset="60%" stopColor="#003566" />
+        <stop offset="100%" stopColor="#00509d" />
+      </linearGradient>
+
+      <linearGradient id={`${idPrefix}cyanBand`} x1="0" y1="0" x2="1" y2="0">
+        <stop offset="0%" stopColor="#0284c7" />
+        <stop offset="50%" stopColor="#38bdf8" />
+        <stop offset="100%" stopColor="#0369a1" />
+      </linearGradient>
+
+      <linearGradient id={`${idPrefix}dropGrad`} x1="0" y1="0" x2="0" y2="1">
+        <stop offset="0%" stopColor="#0033aa" />
+        <stop offset="35%" stopColor="#0055dd" />
+        <stop offset="75%" stopColor="#002288" />
+        <stop offset="100%" stopColor="#001144" />
+      </linearGradient>
+
+      <radialGradient id={`${idPrefix}dropFlare`} cx="35%" cy="30%" r="35%">
+        <stop offset="0%" stopColor="#ffffff" stopOpacity="0.95" />
+        <stop offset="50%" stopColor="#7dd3fc" stopOpacity="0.6" />
+        <stop offset="100%" stopColor="#0284c7" stopOpacity="0" />
+      </radialGradient>
+
+      <linearGradient id={`${idPrefix}glossStreak`} x1="0" y1="0" x2="0" y2="1">
+        <stop offset="0%" stopColor="#ffffff" stopOpacity="0.9" />
+        <stop offset="100%" stopColor="#ffffff" stopOpacity="0.05" />
+      </linearGradient>
+    </defs>
+  );
+
+  // Helper for rendering the GMP Quality Assured Seal
+  const renderGmpBadge = (scale = 1) => (
+    <g transform={`scale(${scale})`}>
+      <rect x="0" y="0" width="22" height="13" rx="3.5" fill="#ffffff" stroke="#0f172a" strokeWidth="0.8" />
+      <rect x="1.5" y="1.5" width="19" height="10" rx="2" fill="#0f172a" />
+      <text x="11" y="6.5" textAnchor="middle" fill="#ffffff" fontSize="4.5" fontWeight="900" fontFamily="sans-serif">
+        GMP
+      </text>
+      <text x="11" y="9.8" textAnchor="middle" fill="#ffffff" fontSize="2.2" fontWeight="700" fontFamily="sans-serif">
+        Quality Assured
+      </text>
+    </g>
+  );
+
+  // 65 mL Flagship Bottle + 3D Packaging Box (Using authentic CMD65.png)
   if (variant === 'bottle-65ml') {
     return (
       <div className={`relative flex items-center justify-center select-none ${className}`}>
-        <svg
-          viewBox="0 0 240 400"
-          className="w-full h-full max-h-[360px] drop-shadow-2xl"
-          fill="none"
-          xmlns="http://www.w3.org/2000/svg"
-        >
-          <defs>
-            <linearGradient id="capGrad65" x1="0" y1="0" x2="1" y2="0">
-              <stop offset="0%" stopColor="#e2e8f0" />
-              <stop offset="25%" stopColor="#ffffff" />
-              <stop offset="70%" stopColor="#f8fafc" />
-              <stop offset="100%" stopColor="#cbd5e1" />
-            </linearGradient>
-            <linearGradient id="bodyGrad65" x1="0" y1="0" x2="1" y2="0">
-              <stop offset="0%" stopColor="#e2e8f0" />
-              <stop offset="20%" stopColor="#ffffff" />
-              <stop offset="80%" stopColor="#ffffff" />
-              <stop offset="100%" stopColor="#cbd5e1" />
-            </linearGradient>
-            <linearGradient id="cyanBand" x1="0" y1="0" x2="1" y2="0">
-              <stop offset="0%" stopColor="#0284c7" />
-              <stop offset="50%" stopColor="#38bdf8" />
-              <stop offset="100%" stopColor="#0369a1" />
-            </linearGradient>
-            <linearGradient id="dropGradBottle" x1="0" y1="0" x2="0" y2="1">
-              <stop offset="0%" stopColor="#0044cc" />
-              <stop offset="50%" stopColor="#0066ff" />
-              <stop offset="100%" stopColor="#001a4d" />
-            </linearGradient>
-            <radialGradient id="dropFlareBottle" cx="40%" cy="35%" r="40%">
-              <stop offset="0%" stopColor="#ffffff" stopOpacity="0.9" />
-              <stop offset="50%" stopColor="#66b3ff" stopOpacity="0.5" />
-              <stop offset="100%" stopColor="#0044cc" stopOpacity="0" />
-            </radialGradient>
-            <linearGradient id="shine" x1="0" y1="0" x2="0" y2="1">
-              <stop offset="0%" stopColor="#ffffff" stopOpacity="0.75" />
-              <stop offset="100%" stopColor="#ffffff" stopOpacity="0" />
-            </linearGradient>
-          </defs>
-
-          {/* Realistic Ambient Shadow under bottle */}
-          <ellipse cx="120" cy="385" rx="75" ry="10" fill="#0f172a" fillOpacity="0.35" filter="blur(3px)" />
-
-          {/* White Snap Flip-Cap with Thumb Tab */}
-          <rect x="88" y="16" width="64" height="58" rx="8" fill="url(#capGrad65)" stroke="#94a3b8" strokeWidth="1.5" />
-          <line x1="88" y1="44" x2="152" y2="44" stroke="#94a3b8" strokeWidth="1.5" />
-          <path d="M108 40 L132 40 L128 46 L112 46 Z" fill="#e2e8f0" stroke="#94a3b8" strokeWidth="1" />
-
-          {/* Neck */}
-          <rect x="82" y="74" width="76" height="18" rx="3" fill="url(#capGrad65)" stroke="#94a3b8" strokeWidth="1.5" />
-          
-          {/* Main Cylindrical Bottle Body */}
-          <rect x="50" y="92" width="140" height="282" rx="22" fill="url(#bodyGrad65)" stroke="#94a3b8" strokeWidth="1.5" />
-
-          {/* Glossy light streak */}
-          <rect x="60" y="98" width="12" height="268" rx="6" fill="url(#shine)" />
-
-          {/* Label Container */}
-          <rect x="54" y="108" width="132" height="254" rx="10" fill="#ffffff" stroke="#e2e8f0" strokeWidth="1" />
-
-          {/* Top Cyan Banner: HCI CMD */}
-          <rect x="54" y="108" width="132" height="24" rx="4" fill="url(#cyanBand)" />
-          <text x="120" y="124" textAnchor="middle" fill="#ffffff" fontSize="11" fontWeight="900" fontFamily="sans-serif" letterSpacing="1.2">
-            HCI CMD
-          </text>
-
-          {/* Brand Logo: CELL (with green hexagon in C) */}
-          <g transform="translate(74, 137)">
-            {/* Outer Blue C */}
-            <path d="M18 6 A11 11 0 1 0 18 22" stroke="#002b80" strokeWidth="4.5" strokeLinecap="square" fill="none" />
-            {/* Inner Green Hexagon */}
-            <polygon points="11,9 15,11.5 15,16.5 11,19 7,16.5 7,11.5" fill="none" stroke="#16a34a" strokeWidth="1.8" />
-            <circle cx="11" cy="14" r="2.2" fill="#16a34a" />
-            {/* ELL */}
-            <text x="21" y="22" fill="#002b80" fontSize="17" fontWeight="900" fontFamily="sans-serif">
-              ELL
-            </text>
-            <text x="59" y="12" fill="#002b80" fontSize="7" fontWeight="900">
-              ®
-            </text>
-          </g>
-
-          {/* MINERAL DROPS under CELL */}
-          <text x="120" y="167" textAnchor="middle" fill="#002b80" fontSize="8" fontWeight="900" fontFamily="sans-serif" letterSpacing="1.8">
-            MINERAL DROPS
-          </text>
-
-          {/* CMD Water Droplet Medallion */}
-          <g transform="translate(86, 172)">
-            {/* Ripples */}
-            <ellipse cx="34" cy="46" rx="30" ry="10" stroke="#0033aa" strokeWidth="2" fill="none" />
-            <ellipse cx="34" cy="44" rx="23" ry="7.5" stroke="#38bdf8" strokeWidth="1.8" fill="none" />
-            <ellipse cx="34" cy="42" rx="17" ry="5.5" stroke="#ffffff" strokeWidth="1.5" fill="none" />
-            {/* Droplet */}
-            <path d="M34 6 C30 16, 17 26, 17 36 A17 17 0 0 0 51 36 C51 26, 38 16, 34 6 Z" fill="url(#dropGradBottle)" />
-            {/* Flare */}
-            <ellipse cx="28" cy="24" rx="9" ry="6" fill="url(#dropFlareBottle)" transform="rotate(-20 28 24)" />
-            {/* Registered ® on Drop */}
-            <circle cx="48" cy="14" r="3.2" fill="#ffffff" stroke="#0033aa" strokeWidth="0.8" />
-            <text x="48" y="15.8" textAnchor="middle" fill="#0033aa" fontSize="3.5" fontWeight="900">®</text>
-            {/* CMD Text */}
-            <text x="34" y="40" textAnchor="middle" fill="#ffffff" fontSize="11" fontWeight="900" fontFamily="sans-serif">CMD</text>
-          </g>
-
-          {/* Product Descriptions */}
-          <text x="120" y="240" textAnchor="middle" fill="#0f172a" fontSize="7.8" fontWeight="900" fontFamily="sans-serif" letterSpacing="0.4">
-            IONIC MINERAL CONCENTRATE
-          </text>
-          <text x="120" y="253" textAnchor="middle" fill="#dc2626" fontSize="7.8" fontWeight="900" fontFamily="sans-serif">
-            FOOD SUPPLEMENT
-          </text>
-          <text x="120" y="264" textAnchor="middle" fill="#0f172a" fontSize="6" fontWeight="900" fontFamily="sans-serif">
-            NO APPROVED THERAPEUTIC CLAIMS
-          </text>
-
-          {/* Origin & Certificates with Red Star */}
-          <g transform="translate(68, 273)">
-            <text x="5" y="6" fill="#dc2626" fontSize="8" fontWeight="900">★</text>
-            <text x="52" y="5" textAnchor="middle" fill="#0033aa" fontSize="5.5" fontWeight="800" fontFamily="sans-serif">
-              From Great Salt Lake
-            </text>
-            <text x="52" y="12" textAnchor="middle" fill="#0033aa" fontSize="5.5" fontWeight="800" fontFamily="sans-serif">
-              Product of USA
-            </text>
-            <text x="96" y="6" fill="#059669" fontSize="6" fontWeight="900">حلال</text>
-          </g>
-
-          {/* Bottom Cyan Band: NET 65mL (1080 drops) */}
-          <rect x="54" y="330" width="132" height="32" rx="4" fill="url(#cyanBand)" />
-          <text x="120" y="350" textAnchor="middle" fill="#ffffff" fontSize="10.5" fontWeight="900" fontFamily="sans-serif">
-            NET 65mL (1080 drops)
-          </text>
-        </svg>
+        <img
+          src="/CMD65.png?v=clean_v2"
+          alt="HCI Cell Mineral Drops (CMD) 65 mL Flagship Bottle"
+          className="w-full h-full max-h-[390px] object-contain drop-shadow-2xl transition-transform duration-300 hover:scale-105"
+          loading="eager"
+          decoding="async"
+          onError={(e) => {
+            (e.target as HTMLImageElement).src = '/CMD65ml.png?v=clean_v2';
+          }}
+          referrerPolicy="no-referrer"
+        />
       </div>
     );
   }
 
-  // 30 mL Compact Bottle based directly on the provided authentic photo
+  // 30 mL Compact Bottle + Packaging Box (Using authentic CMD30.png)
   if (variant === 'bottle-30ml') {
     return (
       <div className={`relative flex items-center justify-center select-none ${className}`}>
-        <svg
-          viewBox="0 0 200 340"
-          className="w-full h-full max-h-[300px] drop-shadow-2xl"
-          fill="none"
-          xmlns="http://www.w3.org/2000/svg"
-        >
-          <defs>
-            <linearGradient id="capGrad30" x1="0" y1="0" x2="1" y2="0">
-              <stop offset="0%" stopColor="#e2e8f0" />
-              <stop offset="25%" stopColor="#ffffff" />
-              <stop offset="70%" stopColor="#f8fafc" />
-              <stop offset="100%" stopColor="#cbd5e1" />
-            </linearGradient>
-            <linearGradient id="bodyGrad30" x1="0" y1="0" x2="1" y2="0">
-              <stop offset="0%" stopColor="#e2e8f0" />
-              <stop offset="20%" stopColor="#ffffff" />
-              <stop offset="80%" stopColor="#ffffff" />
-              <stop offset="100%" stopColor="#cbd5e1" />
-            </linearGradient>
-            <linearGradient id="cyanBand30" x1="0" y1="0" x2="1" y2="0">
-              <stop offset="0%" stopColor="#0284c7" />
-              <stop offset="50%" stopColor="#38bdf8" />
-              <stop offset="100%" stopColor="#0369a1" />
-            </linearGradient>
-            <linearGradient id="dropGrad30" x1="0" y1="0" x2="0" y2="1">
-              <stop offset="0%" stopColor="#0044cc" />
-              <stop offset="50%" stopColor="#0066ff" />
-              <stop offset="100%" stopColor="#001a4d" />
-            </linearGradient>
-          </defs>
-
-          {/* Ambient Shadow */}
-          <ellipse cx="100" cy="328" rx="60" ry="8" fill="#0f172a" fillOpacity="0.35" filter="blur(3px)" />
-
-          {/* Cap */}
-          <rect x="74" y="14" width="52" height="48" rx="7" fill="url(#capGrad30)" stroke="#94a3b8" strokeWidth="1.5" />
-          <line x1="74" y1="38" x2="126" y2="38" stroke="#94a3b8" strokeWidth="1.5" />
-          <path d="M92 34 L108 34 L105 39 L95 39 Z" fill="#e2e8f0" stroke="#94a3b8" strokeWidth="1" />
-
-          {/* Neck */}
-          <rect x="68" y="62" width="64" height="15" rx="3" fill="url(#capGrad30)" stroke="#94a3b8" strokeWidth="1.5" />
-          
-          {/* Main Body */}
-          <rect x="42" y="77" width="116" height="240" rx="18" fill="url(#bodyGrad30)" stroke="#94a3b8" strokeWidth="1.5" />
-
-          {/* Label */}
-          <rect x="46" y="90" width="108" height="216" rx="8" fill="#ffffff" stroke="#e2e8f0" strokeWidth="1" />
-
-          {/* Top Cyan Band */}
-          <rect x="46" y="90" width="108" height="20" rx="3" fill="url(#cyanBand30)" />
-          <text x="100" y="104" textAnchor="middle" fill="#ffffff" fontSize="9.5" fontWeight="900" fontFamily="sans-serif">
-            HCI CMD
-          </text>
-
-          {/* Brand Logo: CELL (with green hexagon in C) */}
-          <g transform="translate(62, 115)">
-            <path d="M15 5 A9 9 0 1 0 15 18" stroke="#002b80" strokeWidth="3.8" strokeLinecap="square" fill="none" />
-            <polygon points="9,7.5 12.5,9.5 12.5,13.5 9,15.5 5.5,13.5 5.5,9.5" fill="none" stroke="#16a34a" strokeWidth="1.5" />
-            <circle cx="9" cy="11.5" r="1.8" fill="#16a34a" />
-            <text x="17" y="18" fill="#002b80" fontSize="14" fontWeight="900" fontFamily="sans-serif">
-              ELL
-            </text>
-            <text x="49" y="10" fill="#002b80" fontSize="6" fontWeight="900">
-              ®
-            </text>
-          </g>
-
-          <text x="100" y="140" textAnchor="middle" fill="#002b80" fontSize="7" fontWeight="900" fontFamily="sans-serif" letterSpacing="1.4">
-            MINERAL DROPS
-          </text>
-
-          {/* CMD Droplet */}
-          <g transform="translate(73, 144)">
-            <ellipse cx="27" cy="37" rx="23" ry="8" stroke="#0033aa" strokeWidth="1.6" fill="none" />
-            <ellipse cx="27" cy="35" rx="18" ry="6" stroke="#38bdf8" strokeWidth="1.5" fill="none" />
-            <path d="M27 5 C24 13, 13 21, 13 29 A14 14 0 0 0 41 29 C41 21, 30 13, 27 5 Z" fill="url(#dropGrad30)" />
-            <circle cx="38" cy="11" r="2.5" fill="#ffffff" stroke="#0033aa" strokeWidth="0.7" />
-            <text x="38" y="12.5" textAnchor="middle" fill="#0033aa" fontSize="2.8" fontWeight="900">®</text>
-            <text x="27" y="32" textAnchor="middle" fill="#ffffff" fontSize="9" fontWeight="900" fontFamily="sans-serif">CMD</text>
-          </g>
-
-          <text x="100" y="200" textAnchor="middle" fill="#0f172a" fontSize="6.8" fontWeight="900" fontFamily="sans-serif">
-            IONIC MINERAL CONCENTRATE
-          </text>
-          <text x="100" y="211" textAnchor="middle" fill="#dc2626" fontSize="6.8" fontWeight="900" fontFamily="sans-serif">
-            FOOD SUPPLEMENT
-          </text>
-          <text x="100" y="221" textAnchor="middle" fill="#0f172a" fontSize="5.2" fontWeight="900" fontFamily="sans-serif">
-            NO APPROVED THERAPEUTIC CLAIMS
-          </text>
-
-          <text x="100" y="233" textAnchor="middle" fill="#0033aa" fontSize="4.8" fontWeight="800" fontFamily="sans-serif">
-            ★ From Great Salt Lake • Product of USA ★
-          </text>
-
-          {/* Bottom Band */}
-          <rect x="46" y="272" width="108" height="28" rx="3" fill="url(#cyanBand30)" />
-          <text x="100" y="290" textAnchor="middle" fill="#ffffff" fontSize="9" fontWeight="900" fontFamily="sans-serif">
-            NET 30mL (500 drops)
-          </text>
-        </svg>
+        <img
+          src="/CMD30.png?v=clean_v2"
+          alt="HCI Cell Mineral Drops (CMD) 30 mL Compact Bottle"
+          className="w-full h-full max-h-[390px] object-contain drop-shadow-2xl transition-transform duration-300 hover:scale-105"
+          loading="eager"
+          decoding="async"
+          onError={(e) => {
+            (e.target as HTMLImageElement).src = '/CMD30ml.png?v=clean_v2';
+          }}
+          referrerPolicy="no-referrer"
+        />
       </div>
     );
   }
 
-  // Dual/Hero showcase
+  // Dual / Hero presentation side-by-side matching the user provided images
   return (
     <div className={`relative w-full overflow-hidden select-none ${className}`}>
       {/* Background Atmosphere & Mineral Lake Water Graphic */}
@@ -302,33 +163,48 @@ export const HciCmdBottles: React.FC<HciCmdBottlesProps> = ({
 
         {/* Content Showcase Grid */}
         <div className="relative z-10 grid grid-cols-1 lg:grid-cols-12 gap-8 items-center">
-          {/* Left: Authentic HCI CMD Bottles (65mL & 30mL) */}
+          {/* Left: Authentic HCI CMD Complete Product Photo Setup (30mL on Left + 65mL on Right) */}
           <div className="lg:col-span-5 flex flex-col items-center justify-center relative">
-            {/* Twin Original Bottles Container */}
-            <div className="relative flex items-end justify-center gap-2 sm:gap-4 py-4 w-full max-w-sm">
-              {/* 65mL Flagship Bottle */}
-              <div className="w-1/2 max-w-[175px] transform hover:scale-105 transition-transform duration-300">
-                <HciCmdBottles variant="bottle-65ml" />
-                <div className="text-center mt-2">
-                  <span className="inline-block bg-white/95 dark:bg-slate-900/90 text-sky-900 dark:text-sky-300 text-[11px] font-extrabold px-3 py-1 rounded-full shadow-md border border-sky-200 dark:border-sky-700">
-                    65 mL (1,080 Drops)
-                  </span>
-                </div>
+            <div className="relative w-full max-w-lg py-2 sm:py-4 flex items-end justify-center gap-3 sm:gap-6">
+              {/* 30mL Pack */}
+              <div className="relative group w-[45%] flex flex-col items-center transition-transform duration-300 hover:scale-105 cursor-pointer">
+                <img
+                  src="/CMD30.png?v=clean_v2"
+                  alt="HCI CMD 30mL Compact Travel Edition"
+                  className="w-full h-auto max-h-[260px] sm:max-h-[310px] object-contain drop-shadow-[0_20px_25px_rgba(0,0,0,0.45)] select-none"
+                  loading="eager"
+                  decoding="async"
+                  onError={(e) => {
+                    (e.target as HTMLImageElement).src = '/CMD30ml.png?v=clean_v2';
+                  }}
+                  referrerPolicy="no-referrer"
+                />
+                <span className="mt-2 text-[10px] sm:text-xs font-bold px-2.5 py-0.5 rounded-full bg-slate-950/80 text-cyan-200 border border-cyan-400/30 backdrop-blur-md shadow-sm">
+                  30mL (500 Drops)
+                </span>
               </div>
 
-              {/* 30mL Travel Bottle */}
-              <div className="w-2/5 max-w-[145px] transform hover:scale-105 transition-transform duration-300">
-                <HciCmdBottles variant="bottle-30ml" />
-                <div className="text-center mt-2">
-                  <span className="inline-block bg-white/95 dark:bg-slate-900/90 text-sky-900 dark:text-sky-300 text-[11px] font-extrabold px-3 py-1 rounded-full shadow-md border border-sky-200 dark:border-sky-700">
-                    30 mL (500 Drops)
-                  </span>
-                </div>
+              {/* 65mL Pack */}
+              <div className="relative group w-[52%] flex flex-col items-center transition-transform duration-300 hover:scale-105 cursor-pointer">
+                <img
+                  src="/CMD65.png?v=clean_v2"
+                  alt="HCI CMD 65mL Flagship Family Edition"
+                  className="w-full h-auto max-h-[300px] sm:max-h-[360px] object-contain drop-shadow-[0_25px_30px_rgba(0,0,0,0.5)] select-none"
+                  loading="eager"
+                  decoding="async"
+                  onError={(e) => {
+                    (e.target as HTMLImageElement).src = '/CMD65ml.png?v=clean_v2';
+                  }}
+                  referrerPolicy="no-referrer"
+                />
+                <span className="mt-2 text-[10px] sm:text-xs font-bold px-2.5 py-0.5 rounded-full bg-slate-950/80 text-cyan-200 border border-cyan-400/30 backdrop-blur-md shadow-sm">
+                  65mL (1080 Drops)
+                </span>
               </div>
             </div>
 
-            {/* Requirement 2: Sub-badge beneath bottle presentation "From Utah's Great Salt Lake" */}
-            <div className="mt-3 flex items-center gap-2 bg-slate-950/70 backdrop-blur-md px-4 py-1.5 rounded-full text-xs font-semibold text-sky-200 border border-sky-400/30 shadow-md">
+            {/* Sub-badge beneath bottle presentation */}
+            <div className="mt-3 flex items-center gap-2 bg-slate-950/75 backdrop-blur-md px-4 py-1.5 rounded-full text-xs font-semibold text-sky-200 border border-sky-400/30 shadow-md">
               <svg className="w-4 h-4 text-cyan-400 shrink-0" viewBox="0 0 24 24" fill="currentColor">
                 <path d="M12 2C8.13 2 5 5.13 5 9c0 5.25 7 13 7 13s7-7.75 7-13c0-3.87-3.13-7-7-7zm0 9.5c-1.38 0-2.5-1.12-2.5-2.5s1.12-2.5 2.5-2.5 2.5 1.12 2.5 2.5-1.12 2.5-2.5 2.5z"/>
               </svg>
@@ -336,55 +212,55 @@ export const HciCmdBottles: React.FC<HciCmdBottlesProps> = ({
             </div>
           </div>
 
-          {/* Right: Hero Headline with Transparent Overlapping CMD Logo */}
-          <div className="lg:col-span-7 space-y-6 lg:pl-4">
-            {/* Requirement 1: Headline "CELL MINERAL DROPS" with bigger CELL, green hexagon in C, MINERAL DROPS below, and transparent CMD logo overlap */}
-            <div className="relative py-2">
-              {/* Overlapping Transparent Original CMD Logo Watermark */}
-              <div className="absolute -top-10 -right-6 sm:right-10 w-48 h-48 sm:w-64 sm:h-64 opacity-25 pointer-events-none transform -rotate-12">
-                <HciCmdLogo variant="droplet" className="w-full h-full filter drop-shadow-2xl" />
-              </div>
+          {/* Right: Hero Headline with Glowing White Water Droplet & Ripple Halo Watermark */}
+          <div className="lg:col-span-7 space-y-6 lg:pl-4 relative">
+            {/* Glowing White HCI CMD Water Droplet & Ripple Halo Watermark */}
+            <div className="absolute -top-10 -right-4 sm:right-6 w-64 h-64 sm:w-80 sm:h-80 lg:w-96 lg:h-96 opacity-40 sm:opacity-50 pointer-events-none transform -rotate-6 z-0 flex items-center justify-center">
+              <HciCmdLogo
+                variant="watermark-white"
+                className="w-full h-full filter drop-shadow-[0_0_20px_rgba(255,255,255,0.85)]"
+              />
+            </div>
 
-              {/* Top HCI Badge */}
-              <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-white/20 backdrop-blur-md text-sky-100 text-xs font-black tracking-wider uppercase mb-2 border border-white/30">
-                <span>HCI Cell Mineral Drops</span>
-              </div>
+            {/* Top HCI Badge */}
+            <div className="relative z-10 inline-flex items-center gap-2 px-3 py-1 rounded-full bg-white/20 backdrop-blur-md text-sky-100 text-xs font-black tracking-wider uppercase mb-2 border border-white/30">
+              <span>HCI Cell Mineral Drops</span>
+            </div>
 
-              {/* Main Headline */}
-              <div className="space-y-1 relative z-10">
-                {/* Big CELL with green hexagon */}
-                <div className="flex items-center gap-2 sm:gap-3 leading-none drop-shadow-lg">
-                  <div className="relative w-14 h-14 sm:w-20 sm:h-20 flex items-center justify-center shrink-0">
-                    <svg viewBox="0 0 100 100" className="w-full h-full" fill="none">
-                      <path
-                        d="M80 18 A44 44 0 1 0 80 82"
-                        stroke="#ffffff"
-                        strokeWidth="16"
-                        strokeLinecap="square"
-                        fill="none"
-                      />
-                      <polygon
-                        points="50,22 72,34 72,66 50,78 28,66 28,34"
-                        fill="none"
-                        stroke="#22c55e"
-                        strokeWidth="9"
-                      />
-                      <circle cx="50" cy="50" r="13" fill="#22c55e" />
-                    </svg>
-                  </div>
-
-                  <span className="text-5xl sm:text-7xl lg:text-8xl font-black tracking-tight text-white font-sans uppercase">
-                    ELL
-                  </span>
-                  <span className="text-xl sm:text-3xl font-black text-cyan-300 self-start -mt-2">
-                    ®
-                  </span>
+            {/* Main Headline */}
+            <div className="space-y-1 relative z-10">
+              {/* Big CELL with green hexagon */}
+              <div className="flex items-center gap-2 sm:gap-3 leading-none drop-shadow-lg">
+                <div className="relative w-14 h-14 sm:w-20 sm:h-20 flex items-center justify-center shrink-0">
+                  <svg viewBox="0 0 100 100" className="w-full h-full" fill="none">
+                    <path
+                      d="M80 18 A44 44 0 1 0 80 82"
+                      stroke="#ffffff"
+                      strokeWidth="16"
+                      strokeLinecap="square"
+                      fill="none"
+                    />
+                    <polygon
+                      points="50,22 72,34 72,66 50,78 28,66 28,34"
+                      fill="none"
+                      stroke="#22c55e"
+                      strokeWidth="9"
+                    />
+                    <circle cx="50" cy="50" r="13" fill="#22c55e" />
+                  </svg>
                 </div>
 
-                {/* MINERAL DROPS Placed Below */}
-                <div className="text-2xl sm:text-4xl lg:text-5xl font-black tracking-[0.18em] sm:tracking-[0.24em] text-cyan-200 uppercase pt-1 drop-shadow-md">
-                  MINERAL DROPS
-                </div>
+                <span className="text-5xl sm:text-7xl lg:text-8xl font-black tracking-tight text-white font-sans uppercase">
+                  ELL
+                </span>
+                <span className="text-xl sm:text-3xl font-black text-cyan-300 self-start -mt-2">
+                  ®
+                </span>
+              </div>
+
+              {/* MINERAL DROPS Placed Below */}
+              <div className="text-2xl sm:text-4xl lg:text-5xl font-black tracking-[0.18em] sm:tracking-[0.24em] text-cyan-200 uppercase pt-1 drop-shadow-md">
+                MINERAL DROPS
               </div>
             </div>
 

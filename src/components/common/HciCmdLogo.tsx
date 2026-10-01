@@ -6,7 +6,7 @@
 import React from 'react';
 
 interface HciCmdLogoProps {
-  variant?: 'full' | 'droplet' | 'wordmark';
+  variant?: 'full' | 'droplet' | 'wordmark' | 'watermark-white';
   size?: 'sm' | 'md' | 'lg' | 'xl' | 'hero';
   className?: string;
   watermark?: boolean;
@@ -18,6 +18,73 @@ export const HciCmdLogo: React.FC<HciCmdLogoProps> = ({
   className = '',
   watermark = false,
 }) => {
+  // Pure White Transparent Glowing Watermark Logo for Hero Headline
+  if (variant === 'watermark-white') {
+    return (
+      <svg
+        viewBox="0 0 160 160"
+        className={className}
+        fill="none"
+        xmlns="http://www.w3.org/2000/svg"
+      >
+        <defs>
+          <filter id="whiteGlow" x="-20%" y="-20%" width="140%" height="140%">
+            <feGaussianBlur stdDeviation="3" result="blur" />
+            <feComposite in="SourceGraphic" in2="blur" operator="over" />
+          </filter>
+        </defs>
+
+        {/* Outer White Ripple Wave 3 */}
+        <ellipse cx="80" cy="125" rx="74" ry="24" stroke="#ffffff" strokeWidth="4" fill="none" opacity="0.6" filter="url(#whiteGlow)" />
+
+        {/* Middle White Ripple Wave 2 */}
+        <ellipse cx="80" cy="121" rx="58" ry="18" stroke="#ffffff" strokeWidth="4" fill="none" opacity="0.8" filter="url(#whiteGlow)" />
+
+        {/* Inner White Ripple Wave 1 */}
+        <ellipse cx="80" cy="116" rx="42" ry="13" stroke="#ffffff" strokeWidth="3.5" fill="none" opacity="0.95" />
+
+        {/* Main White Water Droplet Shape with subtle translucent white fill */}
+        <path
+          d="M80 16 C72 40, 38 68, 38 92 A42 42 0 0 0 122 92 C122 68, 88 40, 80 16 Z"
+          fill="#ffffff"
+          fillOpacity="0.25"
+          stroke="#ffffff"
+          strokeWidth="3.5"
+          filter="url(#whiteGlow)"
+        />
+
+        {/* Glossy White Inner Highlight Curve */}
+        <path
+          d="M56 46 Q70 34 80 20"
+          stroke="#ffffff"
+          strokeWidth="3.5"
+          strokeLinecap="round"
+          fill="none"
+          opacity="0.9"
+        />
+
+        {/* Registered Symbol ® in White */}
+        <circle cx="114" cy="36" r="7.5" stroke="#ffffff" strokeWidth="1.8" fill="#ffffff" fillOpacity="0.2" />
+        <text x="114" y="40" textAnchor="middle" fill="#ffffff" fontSize="8" fontWeight="900" fontFamily="sans-serif">®</text>
+
+        {/* Bold White CMD Typography on Droplet */}
+        <text
+          x="80"
+          y="100"
+          textAnchor="middle"
+          fill="#ffffff"
+          fontSize="28"
+          fontWeight="900"
+          fontFamily="system-ui, -apple-system, sans-serif"
+          letterSpacing="1"
+          style={{ filter: 'drop-shadow(0px 2px 8px rgba(255,255,255,0.6))' }}
+        >
+          CMD
+        </text>
+      </svg>
+    );
+  }
+
   // Exact CMD Water Drop Logo with concentric ripple rings and lens flare highlight
   if (variant === 'droplet') {
     return (
@@ -139,8 +206,8 @@ export const HciCmdLogo: React.FC<HciCmdLogoProps> = ({
   return (
     <div className={`relative flex items-center gap-3 ${className}`}>
       {watermark && (
-        <div className="absolute -inset-4 opacity-15 pointer-events-none flex items-center justify-center">
-          <HciCmdLogo variant="droplet" className="w-64 h-64" />
+        <div className="absolute -inset-4 opacity-25 pointer-events-none flex items-center justify-center">
+          <HciCmdLogo variant="watermark-white" className="w-64 h-64" />
         </div>
       )}
 

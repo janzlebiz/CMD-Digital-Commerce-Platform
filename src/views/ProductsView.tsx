@@ -22,6 +22,8 @@ export const ProductsView: React.FC<ProductsViewProps> = ({ onNavigate, addToCar
       servings: '1,080 drops (45–60 day family supply)',
       price: 1200,
       variant: 'bottle-65ml' as const,
+      image: '/CMD65.png?v=clean_v2',
+      fallbackImage: '/CMD65ml.png?v=clean_v2',
       tagline: 'Standard complete cellular ionic mineral & electrolyte supply',
       description: 'Our authentic flagship bottle. High-concentration ionic trace minerals extracted naturally via 2-year solar concentration from the Great Salt Lake, Utah, USA. Ideal for households, families, and daily wellness hydration routines.',
       highlights: [
@@ -40,6 +42,8 @@ export const ProductsView: React.FC<ProductsViewProps> = ({ onNavigate, addToCar
       servings: '500 drops (20–30 day supply)',
       price: 650,
       variant: 'bottle-30ml' as const,
+      image: '/CMD30.png?v=clean_v2',
+      fallbackImage: '/CMD30ml.png?v=clean_v2',
       tagline: 'Pocket-sized travel dropper for on-the-go electrolyte balance',
       description: 'Compact and convenient travel size. Perfect for keeping in your bag, car, or office desk for instant drinking water remineralization wherever you travel in Camarines Norte.',
       highlights: [
@@ -78,8 +82,22 @@ export const ProductsView: React.FC<ProductsViewProps> = ({ onNavigate, addToCar
           >
             <div className="space-y-6">
               {/* Product Visual Area */}
-              <div className="relative h-64 sm:h-72 rounded-2xl bg-gradient-to-br from-sky-50 via-slate-50 to-sky-100 dark:from-slate-950 dark:via-slate-900 dark:to-sky-950/40 border border-sky-100 dark:border-slate-800 flex items-center justify-center overflow-hidden p-4">
-                <HciCmdBottles variant={prod.variant} className="h-full" />
+              <div className="relative h-64 sm:h-72 rounded-2xl bg-gradient-to-b from-sky-50/80 via-white to-sky-100/60 dark:from-slate-900/90 dark:via-slate-950 dark:to-sky-950/40 border border-sky-100/80 dark:border-slate-800 flex items-center justify-center overflow-hidden p-4 group">
+                {prod.image ? (
+                  <img
+                    src={prod.image}
+                    alt={prod.name}
+                    className="max-h-full max-w-full object-contain drop-shadow-[0_15px_25px_rgba(0,0,0,0.15)] dark:drop-shadow-[0_15px_30px_rgba(0,0,0,0.5)] select-none transition-transform duration-300 group-hover:scale-105"
+                    onError={(e) => {
+                      if (prod.fallbackImage) {
+                        (e.target as HTMLImageElement).src = prod.fallbackImage;
+                      }
+                    }}
+                    referrerPolicy="no-referrer"
+                  />
+                ) : (
+                  <HciCmdBottles variant={prod.variant} className="h-full" />
+                )}
 
                 <div className="absolute top-3 left-3 bg-white/95 dark:bg-slate-900/90 backdrop-blur-md border border-sky-200 dark:border-sky-800 text-sky-800 dark:text-sky-300 text-xs font-bold px-3 py-1 rounded-lg shadow-sm">
                   {prod.badge}
