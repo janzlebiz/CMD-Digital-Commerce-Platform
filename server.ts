@@ -11021,7 +11021,7 @@ async function startServer() {
     app.use((_req, res, next) => {
       res.removeHeader('X-Powered-By');
       res.setHeader('Strict-Transport-Security', 'max-age=63072000; includeSubDomains; preload');
-      res.setHeader('Content-Security-Policy', "default-src 'self'; script-src 'self' 'unsafe-inline' 'unsafe-eval'; style-src 'self' 'unsafe-inline'; font-src 'self' data:; img-src 'self' data: https:; connect-src 'self' https:;");
+      res.setHeader('Content-Security-Policy', "default-src * 'unsafe-inline' 'unsafe-eval' data: blob: https:;");
       res.setHeader('Permissions-Policy', 'camera=(), microphone=(), geolocation=()');
       res.setHeader('X-Content-Type-Options', 'nosniff');
       res.setHeader('X-Frame-Options', 'SAMEORIGIN');
