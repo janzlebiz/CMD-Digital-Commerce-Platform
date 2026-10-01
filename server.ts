@@ -3761,6 +3761,22 @@ export function createExpressApp(deps: ServerDependencies = {}): Express {
     next();
   });
 
+  // Explicit CORS Middleware with preflight support
+  app.use((req, res, next) => {
+    const origin = req.headers.origin;
+    if (origin) {
+      res.setHeader('Access-Control-Allow-Origin', origin);
+      res.setHeader('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS');
+      res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization, X-Correlation-Id, X-Request-Id');
+      res.setHeader('Access-Control-Allow-Credentials', 'true');
+    }
+    if (req.method === 'OPTIONS') {
+      res.sendStatus(204);
+      return;
+    }
+    next();
+  });
+
   // Phase 9B-1: In-Memory Rate Limiting Store & Middleware
   const rateLimitStore = new Map<string, { count: number; resetAt: number }>();
   function createRateLimiter(windowMs: number, maxRequests: number, message = 'Rate limit exceeded. Please try again later.') {
@@ -3786,6 +3802,9 @@ export function createExpressApp(deps: ServerDependencies = {}): Express {
   const standardRateLimiter = createRateLimiter(60000, 60); // 60 req/min
   const strictRateLimiter = createRateLimiter(60000, 15);    // 15 req/min for checkout & unsubscribe
   const authRateLimiter = createRateLimiter(60000, 5, 'Too many authentication attempts. Please try again later.'); // 5 req/min for auth / login brute-force protection
+
+  // Global rate limiter for API routes
+  app.use('/api/', standardRateLimiter);
 
   app.use((req, res, next) => {
     const startTime = Date.now();
