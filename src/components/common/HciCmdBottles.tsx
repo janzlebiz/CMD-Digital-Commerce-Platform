@@ -91,18 +91,22 @@ export const HciCmdBottles: React.FC<HciCmdBottlesProps> = ({
   // 65 mL Flagship Bottle + 3D Packaging Box (Using authentic CMD_65ml_product_transparent.webp)
   if (variant === 'bottle-65ml') {
     return (
-      <div className={`relative flex items-center justify-center select-none ${className}`}>
-        <img
-          src="/CMD_65ml_product_transparent.webp"
-          alt="HCI Cell Mineral Drops (CMD) 65 mL Flagship Bottle"
-          className="w-full h-full max-h-[390px] object-contain drop-shadow-2xl transition-transform duration-300 hover:scale-105"
-          loading="eager"
-          decoding="async"
-          onError={(e) => {
-            (e.target as HTMLImageElement).src = '/CMD_65ml_product.webp';
-          }}
-          referrerPolicy="no-referrer"
-        />
+      <div className={`relative flex flex-col items-center justify-center select-none ${className}`}>
+        <div className="relative group w-full flex flex-col items-center">
+          <img
+            src="/CMD_65ml_product_transparent.webp"
+            alt="HCI Cell Mineral Drops (CMD) 65 mL Flagship Bottle"
+            className="w-full h-full max-h-[360px] object-contain drop-shadow-[0_20px_30px_rgba(0,0,0,0.18)] dark:drop-shadow-[0_20px_35px_rgba(0,0,0,0.6)] transition-transform duration-300 group-hover:scale-105"
+            loading="eager"
+            decoding="async"
+            onError={(e) => {
+              (e.target as HTMLImageElement).src = '/CMD_65ml_product.webp';
+            }}
+            referrerPolicy="no-referrer"
+          />
+          {/* Grounding contact floor shadow */}
+          <div className="w-28 sm:w-36 h-3 rounded-full bg-slate-900/25 dark:bg-slate-950/70 blur-md -mt-2 pointer-events-none transition-all duration-300 group-hover:w-32 sm:group-hover:w-40 group-hover:bg-slate-900/35" />
+        </div>
       </div>
     );
   }
@@ -110,18 +114,22 @@ export const HciCmdBottles: React.FC<HciCmdBottlesProps> = ({
   // 30 mL Compact Bottle + Packaging Box (Using authentic CMD_30ml_product_transparent.webp)
   if (variant === 'bottle-30ml') {
     return (
-      <div className={`relative flex items-center justify-center select-none ${className}`}>
-        <img
-          src="/CMD_30ml_product_transparent.webp"
-          alt="HCI Cell Mineral Drops (CMD) 30 mL Compact Bottle"
-          className="w-full h-full max-h-[390px] object-contain drop-shadow-2xl transition-transform duration-300 hover:scale-105"
-          loading="eager"
-          decoding="async"
-          onError={(e) => {
-            (e.target as HTMLImageElement).src = '/CMD_30ml_product.webp';
-          }}
-          referrerPolicy="no-referrer"
-        />
+      <div className={`relative flex flex-col items-center justify-center select-none ${className}`}>
+        <div className="relative group w-full flex flex-col items-center">
+          <img
+            src="/CMD_30ml_product_transparent.webp"
+            alt="HCI Cell Mineral Drops (CMD) 30 mL Compact Bottle"
+            className="w-full h-full max-h-[320px] object-contain drop-shadow-[0_16px_25px_rgba(0,0,0,0.16)] dark:drop-shadow-[0_16px_30px_rgba(0,0,0,0.6)] transition-transform duration-300 group-hover:scale-105"
+            loading="eager"
+            decoding="async"
+            onError={(e) => {
+              (e.target as HTMLImageElement).src = '/CMD_30ml_product.webp';
+            }}
+            referrerPolicy="no-referrer"
+          />
+          {/* Grounding contact floor shadow */}
+          <div className="w-24 sm:w-28 h-2.5 rounded-full bg-slate-900/25 dark:bg-slate-950/70 blur-md -mt-2 pointer-events-none transition-all duration-300 group-hover:w-28 sm:group-hover:w-32 group-hover:bg-slate-900/35" />
+        </div>
       </div>
     );
   }
@@ -163,52 +171,64 @@ export const HciCmdBottles: React.FC<HciCmdBottlesProps> = ({
 
         {/* Content Showcase Grid */}
         <div className="relative z-10 grid grid-cols-1 lg:grid-cols-12 gap-8 items-center">
-          {/* Left: Authentic HCI CMD Complete Product Photo Setup (30mL on Left + 65mL on Right) */}
+          {/* Left: Authentic HCI CMD Complete Product Photo Setup on Studio Frosted Pedestal */}
           <div className="lg:col-span-5 flex flex-col items-center justify-center relative">
-            <div className="relative w-full max-w-lg py-2 sm:py-4 flex items-end justify-center gap-3 sm:gap-6">
-              {/* 30mL Pack */}
-              <div className="relative group w-[45%] flex flex-col items-center transition-transform duration-300 hover:scale-105 cursor-pointer">
-                <img
-                  src="/CMD_30ml_product_transparent.webp"
-                  alt="HCI CMD 30mL Compact Travel Edition"
-                  className="w-full h-auto max-h-[260px] sm:max-h-[310px] object-contain drop-shadow-[0_20px_25px_rgba(0,0,0,0.45)] select-none"
-                  loading="eager"
-                  decoding="async"
-                  onError={(e) => {
-                    (e.target as HTMLImageElement).src = '/CMD_30ml_product.webp';
-                  }}
-                  referrerPolicy="no-referrer"
-                />
-                <span className="mt-2 text-[10px] sm:text-xs font-bold px-2.5 py-0.5 rounded-full bg-slate-950/80 text-cyan-200 border border-cyan-400/30 backdrop-blur-md shadow-sm">
-                  30mL (500 Drops)
-                </span>
-              </div>
+            {/* Unified Studio Frosted Pedestal Pad */}
+            <div className="relative w-full max-w-lg rounded-3xl bg-white/10 dark:bg-slate-950/40 backdrop-blur-md border border-white/20 dark:border-sky-500/20 p-4 sm:p-6 shadow-2xl overflow-hidden">
+              {/* Internal Studio Lighting Radial Glow */}
+              <div className="absolute inset-0 bg-radial from-white/20 via-sky-400/10 to-transparent pointer-events-none" />
 
-              {/* 65mL Pack */}
-              <div className="relative group w-[52%] flex flex-col items-center transition-transform duration-300 hover:scale-105 cursor-pointer">
-                <img
-                  src="/CMD_65ml_product_transparent.webp"
-                  alt="HCI CMD 65mL Flagship Family Edition"
-                  className="w-full h-auto max-h-[300px] sm:max-h-[360px] object-contain drop-shadow-[0_25px_30px_rgba(0,0,0,0.5)] select-none"
-                  loading="eager"
-                  decoding="async"
-                  onError={(e) => {
-                    (e.target as HTMLImageElement).src = '/CMD_65ml_product.webp';
-                  }}
-                  referrerPolicy="no-referrer"
-                />
-                <span className="mt-2 text-[10px] sm:text-xs font-bold px-2.5 py-0.5 rounded-full bg-slate-950/80 text-cyan-200 border border-cyan-400/30 backdrop-blur-md shadow-sm">
-                  65mL (1080 Drops)
-                </span>
+              <div className="relative w-full flex items-end justify-center gap-3 sm:gap-6 py-2">
+                {/* 30mL Pack */}
+                <div className="relative group w-[45%] flex flex-col items-center transition-transform duration-300 hover:scale-105 cursor-pointer">
+                  <img
+                    src="/CMD_30ml_product_transparent.webp"
+                    alt="HCI CMD 30mL Compact Travel Edition"
+                    className="w-full h-auto max-h-[250px] sm:max-h-[290px] object-contain drop-shadow-[0_15px_22px_rgba(0,0,0,0.35)] select-none"
+                    loading="eager"
+                    decoding="async"
+                    onError={(e) => {
+                      (e.target as HTMLImageElement).src = '/CMD_30ml_product.webp';
+                    }}
+                    referrerPolicy="no-referrer"
+                  />
+                  {/* Floor Contact Shadow */}
+                  <div className="w-20 sm:w-24 h-2.5 rounded-full bg-slate-950/60 blur-sm -mt-1.5 pointer-events-none" />
+                  
+                  <span className="mt-3 text-[10px] sm:text-xs font-bold px-2.5 py-1 rounded-full bg-slate-950/85 text-emerald-300 border border-emerald-400/30 backdrop-blur-md shadow-md">
+                    30mL • 500 Drops
+                  </span>
+                </div>
+
+                {/* 65mL Pack */}
+                <div className="relative group w-[53%] flex flex-col items-center transition-transform duration-300 hover:scale-105 cursor-pointer">
+                  <img
+                    src="/CMD_65ml_product_transparent.webp"
+                    alt="HCI CMD 65mL Flagship Family Edition"
+                    className="w-full h-auto max-h-[295px] sm:max-h-[345px] object-contain drop-shadow-[0_22px_30px_rgba(0,0,0,0.45)] select-none"
+                    loading="eager"
+                    decoding="async"
+                    onError={(e) => {
+                      (e.target as HTMLImageElement).src = '/CMD_65ml_product.webp';
+                    }}
+                    referrerPolicy="no-referrer"
+                  />
+                  {/* Floor Contact Shadow */}
+                  <div className="w-24 sm:w-30 h-3 rounded-full bg-slate-950/65 blur-sm -mt-1.5 pointer-events-none" />
+                  
+                  <span className="mt-3 text-[10px] sm:text-xs font-bold px-3 py-1 rounded-full bg-slate-950/85 text-cyan-300 border border-cyan-400/40 backdrop-blur-md shadow-md">
+                    65mL • 1,080 Drops
+                  </span>
+                </div>
               </div>
             </div>
 
             {/* Sub-badge beneath bottle presentation */}
-            <div className="mt-3 flex items-center gap-2 bg-slate-950/75 backdrop-blur-md px-4 py-1.5 rounded-full text-xs font-semibold text-sky-200 border border-sky-400/30 shadow-md">
+            <div className="mt-4 flex items-center gap-2 bg-slate-950/80 backdrop-blur-md px-4 py-1.5 rounded-full text-xs font-semibold text-sky-200 border border-sky-400/30 shadow-lg">
               <svg className="w-4 h-4 text-cyan-400 shrink-0" viewBox="0 0 24 24" fill="currentColor">
                 <path d="M12 2C8.13 2 5 5.13 5 9c0 5.25 7 13 7 13s7-7.75 7-13c0-3.87-3.13-7-7-7zm0 9.5c-1.38 0-2.5-1.12-2.5-2.5s1.12-2.5 2.5-2.5 2.5 1.12 2.5 2.5-1.12 2.5-2.5 2.5z"/>
               </svg>
-              <span>From Utah&apos;s Great Salt Lake</span>
+              <span>From Utah&apos;s Great Salt Lake • Product of USA</span>
             </div>
           </div>
 

@@ -33,7 +33,8 @@ export const ProductsView: React.FC<ProductsViewProps> = ({ onNavigate, addToCar
         'FDA Philippines Registered Food Supplement',
         'From Great Salt Lake, Utah • Product of USA',
       ],
-      badge: 'Flagship Edition (1,080 Drops)',
+      badge: 'Flagship Edition • 1,080 Drops',
+      badgeColor: 'sky',
     },
     {
       skuId: 'hci-cmd-30ml',
@@ -53,7 +54,8 @@ export const ProductsView: React.FC<ProductsViewProps> = ({ onNavigate, addToCar
         'Instant mineral electrolyte hydration anywhere',
         'From Great Salt Lake, Utah • Product of USA',
       ],
-      badge: 'Travel Edition (500 Drops)',
+      badge: 'Travel Edition • 500 Drops',
+      badgeColor: 'emerald',
     },
   ];
 
@@ -83,33 +85,37 @@ export const ProductsView: React.FC<ProductsViewProps> = ({ onNavigate, addToCar
             <div className="space-y-6">
               {/* Product Visual Area */}
               <div
-                className="relative w-full h-[280px] rounded-[16px] p-6 border border-sky-100/80 dark:border-slate-800 flex items-center justify-center overflow-hidden group shadow-inner transition-all bg-[linear-gradient(135deg,#f8fcff_0%,#eef8ff_50%,#ffffff_100%)] dark:bg-[linear-gradient(135deg,#0f172a_0%,#020617_50%,#082f49_100%)]"
+                className="relative w-full h-[280px] rounded-[16px] p-6 border border-sky-100/80 dark:border-slate-800 flex flex-col items-center justify-center overflow-hidden group shadow-inner transition-all bg-[linear-gradient(135deg,#f8fcff_0%,#eef8ff_50%,#ffffff_100%)] dark:bg-[linear-gradient(135deg,#0f172a_0%,#020617_50%,#082f49_100%)]"
                 style={{
                   borderRadius: '16px',
                   padding: '24px',
                 }}
               >
                 {prod.image ? (
-                  <img
-                    src={prod.image}
-                    alt={prod.name}
-                    className="w-full h-[280px] object-contain bg-transparent drop-shadow-[0_12px_20px_rgba(0,0,0,0.12)] dark:drop-shadow-[0_15px_30px_rgba(0,0,0,0.5)] select-none transition-transform duration-300 group-hover:scale-105"
-                    onError={(e) => {
-                      if (prod.fallbackImage) {
-                        (e.target as HTMLImageElement).src = prod.fallbackImage;
-                      }
-                    }}
-                    referrerPolicy="no-referrer"
-                  />
+                  <div className="relative w-full h-full flex flex-col items-center justify-center">
+                    <img
+                      src={prod.image}
+                      alt={prod.name}
+                      className="w-full h-[230px] object-contain bg-transparent drop-shadow-[0_14px_22px_rgba(0,0,0,0.14)] dark:drop-shadow-[0_16px_32px_rgba(0,0,0,0.55)] select-none transition-transform duration-300 group-hover:scale-105"
+                      onError={(e) => {
+                        if (prod.fallbackImage) {
+                          (e.target as HTMLImageElement).src = prod.fallbackImage;
+                        }
+                      }}
+                      referrerPolicy="no-referrer"
+                    />
+                    {/* Floor Contact Grounding Shadow */}
+                    <div className="w-28 sm:w-36 h-2.5 rounded-full bg-slate-900/20 dark:bg-slate-950/70 blur-sm -mt-1 pointer-events-none transition-all duration-300 group-hover:w-32 sm:group-hover:w-40 group-hover:bg-slate-900/30" />
+                  </div>
                 ) : (
                   <HciCmdBottles variant={prod.variant} className="h-full" />
                 )}
 
-                <div className="absolute top-3 left-3 bg-white/95 dark:bg-slate-900/90 backdrop-blur-md border border-sky-200 dark:border-sky-800 text-sky-800 dark:text-sky-300 text-xs font-bold px-3 py-1 rounded-lg shadow-sm">
+                <div className="absolute top-3 left-3 bg-white/95 dark:bg-slate-900/95 backdrop-blur-md border border-sky-200 dark:border-sky-800 text-sky-800 dark:text-sky-300 text-xs font-bold px-3 py-1 rounded-lg shadow-sm">
                   {prod.badge}
                 </div>
 
-                <div className="absolute bottom-3 right-3 text-[11px] bg-white/90 dark:bg-slate-900/90 text-slate-700 dark:text-slate-300 font-mono font-bold px-2.5 py-1 rounded-md border border-slate-200 dark:border-slate-700">
+                <div className="absolute bottom-3 right-3 text-[11px] bg-white/90 dark:bg-slate-900/90 text-slate-700 dark:text-slate-300 font-mono font-bold px-2.5 py-1 rounded-md border border-slate-200 dark:border-slate-700 shadow-xs">
                   {prod.servings}
                 </div>
               </div>
