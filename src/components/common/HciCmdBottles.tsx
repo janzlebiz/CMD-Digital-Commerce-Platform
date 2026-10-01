@@ -99,9 +99,6 @@ export const HciCmdBottles: React.FC<HciCmdBottlesProps> = ({
             className="w-full h-full max-h-[360px] object-contain drop-shadow-[0_20px_30px_rgba(0,0,0,0.18)] dark:drop-shadow-[0_20px_35px_rgba(0,0,0,0.6)] transition-transform duration-300 group-hover:scale-105"
             loading="eager"
             decoding="async"
-            onError={(e) => {
-              (e.target as HTMLImageElement).src = '/CMD_65ml_product.webp';
-            }}
             referrerPolicy="no-referrer"
           />
           {/* Grounding contact floor shadow */}
@@ -122,9 +119,6 @@ export const HciCmdBottles: React.FC<HciCmdBottlesProps> = ({
             className="w-full h-full max-h-[320px] object-contain drop-shadow-[0_16px_25px_rgba(0,0,0,0.16)] dark:drop-shadow-[0_16px_30px_rgba(0,0,0,0.6)] transition-transform duration-300 group-hover:scale-105"
             loading="eager"
             decoding="async"
-            onError={(e) => {
-              (e.target as HTMLImageElement).src = '/CMD_30ml_product.webp';
-            }}
             referrerPolicy="no-referrer"
           />
           {/* Grounding contact floor shadow */}
@@ -187,9 +181,6 @@ export const HciCmdBottles: React.FC<HciCmdBottlesProps> = ({
                     className="w-full h-auto max-h-[250px] sm:max-h-[290px] object-contain drop-shadow-[0_15px_22px_rgba(0,0,0,0.35)] select-none"
                     loading="eager"
                     decoding="async"
-                    onError={(e) => {
-                      (e.target as HTMLImageElement).src = '/CMD_30ml_product.webp';
-                    }}
                     referrerPolicy="no-referrer"
                   />
                   {/* Floor Contact Shadow */}
@@ -208,9 +199,6 @@ export const HciCmdBottles: React.FC<HciCmdBottlesProps> = ({
                     className="w-full h-auto max-h-[295px] sm:max-h-[345px] object-contain drop-shadow-[0_22px_30px_rgba(0,0,0,0.45)] select-none"
                     loading="eager"
                     decoding="async"
-                    onError={(e) => {
-                      (e.target as HTMLImageElement).src = '/CMD_65ml_product.webp';
-                    }}
                     referrerPolicy="no-referrer"
                   />
                   {/* Floor Contact Shadow */}

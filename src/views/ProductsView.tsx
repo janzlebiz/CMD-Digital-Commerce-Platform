@@ -23,7 +23,6 @@ export const ProductsView: React.FC<ProductsViewProps> = ({ onNavigate, addToCar
       price: 1200,
       variant: 'bottle-65ml' as const,
       image: '/CMD_65ml_product_transparent.webp',
-      fallbackImage: '/CMD_65ml_product.webp',
       tagline: 'Standard complete cellular ionic mineral & electrolyte supply',
       description: 'Our authentic flagship bottle. High-concentration ionic trace minerals extracted naturally via 2-year solar concentration from the Great Salt Lake, Utah, USA. Ideal for households, families, and daily wellness hydration routines.',
       highlights: [
@@ -44,7 +43,6 @@ export const ProductsView: React.FC<ProductsViewProps> = ({ onNavigate, addToCar
       price: 650,
       variant: 'bottle-30ml' as const,
       image: '/CMD_30ml_product_transparent.webp',
-      fallbackImage: '/CMD_30ml_product.webp',
       tagline: 'Pocket-sized travel dropper for on-the-go electrolyte balance',
       description: 'Compact and convenient travel size. Perfect for keeping in your bag, car, or office desk for instant drinking water remineralization wherever you travel in Camarines Norte.',
       highlights: [
@@ -97,11 +95,6 @@ export const ProductsView: React.FC<ProductsViewProps> = ({ onNavigate, addToCar
                       src={prod.image}
                       alt={prod.name}
                       className="w-full h-[230px] object-contain bg-transparent drop-shadow-[0_14px_22px_rgba(0,0,0,0.14)] dark:drop-shadow-[0_16px_32px_rgba(0,0,0,0.55)] select-none transition-transform duration-300 group-hover:scale-105"
-                      onError={(e) => {
-                        if (prod.fallbackImage) {
-                          (e.target as HTMLImageElement).src = prod.fallbackImage;
-                        }
-                      }}
                       referrerPolicy="no-referrer"
                     />
                     {/* Floor Contact Grounding Shadow */}
