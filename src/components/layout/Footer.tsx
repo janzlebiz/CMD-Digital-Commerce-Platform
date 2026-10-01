@@ -95,7 +95,7 @@ export const Footer: React.FC<FooterProps> = ({ onNavigate }) => {
               </svg>
             </div>
             <div className="flex flex-col">
-              <div className="flex items-center gap-1 leading-none">
+              <div className="flex items-center gap-0 leading-none">
                 <span className="font-black text-xs text-sky-600 dark:text-sky-400 uppercase tracking-wider mr-1">HCI</span>
                 <div className="relative w-3.5 h-3.5 flex items-center justify-center inline-flex">
                   <svg viewBox="0 0 100 100" className="w-full h-full" fill="none">

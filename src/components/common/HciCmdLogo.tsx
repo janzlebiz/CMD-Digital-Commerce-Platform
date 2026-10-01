@@ -161,7 +161,7 @@ export const HciCmdLogo: React.FC<HciCmdLogoProps> = ({
     return (
       <div className={`inline-flex flex-col items-center select-none ${className}`}>
         {/* CELL with Green Hexagon in C */}
-        <div className="flex items-center gap-1 leading-none">
+        <div className="flex items-center gap-0 leading-none">
           {/* Custom C with Green Hexagon/Circle inside */}
           <div className="relative flex items-center justify-center w-[1.1em] h-[1.1em]">
             {/* Outer Blue C */}

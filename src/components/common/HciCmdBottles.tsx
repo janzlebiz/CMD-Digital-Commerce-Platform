@@ -238,8 +238,8 @@ export const HciCmdBottles: React.FC<HciCmdBottlesProps> = ({
             {/* Main Headline */}
             <div className="space-y-1 relative z-10">
               {/* Big CELL with green hexagon */}
-              <div className="flex items-center gap-2 sm:gap-3 leading-none drop-shadow-lg">
-                <div className="relative w-14 h-14 sm:w-20 sm:h-20 flex items-center justify-center shrink-0">
+              <div className="flex items-baseline gap-1 leading-none drop-shadow-lg">
+                <div className="relative text-5xl sm:text-7xl lg:text-8xl w-[0.85em] h-[0.85em] flex items-center justify-center shrink-0 translate-y-1 sm:translate-y-2">
                   <svg viewBox="0 0 100 100" className="w-full h-full" fill="none">
                     <path
                       d="M80 18 A44 44 0 1 0 80 82"

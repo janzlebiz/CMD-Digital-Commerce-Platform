@@ -83,9 +83,9 @@ export const Navbar: React.FC<NavbarProps> = ({ currentView, onNavigate, cartCou
                 </svg>
               </div>
               <div className="flex flex-col">
-                <div className="flex items-center gap-1 leading-none">
+                <div className="flex items-baseline gap-0 leading-none">
                   <span className="font-black text-xs text-sky-600 dark:text-sky-400 uppercase tracking-wider mr-1">HCI</span>
-                  <div className="relative w-4 h-4 flex items-center justify-center inline-flex">
+                  <div className="relative text-sm sm:text-base w-[0.85em] h-[0.85em] flex items-center justify-center inline-flex translate-y-[0.5px]">
                     <svg viewBox="0 0 100 100" className="w-full h-full" fill="none">
                       <path d="M78 20 A42 42 0 1 0 78 80" stroke="#002b80" strokeWidth="18" strokeLinecap="square" fill="none" />
                       <polygon points="50,26 68,36 68,64 50,74 32,64 32,36" fill="none" stroke="#16a34a" strokeWidth="9" />
