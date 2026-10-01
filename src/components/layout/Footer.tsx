@@ -86,19 +86,29 @@ export const Footer: React.FC<FooterProps> = ({ onNavigate }) => {
         {/* Column 1: Brand & Territory Mission */}
         <div className="space-y-3.5">
           <div className="flex items-center gap-3">
-            <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-sky-500 to-blue-700 text-white font-black shadow-md flex items-center justify-center border border-sky-400/30">
-              <svg viewBox="0 0 40 40" className="w-7 h-7" fill="none">
-                <path d="M20 6 C16 16, 9 22, 9 29 A11 11 0 0 0 31 29 C31 22, 24 16, 20 6 Z" fill="#ffffff" />
-                <ellipse cx="20" cy="30" rx="14" ry="4.5" stroke="#38bdf8" strokeWidth="2.5" fill="none" />
-                <text x="20" y="30" textAnchor="middle" fill="#0284c7" fontSize="7.5" fontWeight="900" fontFamily="sans-serif">CMD</text>
+            <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-sky-500 to-blue-700 text-white font-black shadow-md flex items-center justify-center border border-sky-400/30 p-1">
+              <svg viewBox="0 0 160 160" className="w-full h-full" fill="none">
+                <ellipse cx="80" cy="125" rx="72" ry="24" stroke="#38bdf8" strokeWidth="6" fill="none" />
+                <ellipse cx="80" cy="120" rx="54" ry="17" stroke="#ffffff" strokeWidth="5" fill="none" />
+                <path d="M80 18 C72 42, 40 68, 40 92 A40 40 0 0 0 120 92 C120 68, 88 42, 80 18 Z" fill="#ffffff" />
+                <text x="80" y="100" textAnchor="middle" fill="#0033aa" fontSize="28" fontWeight="900" fontFamily="sans-serif">CMD</text>
               </svg>
             </div>
-            <div>
-              <span className="text-slate-900 dark:text-white font-black text-sm block leading-none">
-                HCI CMD
-              </span>
-              <span className="text-[10px] text-sky-700 dark:text-sky-400 font-extrabold tracking-wider block mt-1">
-                CELL MINERAL DROPS
+            <div className="flex flex-col">
+              <div className="flex items-center gap-1 leading-none">
+                <span className="font-black text-xs text-sky-600 dark:text-sky-400 uppercase tracking-wider mr-1">HCI</span>
+                <div className="relative w-3.5 h-3.5 flex items-center justify-center inline-flex">
+                  <svg viewBox="0 0 100 100" className="w-full h-full" fill="none">
+                    <path d="M78 20 A42 42 0 1 0 78 80" stroke="#002b80" strokeWidth="18" strokeLinecap="square" fill="none" />
+                    <polygon points="50,26 68,36 68,64 50,74 32,64 32,36" fill="none" stroke="#16a34a" strokeWidth="9" />
+                    <circle cx="50" cy="50" r="10" fill="#16a34a" />
+                  </svg>
+                </div>
+                <span className="font-black text-sm text-slate-900 dark:text-white uppercase tracking-tight">ELL</span>
+                <span className="text-[8px] font-black text-sky-600 -mt-1">®</span>
+              </div>
+              <span className="text-[9px] text-sky-700 dark:text-sky-400 font-black tracking-[0.18em] uppercase mt-0.5">
+                MINERAL DROPS
               </span>
             </div>
           </div>
